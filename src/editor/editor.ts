@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu';
 import type { App } from '../app';
 import type { Placement, PlanetRecipe, Team, Work } from '../data/types';
+import { footprintGroundRadius } from '../planet/footprint';
 import { clampScale, faceYaw, PLINTH_HEIGHT, placementTransform, YAW_STEP } from '../planet/placement';
-import type { PlacedWork, PlanetView } from '../scenes/planetView';
+import { plinthRadius, type PlacedWork, type PlanetView } from '../scenes/planetView';
 import { EditPanel } from '../ui/editPanel';
 import type { PlanetScreen } from '../ui/planetScreen';
 
@@ -16,6 +17,7 @@ export class Editor {
   private readonly panel: EditPanel;
   private placing: Work | null = null;
   private ghost: THREE.Group | null = null;
+  private ghostFootprint = 0; // 幽灵模型的水平半径：预览和摆上去的作品用同样的展台半径贴地
   private selected: PlacedWork | null = null;
   private dragging = false;
 
@@ -108,6 +110,7 @@ export class Editor {
     ghost.visible = false;
     this.view.planet?.planet.works.add(ghost);
     this.ghost = ghost;
+    this.ghostFootprint = model.footprint;
   }
 
   private cancelPlacing(): void {
@@ -169,6 +172,8 @@ export class Editor {
     this.ghost.visible = dir !== null;
     if (!dir) return;
     const { position, quaternion } = placementTransform({ workId: '', dir, yaw: faceYaw(dir, this.towardCamera()), scale: 1 }, entry.planet.height, entry.planet.sea);
+    // 和 PlanetView.updateTransform 一样按展台底下最高的地面贴地，点下去时作品不会往上跳
+    position.setLength(footprintGroundRadius(position.clone().normalize(), plinthRadius(this.ghostFootprint), entry.planet.height, entry.planet.sea));
     this.ghost.position.copy(position);
     this.ghost.quaternion.copy(quaternion);
   }
