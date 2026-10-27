@@ -2,7 +2,7 @@
 // 默认读 models-in/（GLB + works.csv），输出到 public/models、public/thumbs、src/data/works.json
 // 测试时可用环境变量换目录：PREP_IN、PREP_OUT、WORKS_OUT
 // 可选减面：npm run prep -- --max-tris=300000，面数超过这个值的模型按比例减到它附近（spec 6 默认不减面，用户同意后才开）
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dedup, meshopt, prune, simplify, textureCompress, weld } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer';
@@ -36,7 +36,14 @@ function addProblem(entry, error) {
 
 const io = await createIO();
 const csv = path.join(IN, 'works.csv');
-const rows = parseCsv(readFileSync(csv, 'utf8'));
+let rows;
+try {
+  rows = parseCsv(readFileSync(csv, 'utf8'));
+} catch (err) {
+  // 引号、编码、列数这类错误：只打印说明，不打印 Node 的堆栈
+  console.error(`错误：${csv}：${err.message}。已停止，没有写任何文件。`);
+  process.exit(1);
+}
 // 没有一行填了 file（比如表头写成了 File,Title,…）：直接停下，不能拿空清单覆盖 works.json
 if (!rows.some((row) => row.file)) {
   console.error(`错误：${csv} 里没有任何一行有 file 值（表头要写成小写的 file,title,author,description）。已停止，没有写任何文件。`);
@@ -47,6 +54,13 @@ mkdirSync(path.join(OUT, 'thumbs'), { recursive: true });
 const works = [];
 const report = [];
 const used = new Set();
+
+// 文件夹里有、works.csv 里没写的 GLB：多半是漏了一行，或者那一行被并进了上一格（引号没闭合）。不处理，在报告里标出来
+const listed = new Set(rows.map((row) => row.file).filter(Boolean));
+for (const f of readdirSync(IN).filter((name) => name.toLowerCase().endsWith('.glb') && !listed.has(name))) {
+  console.warn(`跳过：${f} 没有写进 works.csv`);
+  report.push({ file: f, error: 'GLB not listed in works.csv', flag: true });
+}
 
 for (const row of rows) {
   const src = path.join(IN, row.file ?? '');
