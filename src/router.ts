@@ -6,7 +6,14 @@ export type Route =
   | { view: 'museum'; teamId: string; workId?: string };
 
 export function parseRoute(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  const segments = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  let parts: string[];
+  try {
+    parts = segments.map(decodeURIComponent);
+  } catch {
+    // 坏的 % 转义（如手打的 #/t/100%）会让 decodeURIComponent 抛 URIError：按无效地址处理，回星系
+    return { view: 'galaxy' };
+  }
   if (parts[0] !== 't' || !parts[1]) return { view: 'galaxy' };
   const teamId = parts[1];
   if (parts.length === 2) return { view: 'planet', teamId };

@@ -11,6 +11,8 @@ describe('parseRoute', () => {
     ['#/t/nebula/museum/w-3', { view: 'museum', teamId: 'nebula', workId: 'w-3' }],
     ['#/nope', { view: 'galaxy' }],
     ['#/t/x/what', { view: 'galaxy' }],
+    ['#/t/100%', { view: 'galaxy' }],
+    ['#/t/%E0%A4%A', { view: 'galaxy' }],
   ])('%s', (hash, route) => {
     expect(parseRoute(hash)).toEqual(route);
   });
