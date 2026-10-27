@@ -10,6 +10,7 @@ import { browserStorage, LocalStore } from './data/store';
 import type { Seed } from './data/types';
 import { World } from './scenes/world';
 import { PlanetScreen } from './ui/planetScreen';
+import { MembersPage } from './ui/membersPage';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 const seed = seedJson as unknown as Seed;
@@ -18,4 +19,8 @@ const world = await World.create(document.querySelector<HTMLCanvasElement>('#sta
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 app.planetLayer = planetScreen;
+app.members = new MembersPage(app.root, seed.you.memberId, () => app.closeSheet(), (workId) => {
+  const team = app.currentTeam;
+  if (team) app.navigate({ view: 'museum', teamId: team.id, workId });
+});
 await app.start();
