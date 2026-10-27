@@ -5,15 +5,18 @@ export type Route =
   | { view: 'members'; teamId: string }
   | { view: 'museum'; teamId: string; workId?: string };
 
-export function parseRoute(hash: string): Route {
-  const segments = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  let parts: string[];
+// 按段解码：某段的 % 转义是坏的（如手打的 #/t/100%）就保留原样。这样它只是一个找不到的团队或作品，
+// 由 App 提示后回星系、由 Museum 提示后留在网格（spec 第 9 节）；段数不对、视图词不认识的地址才直接回星系
+function decodeSegment(segment: string): string {
   try {
-    parts = segments.map(decodeURIComponent);
+    return decodeURIComponent(segment);
   } catch {
-    // 坏的 % 转义（如手打的 #/t/100%）会让 decodeURIComponent 抛 URIError：按无效地址处理，回星系
-    return { view: 'galaxy' };
+    return segment;
   }
+}
+
+export function parseRoute(hash: string): Route {
+  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeSegment);
   if (parts[0] !== 't' || !parts[1]) return { view: 'galaxy' };
   const teamId = parts[1];
   if (parts.length === 2) return { view: 'planet', teamId };
