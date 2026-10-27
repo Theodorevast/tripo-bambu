@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Team } from '../src/data/types';
 import { PlanetObject } from '../src/planet/planetObject';
 import { BASE_RADIUS, PRESETS } from '../src/planet/presets';
-import { PlanetView } from '../src/scenes/planetView';
+import { PlanetView, plinthRadius } from '../src/scenes/planetView';
 import type { World } from '../src/scenes/world';
 
 const team: Team = {
@@ -55,5 +55,34 @@ describe('PlanetView', () => {
     const view = new PlanetView(fakeWorld());
     await view.enter({ ...team, planet: { ...team.planet, placements: [{ workId: 'nope', dir: [0, 1, 0], yaw: 0, scale: 1 }] } });
     expect(view.placed.size).toBe(0);
+  });
+  it('pick 不穿过星球：正面的作品拾取得到，被星球挡住的拾取不到', async () => {
+    const raycaster = new THREE.Raycaster();
+    const world = Object.assign(fakeWorld(), { rayFrom: () => raycaster });
+    const view = new PlanetView(world);
+    await view.enter(team);
+    world.planets.get('t')!.planet.group.updateMatrixWorld(true); // 真实页面里每帧渲染时更新
+    // w1 在北极：从上往下打，拾取盒在星球前面；从下往上打，射线要先穿过整颗星球
+    raycaster.ray.set(new THREE.Vector3(0, 30, 0), new THREE.Vector3(0, -1, 0));
+    expect(view.pick(0, 0)?.work.id).toBe('w1');
+    raycaster.ray.set(new THREE.Vector3(0, -30, 0), new THREE.Vector3(0, 1, 0));
+    expect(view.pick(0, 0)).toBeNull();
+  });
+  it('occluded：从镜头看过去隔着星球的点（悬浮标签用）', async () => {
+    const world = fakeWorld();
+    const view = new PlanetView(world);
+    await view.enter(team);
+    world.planets.get('t')!.planet.group.updateMatrixWorld(true);
+    const top = view.topOf(view.placed.get('w1')!);
+    expect(view.occluded(new THREE.Vector3(0, 30, 0), top)).toBe(false);
+    expect(view.occluded(new THREE.Vector3(0, -30, 0), top)).toBe(true);
+    expect(view.occluded(new THREE.Vector3(30, 0, 0), top)).toBe(false); // 从侧面斜看，视线擦过星球上方
+  });
+  it('plinthRadius 就是展台实际用的半径', async () => {
+    const view = new PlanetView(fakeWorld());
+    await view.enter(team);
+    const w1 = view.placed.get('w1')!;
+    expect(w1.plinth.scale.x).toBe(plinthRadius(w1.model!.footprint));
+    expect(plinthRadius(0.1)).toBe(0.55);
   });
 });

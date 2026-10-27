@@ -10,6 +10,7 @@ export class PlanetScreen implements PlanetLayer {
   readonly view: PlanetView;
   readonly card: WorkCard;
   private readonly world: World;
+  private readonly root: HTMLElement;
   private readonly label = el('div', { className: 'float-label' });
   private readonly note = el('div', { className: 'center-note' });
   private hovered: PlacedWork | null = null;
@@ -19,6 +20,7 @@ export class PlanetScreen implements PlanetLayer {
 
   constructor(world: World, root: HTMLElement, onMuseum: (teamId: string, workId: string) => void) {
     this.world = world;
+    this.root = root;
     this.view = new PlanetView(world);
     this.card = new WorkCard(root, (workId) => { if (this.view.team) onMuseum(this.view.team.id, workId); });
     this.label.hidden = true;
@@ -38,7 +40,7 @@ export class PlanetScreen implements PlanetLayer {
     if (team.status === 'under-construction') {
       this.note.replaceChildren(
         el('div', { className: 'display', textContent: `${team.name} is still building` }),
-        el('div', { className: 'mono', textContent: `${team.members.length} members · founded ${team.foundedDaysAgo} days ago` }),
+        el('div', { className: 'mono', textContent: `${team.members.length} members · founded ${team.foundedDaysAgo} ${team.foundedDaysAgo === 1 ? 'day' : 'days'} ago` }),
       );
       this.note.hidden = false;
     }
@@ -82,8 +84,14 @@ export class PlanetScreen implements PlanetLayer {
 
   private placeLabel(): void {
     if (!this.hovered) return;
-    const at = this.world.toScreen(this.view.topOf(this.hovered));
+    const top = this.view.topOf(this.hovered);
+    // 作品转到星球背面（自动旋转、阻尼）时，指针没动也把标签藏起来
+    const at = this.view.occluded(this.world.rig.camera.position, top) ? null : this.world.toScreen(top);
     this.label.hidden = !at;
-    if (at) this.label.style.transform = `translate(${at.x}px, ${at.y}px) translate(-50%, -100%)`;
+    if (!at) return;
+    // 标签以底边中点对准作品顶上；不压到顶栏：标签顶边至少在顶栏底边下面 8px（顶栏高度从 DOM 读）
+    const bar = this.root.querySelector('.topbar');
+    const minY = (bar ? bar.getBoundingClientRect().bottom : 0) + 8 + this.label.offsetHeight;
+    this.label.style.transform = `translate(${at.x}px, ${Math.max(at.y, minY)}px) translate(-50%, -100%)`;
   }
 }

@@ -3,6 +3,7 @@ import { ModelLibrary, type LoadedModel } from '../assets/models';
 import type { Placement, Team, Work } from '../data/types';
 import { footprintGroundRadius } from '../planet/footprint';
 import { PLINTH_HEIGHT, placementTransform } from '../planet/placement';
+import { BASE_RADIUS, PRESETS } from '../planet/presets';
 import type { PlanetEntry, World } from './world';
 
 export interface PlacedWork {
@@ -16,6 +17,19 @@ export interface PlacedWork {
 }
 
 const PLINTH_DEPTH = 2.0; // 展台往地下延伸，坡地上也不露缝：作品按展台下最高的地面贴地，下坡一侧靠这一段补上
+
+// 展台顶面半径（缩放前）：比模型的水平半径略收一点，再保底。编辑器的摆放预览也用它，和摆上去的作品贴地方式一致
+export function plinthRadius(footprint: number): number {
+  return Math.max(0.55, footprint * 0.95);
+}
+
+// 射线从起点到进入星球遮挡球的距离，打不中为 Infinity。遮挡球以星球中心为心、半径取最低可能的地形，
+// 比这个距离更远的东西一定在地表背后
+function occluderDistance(ray: THREE.Ray, entry: PlanetEntry): number {
+  const sphere = new THREE.Sphere(entry.home, BASE_RADIUS * (1 - PRESETS[entry.planet.currentRecipe.preset].amp));
+  const p = ray.intersectSphere(sphere, new THREE.Vector3());
+  return p ? p.distanceTo(ray.origin) : Infinity;
+}
 
 // 聚焦星球上的作品：放展台和拾取盒，模型加载完再挂上；地形变了重新贴地
 export class PlanetView {
@@ -113,9 +127,23 @@ export class PlanetView {
   }
 
   pick(clientX: number, clientY: number): PlacedWork | null {
+    const entry = this.entry;
+    if (!entry) return null;
+    const raycaster = this.world.rayFrom(clientX, clientY);
     const proxies = [...this.placed.values()].map((pw) => pw.proxy);
-    const hit = this.world.rayFrom(clientX, clientY).intersectObjects(proxies, false)[0];
-    return hit ? this.placed.get(hit.object.userData.workId as string) ?? null : null;
+    const hit = raycaster.intersectObjects(proxies, false)[0];
+    // 拾取盒在射线进入星球之后才打中，说明它在星球背面：看不见，也不该选中
+    if (!hit || hit.distance >= occluderDistance(raycaster.ray, entry)) return null;
+    return this.placed.get(hit.object.userData.workId as string) ?? null;
+  }
+
+  // 从 eye 看 point，中间是否隔着聚焦的星球（作品转到背面时藏起悬浮标签）
+  occluded(eye: THREE.Vector3, point: THREE.Vector3): boolean {
+    const entry = this.entry;
+    if (!entry) return false;
+    const to = point.clone().sub(eye);
+    const dist = to.length();
+    return occluderDistance(new THREE.Ray(eye.clone(), to.divideScalar(dist || 1)), entry) < dist;
   }
 
   // 作品顶上一点的世界坐标，给悬浮标签和编辑条用
@@ -133,7 +161,7 @@ export class PlanetView {
   }
 
   private sizeParts(pw: PlacedWork, height: number, footprint: number): void {
-    const r = Math.max(0.55, footprint * 0.95);
+    const r = plinthRadius(footprint);
     pw.plinth.scale.set(r, 1, r);
     const w = Math.max(0.6, footprint * 2);
     pw.proxy.scale.set(w, height, w);

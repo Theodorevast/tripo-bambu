@@ -69,8 +69,9 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* 建设中提示 */
-#app > .center-note { position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%); text-align: center; pointer-events: none; }
+#app > .center-note { position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); }
 .center-note .display { font-size: 30px; }
+.center-note .mono { color: var(--ink); }
 
 /* 覆盖整屏的页面（Members、Museum）：背景压暗，中间一块面板 */
 #app > .sheet { position: absolute; inset: 0; background: rgba(5, 6, 10, 0.72); backdrop-filter: blur(3px); overflow-y: auto; padding: 88px 24px 48px; animation: fade-in 0.22s ease-out; }
