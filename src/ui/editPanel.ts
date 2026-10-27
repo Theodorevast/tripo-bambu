@@ -20,6 +20,7 @@ export class EditPanel {
   private readonly tray = el('section', { className: 'tray' });
   private readonly trayRow = el('div', { className: 'tray-row' });
   private readonly trayItems = el('div', { className: 'tray-items' });
+  private readonly dropZone = el('div', { className: 'drop-zone mono', textContent: 'Drop GLB here' });
   private readonly bar = el('div', { className: 'edit-bar' });
   private readonly barTitle = el('div', { className: 'display eb-title' });
   private readonly rotateInput = el('input', { type: 'range', min: '-180', max: '180', step: '1' });
@@ -32,7 +33,7 @@ export class EditPanel {
 
   constructor(root: HTMLElement, act: EditPanelActions) {
     this.act = act;
-    this.trayRow.append(this.trayItems);
+    this.trayRow.append(this.trayItems, this.dropZone);
     this.tray.append(el('div', { className: 'mono tray-head', textContent: "Your team's works · pick one, then click the planet" }), this.trayRow);
     this.rotateInput.addEventListener('input', () => act.rotate(Number(this.rotateInput.value)));
     this.scaleInput.addEventListener('input', () => act.scale(Number(this.scaleInput.value)));
@@ -109,5 +110,9 @@ export class EditPanel {
     for (const [id, b] of this.presetButtons) b.setAttribute('aria-pressed', String(id === planet.preset));
     this.ringButton.setAttribute('aria-pressed', String(planet.ring));
     this.atmoButton.setAttribute('aria-pressed', String(planet.atmosphere));
+  }
+
+  setDropHover(on: boolean): void {
+    this.dropZone.classList.toggle('hover', on);
   }
 }

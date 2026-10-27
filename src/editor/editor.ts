@@ -6,6 +6,8 @@ import { clampScale, faceYaw, PLINTH_HEIGHT, placementTransform, YAW_STEP } from
 import { plinthRadius, type PlacedWork, type PlanetView } from '../scenes/planetView';
 import { EditPanel } from '../ui/editPanel';
 import type { PlanetScreen } from '../ui/planetScreen';
+import { toast } from '../ui/toast';
+import { checkDrop, listenForDrops } from './dropGlb';
 
 const ghostMaterial = new THREE.MeshBasicNodeMaterial({ color: '#d9b77e', transparent: true, opacity: 0.45, depthWrite: false });
 
@@ -20,6 +22,7 @@ export class Editor {
   private ghostFootprint = 0; // 幽灵模型的水平半径：预览和摆上去的作品用同样的展台半径贴地
   private selected: PlacedWork | null = null;
   private dragging = false;
+  private tempCount = 0;
 
   constructor(app: App, screen: PlanetScreen) {
     this.app = app;
@@ -40,6 +43,12 @@ export class Editor {
     addEventListener('pointerup', () => this.onUp());
     addEventListener('keydown', (e) => this.onKey(e));
     app.world.frameHooks.add(() => this.placeBar());
+    listenForDrops({
+      active: () => this.active,
+      drop: (file) => void this.addTempWork(file),
+      hover: (on) => this.panel.setDropHover(on),
+      inactiveDrop: () => toast("Open Edit on your team's planet to drop a GLB"),
+    });
   }
 
   private get view(): PlanetView {
@@ -69,6 +78,25 @@ export class Editor {
     this.panel.hide();
     this.screen.setInteractive(true);
     this.app.topbar.setEditing(false);
+  }
+
+  // 拖进来的 GLB 变成临时作品：只在当前页面有效，不进存档、不进 Museum
+  async addTempWork(file: File): Promise<void> {
+    const check = checkDrop(file);
+    if (!check.ok) {
+      toast(check.reason);
+      return;
+    }
+    const work: Work = { id: `tmp-${++this.tempCount}`, title: file.name.replace(/\.glb$/i, ''), authorId: this.app.you.memberId, file: URL.createObjectURL(file), thumb: '', tris: 0 };
+    const model = await this.view.library.load(work);
+    if (model.failed) {
+      URL.revokeObjectURL(work.file);
+      toast('Could not read that GLB');
+      return;
+    }
+    this.view.extraWorks.set(work.id, work);
+    toast(`${work.title} added. Click the planet to place it.`);
+    await this.pickFromTray(work);
   }
 
   // —— 作品栏 ——

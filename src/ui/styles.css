@@ -147,3 +147,7 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .pp-presets button::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--swatch); }
 .pp-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .planet-panel hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+
+/* 拖放区 */
+.drop-zone { flex: 0 0 auto; width: 92px; display: grid; place-items: center; text-align: center; padding: 8px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--ink-faint); }
+.drop-zone.hover { border-color: var(--accent); color: var(--accent); }
