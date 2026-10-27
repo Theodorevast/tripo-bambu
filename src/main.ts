@@ -9,10 +9,13 @@ import seedJson from './data/seed.json';
 import { browserStorage, LocalStore } from './data/store';
 import type { Seed } from './data/types';
 import { World } from './scenes/world';
+import { PlanetScreen } from './ui/planetScreen';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 const seed = seedJson as unknown as Seed;
 const store = new LocalStore(seed, browserStorage());
 const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!);
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
+const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
+app.planetLayer = planetScreen;
 await app.start();
