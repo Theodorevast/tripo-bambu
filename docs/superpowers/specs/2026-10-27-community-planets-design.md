@@ -225,7 +225,7 @@ lighthouse.glb,Old Lighthouse,mia,
 
 1. 用 gltf-transform（MIT）清理用不到的数据、合并重复顶点，把网格压缩成 meshopt 格式，把贴图的最长边缩到 2048 以内并转成 WebP。不减面。
 2. 输出到 `public/models/<workId>.glb`。
-3. 用 Playwright 打开一个只渲染单个模型的页面，在中性背景上截一张 512×512 的缩略图，存成 `public/thumbs/<workId>.webp`。
+3. 用 Playwright 打开一个只渲染单个模型的页面，在透明背景上截一张 512×512 的缩略图（WebP 保留 alpha，放在任何卡片底色上都不多出一块方框），存成 `public/thumbs/<workId>.webp`。
 4. 写 `models-in/prep-report.json`：每个文件处理前后的大小和面数。面数超过 50 万，或者处理后仍然超过 15 MB 的，在报告里标出来，由用户决定要不要换。
 5. 写 `src/data/works.json`，然后运行 `npm run seed` 重新生成 `seed.json`。
 
