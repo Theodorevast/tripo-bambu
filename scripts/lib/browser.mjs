@@ -6,7 +6,8 @@ export const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome
 
 // overrides 合并进 Vite 配置，例如 { publicDir: '.tmp/out' }
 export async function startServer(overrides = {}) {
-  const server = await createServer({ ...overrides, logLevel: 'warn', server: { host: '127.0.0.1', port: 5199, strictPort: false } });
+  // worktree 里的 node_modules 是指向主目录的链接，Vite 默认拒绝读取项目外的文件，字体会 403
+  const server = await createServer({ ...overrides, logLevel: 'warn', server: { host: '127.0.0.1', port: 5199, strictPort: false, fs: { strict: false } } });
   await server.listen();
   const base = (server.resolvedUrls?.local[0] ?? 'http://127.0.0.1:5199/').replace(/\/$/, '');
   return { server, base };
