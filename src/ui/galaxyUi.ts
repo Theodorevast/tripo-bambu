@@ -22,11 +22,19 @@ export class GalaxyUi {
       world.setHover(hit);
       canvas.style.cursor = hit ? 'pointer' : '';
     });
-    canvas.addEventListener('pointerdown', (e) => { this.down = { x: e.clientX, y: e.clientY }; });
+    // 指针移到顶栏上或移出窗口时画布收不到 pointermove：在这里清掉悬停，光圈和标签才不会一直挂着
+    // 只在星系页处理：星球页的光标归 PlanetScreen 管
+    canvas.addEventListener('pointerleave', () => {
+      if (!this.enabled) return;
+      world.setHover(null);
+      canvas.style.cursor = '';
+    });
+    // 只认左键（主键）单击进星球：右键、中键不算
+    canvas.addEventListener('pointerdown', (e) => { this.down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null; });
     canvas.addEventListener('pointerup', (e) => {
       const d = this.down;
       this.down = null;
-      if (!this.enabled || world.rig.flying || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
+      if (!this.enabled || world.rig.flying || !d || e.button !== 0 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
       const hit = world.pickPlanet(e.clientX, e.clientY);
       if (hit) onPick(hit.team.id);
     });
