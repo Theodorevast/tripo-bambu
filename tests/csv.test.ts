@@ -25,12 +25,26 @@ describe('parseCsv', () => {
       { file: 'b.glb', title: 'Bench' },
     ]);
   });
+  it('闭合引号后面只能有空格或制表符，然后是逗号或换行；否则报错，带开引号那一行的行号', () => {
+    const csv = 'file,title,author,description\na.glb,"Big Lamp,mia,\nb.glb,Bench,zoe,\nc.glb,"Hello, World",kai,\n';
+    expect(() => parseCsv(csv)).toThrow(/第 2 行：这里开始的引号在第 4 行闭合/);
+    expect(parseCsv('file,title,author\na.glb,"Lamp" \t,mia\n')).toEqual([{ file: 'a.glb', title: 'Lamp', author: 'mia' }]);
+  });
   it('引号到文件末尾都没闭合时报错，带开引号那一行在文件里的行号', () => {
     expect(() => parseCsv('file,title\r\na.glb,"Lamp\r\nshade"\r\nb.glb,"Bench\r\nc.glb,Chair\r\n')).toThrow(/第 4 行/);
   });
-  it('比表头多出非空格子时报错，带行号；多出来的空格子不算', () => {
+  it('一行的格子比表头多就报错（多出来的是空格子也算），带行号', () => {
     expect(() => parseCsv('file,title\n\na.glb,Lamp\nb.glb,Bench, oak\n')).toThrow(/第 4 行/);
-    expect(parseCsv('file,title\na.glb,Lamp,,\n')).toEqual([{ file: 'a.glb', title: 'Lamp' }]);
+    expect(() => parseCsv('file,title\na.glb,Lamp,,\n')).toThrow(/第 2 行/);
+  });
+  it('描述空着、末尾带逗号的行里，标题有没加引号的逗号：报错，不让列错位', () => {
+    expect(() => parseCsv('file,title,author,description\nlamp.glb,Lamp, brass,mia,\n')).toThrow(/第 2 行/);
+  });
+  it('表格软件把表头补齐出来的空列不算列名：每行同样补齐时照常解析，空列里有内容就报错', () => {
+    expect(parseCsv('file,title,author,description,,\na.glb,Lamp,mia,,,\n')).toEqual([
+      { file: 'a.glb', title: 'Lamp', author: 'mia', description: '' },
+    ]);
+    expect(() => parseCsv('file,title,,\na.glb,Lamp,oops,\n')).toThrow(/第 2 行/);
   });
 });
 
