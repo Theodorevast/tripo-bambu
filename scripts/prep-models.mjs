@@ -92,9 +92,11 @@ if (works.length) {
       console.warn(`⚠ ${entry.file} → ${w.file}  browser could not load model（缩略图是灰色占位方块）`);
     }
     const dest = path.join(OUT, 'thumbs', w.thumb);
-    await sharp(await canvas.screenshot()).webp({ quality: 82 }).toFile(dest);
+    // 透明背景：omitBackground 去掉浏览器默认的白底，截出来的 PNG 带 alpha，sharp 转 WebP 时保留。
+    // exact：透明像素的颜色原样保留；不加的话 libwebp 压缩前会先改写透明区域的颜色，测试方片上出现了一列糊掉的色块
+    await sharp(await canvas.screenshot({ omitBackground: true })).webp({ quality: 82, exact: true }).toFile(dest);
     const meta = await sharp(dest).metadata();
-    console.log(`缩略图 ${w.thumb} ${meta.width}×${meta.height}`);
+    console.log(`缩略图 ${w.thumb} ${meta.width}×${meta.height}${meta.hasAlpha ? ' 透明背景' : ''}`);
   }
   await browser.close();
   await server.close();

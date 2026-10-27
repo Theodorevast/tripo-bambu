@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <title>thumbnail</title>
-    <style>html, body { margin: 0; background: #1a1b22; } #c { width: 512px; height: 512px; display: block; }</style>
+    <!-- 页面不设背景色：prep-models 截图时用 omitBackground 拿透明背景，页面底色会漏进缩略图 -->
+    <style>html, body { margin: 0; background: transparent; } #c { width: 512px; height: 512px; display: block; }</style>
   </head>
   <body>
     <canvas id="c"></canvas>
