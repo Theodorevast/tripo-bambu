@@ -25,11 +25,11 @@ export const RING_OTHERS = 0.4;
 const RING_FADE = 4; // 每秒逼近目标的速率：约 1 秒淡完，和 1.2 秒的镜头飞行同时进行
 
 // 像素预算：主画面按「总像素封顶」定像素比，以后加后处理时靠它控制开销。
-// 例：1440×900 的 2 倍屏 → √(3110400 / 1296000) ≈ 1.55；1920×1080 的 1 倍屏不受影响（1）
-export const MAX_RENDER_PIXELS = 1920 * 1080 * 1.5;
+// 上限取 4K（830 万像素）：常见的 2 倍屏都按原生清晰度画（用户要求模型不能糊），只有超大屏才降；再怎么降也不低于 1 倍
+export const MAX_RENDER_PIXELS = 3840 * 2160;
 
 export function budgetPixelRatio(width: number, height: number, dpr: number): number {
-  return Math.min(dpr, 2, Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, width * height)));
+  return Math.min(dpr, 2, Math.max(1, Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, width * height))));
 }
 
 // 3D 世界：一个渲染器、一个场景，星系里所有星球都在里面；聚焦就是把镜头飞到某颗星球前面
