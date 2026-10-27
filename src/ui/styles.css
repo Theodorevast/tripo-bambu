@@ -119,3 +119,29 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .viewer-info .hint { margin-top: 28px; color: var(--ink-faint); }
 .viewer-close { position: absolute; top: 16px; right: 16px; font-size: 22px; padding: 4px 12px; }
 @media (max-width: 820px) { #app > .viewer { grid-template-columns: 1fr; grid-template-rows: 60vh auto; } }
+
+/* 编辑：作品栏 */
+#app > .tray { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(920px, calc(100vw - 48px)); padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.tray-head { margin-bottom: 10px; }
+.tray-row { display: flex; gap: 10px; }
+.tray-items { display: flex; gap: 10px; overflow-x: auto; }
+.tray-item { position: relative; flex: 0 0 auto; width: 92px; padding: 6px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.tray-item img, .ti-initials { width: 78px; height: 78px; border-radius: 2px; object-fit: cover; display: grid; place-items: center; background: #1b1c25; font: 500 18px var(--font-ui); }
+.ti-name { font-size: 11.5px; line-height: 1.2; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ti-check { position: absolute; top: 4px; right: 6px; color: var(--accent); font-weight: 600; }
+.ti-temp { position: absolute; top: 4px; left: 6px; color: var(--accent); }
+
+/* 编辑条：跟着选中的作品走 */
+#app > .edit-bar { position: absolute; left: 0; top: 0; display: grid; gap: 8px; width: 260px; padding: 14px; background: var(--panel-solid); border: 1px solid var(--accent); border-radius: var(--radius); }
+.eb-title { font-size: 20px; }
+.edit-bar label { display: grid; grid-template-columns: 56px 1fr; align-items: center; }
+.edit-bar input[type='range'] { accent-color: var(--accent); width: 100%; }
+.eb-hint { color: var(--ink-faint); font-size: 10px; }
+
+/* 星球外观面板 */
+#app > .planet-panel { position: absolute; left: 24px; top: 50%; transform: translateY(-50%); width: 200px; display: grid; gap: 10px; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.pp-presets { display: grid; gap: 6px; }
+.pp-presets button { text-align: left; display: flex; align-items: center; gap: 8px; }
+.pp-presets button::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--swatch); }
+.pp-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.planet-panel hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
