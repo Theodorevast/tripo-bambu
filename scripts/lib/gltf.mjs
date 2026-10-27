@@ -1,11 +1,12 @@
 // gltf-transform 共用：带 meshopt 编解码器的读写器、三角面计数
-import { NodeIO } from '@gltf-transform/core';
+import { Logger, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 
 export async function createIO() {
   await Promise.all([MeshoptEncoder.ready, MeshoptDecoder.ready]);
   return new NodeIO()
+    .setLogger(new Logger(Logger.Verbosity.WARN)) // 只显示警告和错误：prune 等步骤的 info 日志太吵
     .registerExtensions(ALL_EXTENSIONS)
     .registerDependencies({ 'meshopt.encoder': MeshoptEncoder, 'meshopt.decoder': MeshoptDecoder });
 }
