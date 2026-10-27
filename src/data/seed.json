@@ -1,0 +1,772 @@
+{
+  "teams": [
+    {
+      "id": "lumen-guild",
+      "name": "Lumen Guild",
+      "motto": "We sculpt with light.",
+      "color": "#d9b77e",
+      "status": "active",
+      "foundedDaysAgo": 41,
+      "members": [
+        {
+          "id": "m-hexa-ines",
+          "handle": "hexa_ines",
+          "displayName": "Ines Duarte",
+          "role": "captain"
+        },
+        {
+          "id": "m-polyfox",
+          "handle": "polyfox",
+          "displayName": "Kai Morrow",
+          "role": "builder"
+        },
+        {
+          "id": "m-mia-makes",
+          "handle": "mia_makes",
+          "displayName": "mia_makes",
+          "role": "builder"
+        },
+        {
+          "id": "m-kenji-polys",
+          "handle": "kenji_polys",
+          "displayName": "kenji_polys",
+          "role": "builder"
+        },
+        {
+          "id": "m-liam-lowpoly",
+          "handle": "liam_lowpoly",
+          "displayName": "liam_lowpoly",
+          "role": "builder"
+        },
+        {
+          "id": "you",
+          "handle": "orbit_ollie",
+          "displayName": "Ollie Park",
+          "role": "builder"
+        }
+      ],
+      "works": [
+        {
+          "id": "ph-01",
+          "title": "Brass Lantern",
+          "authorId": "m-mia-makes",
+          "file": "",
+          "thumb": "",
+          "tris": 12840
+        },
+        {
+          "id": "ph-02",
+          "title": "Tidal Shrine",
+          "authorId": "m-mia-makes",
+          "file": "",
+          "thumb": "",
+          "tris": 48210
+        },
+        {
+          "id": "ph-03",
+          "title": "Paper Crane Mk II",
+          "authorId": "m-kenji-polys",
+          "file": "",
+          "thumb": "",
+          "tris": 6420
+        },
+        {
+          "id": "ph-11",
+          "title": "Glass Greenhouse",
+          "authorId": "m-liam-lowpoly",
+          "file": "",
+          "thumb": "",
+          "tris": 9480
+        }
+      ],
+      "planet": {
+        "seed": 1103,
+        "preset": "verdant",
+        "ring": true,
+        "atmosphere": true,
+        "placements": [
+          {
+            "workId": "ph-01",
+            "dir": [
+              -3.424068996706826e-17,
+              0.8501477701712812,
+              0.5265441756137834
+            ],
+            "yaw": 4.1019155946547874e-17,
+            "scale": 1
+          },
+          {
+            "workId": "ph-02",
+            "dir": [
+              0.5591929034707469,
+              0.34020773595499954,
+              0.75601719101111
+            ],
+            "yaw": -1.1804666909158323,
+            "scale": 1
+          },
+          {
+            "workId": "ph-03",
+            "dir": [
+              1.0272206990120478e-16,
+              -0.16973229826128208,
+              0.9854902064084369
+            ],
+            "yaw": -3.141592653589793,
+            "scale": 1
+          },
+          {
+            "workId": "ph-11",
+            "dir": [
+              -0.5591929034707469,
+              0.34020773595499937,
+              0.7560171910111101
+            ],
+            "yaw": 1.1804666909158326,
+            "scale": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "quiet-vertex",
+      "name": "Quiet Vertex",
+      "motto": "Fewer polygons, more feeling.",
+      "color": "#8fb3c9",
+      "status": "active",
+      "foundedDaysAgo": 33,
+      "members": [
+        {
+          "id": "m-lowpoly-lu",
+          "handle": "lowpoly_lu",
+          "displayName": "Lu Ming",
+          "role": "captain"
+        },
+        {
+          "id": "m-rennie-uv",
+          "handle": "rennie_uv",
+          "displayName": "Rennie Okafor",
+          "role": "builder"
+        },
+        {
+          "id": "m-zoe-sculpts",
+          "handle": "zoe_sculpts",
+          "displayName": "zoe_sculpts",
+          "role": "builder"
+        },
+        {
+          "id": "m-arno-builds",
+          "handle": "arno_builds",
+          "displayName": "arno_builds",
+          "role": "builder"
+        },
+        {
+          "id": "m-otto-bevel",
+          "handle": "otto_bevel",
+          "displayName": "otto_bevel",
+          "role": "builder"
+        }
+      ],
+      "works": [
+        {
+          "id": "ph-04",
+          "title": "Rusty Courier Bot",
+          "authorId": "m-zoe-sculpts",
+          "file": "",
+          "thumb": "",
+          "tris": 88730
+        },
+        {
+          "id": "ph-05",
+          "title": "Moss Golem",
+          "authorId": "m-zoe-sculpts",
+          "file": "",
+          "thumb": "",
+          "tris": 132400
+        },
+        {
+          "id": "ph-06",
+          "title": "Lighthouse at Dusk",
+          "authorId": "m-arno-builds",
+          "file": "",
+          "thumb": "",
+          "tris": 21950
+        },
+        {
+          "id": "ph-14",
+          "title": "Coral Throne",
+          "authorId": "m-otto-bevel",
+          "file": "",
+          "thumb": "",
+          "tris": 72050
+        }
+      ],
+      "planet": {
+        "seed": 2207,
+        "preset": "glacier",
+        "ring": false,
+        "atmosphere": true,
+        "placements": [
+          {
+            "workId": "ph-04",
+            "dir": [
+              -3.424068996706826e-17,
+              0.8501477701712812,
+              0.5265441756137834
+            ],
+            "yaw": 4.1019155946547874e-17,
+            "scale": 1
+          },
+          {
+            "workId": "ph-05",
+            "dir": [
+              0.5591929034707469,
+              0.34020773595499954,
+              0.75601719101111
+            ],
+            "yaw": -1.1804666909158323,
+            "scale": 1
+          },
+          {
+            "workId": "ph-06",
+            "dir": [
+              1.0272206990120478e-16,
+              -0.16973229826128208,
+              0.9854902064084369
+            ],
+            "yaw": -3.141592653589793,
+            "scale": 1
+          },
+          {
+            "workId": "ph-14",
+            "dir": [
+              -0.5591929034707469,
+              0.34020773595499937,
+              0.7560171910111101
+            ],
+            "yaw": 1.1804666909158326,
+            "scale": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "kiln-collective",
+      "name": "Kiln Collective",
+      "motto": "Fired in Blender, glazed by hand.",
+      "color": "#c97b5a",
+      "status": "active",
+      "foundedDaysAgo": 27,
+      "members": [
+        {
+          "id": "m-terra-tomas",
+          "handle": "terra_tomas",
+          "displayName": "Tomas Rios",
+          "role": "captain"
+        },
+        {
+          "id": "m-glaze-june",
+          "handle": "glaze_june",
+          "displayName": "June Park",
+          "role": "builder"
+        },
+        {
+          "id": "m-felix-uv",
+          "handle": "felix_uv",
+          "displayName": "felix_uv",
+          "role": "builder"
+        },
+        {
+          "id": "m-sana-vertex",
+          "handle": "sana_vertex",
+          "displayName": "sana_vertex",
+          "role": "builder"
+        }
+      ],
+      "works": [
+        {
+          "id": "ph-08",
+          "title": "Orbital Kiosk",
+          "authorId": "m-felix-uv",
+          "file": "",
+          "thumb": "",
+          "tris": 17330
+        },
+        {
+          "id": "ph-09",
+          "title": "Clockwork Owl",
+          "authorId": "m-felix-uv",
+          "file": "",
+          "thumb": "",
+          "tris": 64120
+        },
+        {
+          "id": "ph-07",
+          "title": "Tea House",
+          "authorId": "m-sana-vertex",
+          "file": "",
+          "thumb": "",
+          "tris": 35600
+        }
+      ],
+      "planet": {
+        "seed": 3301,
+        "preset": "desert",
+        "ring": true,
+        "atmosphere": true,
+        "placements": [
+          {
+            "workId": "ph-08",
+            "dir": [
+              -3.424068996706826e-17,
+              0.8501477701712812,
+              0.5265441756137834
+            ],
+            "yaw": 4.1019155946547874e-17,
+            "scale": 1
+          },
+          {
+            "workId": "ph-09",
+            "dir": [
+              0.4842752600216464,
+              0.08523771884685889,
+              0.8707536987097735
+            ],
+            "yaw": -1.71892150524696,
+            "scale": 1
+          },
+          {
+            "workId": "ph-07",
+            "dir": [
+              -0.48427526002164606,
+              0.08523771884685849,
+              0.8707536987097735
+            ],
+            "yaw": 1.718921505246961,
+            "scale": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "moss-and-mesh",
+      "name": "Moss & Mesh",
+      "motto": "Small worlds, grown slowly.",
+      "color": "#9bb57f",
+      "status": "active",
+      "foundedDaysAgo": 19,
+      "members": [
+        {
+          "id": "m-fern-ade",
+          "handle": "fern_ade",
+          "displayName": "Adeola Ben",
+          "role": "captain"
+        },
+        {
+          "id": "m-subdiv-sami",
+          "handle": "subdiv_sami",
+          "displayName": "Sami Lind",
+          "role": "builder"
+        },
+        {
+          "id": "m-ivy-retopo",
+          "handle": "ivy_retopo",
+          "displayName": "ivy_retopo",
+          "role": "builder"
+        },
+        {
+          "id": "m-noor-mesh",
+          "handle": "noor_mesh",
+          "displayName": "noor_mesh",
+          "role": "builder"
+        }
+      ],
+      "works": [
+        {
+          "id": "ph-12",
+          "title": "Fox Spirit",
+          "authorId": "m-ivy-retopo",
+          "file": "",
+          "thumb": "",
+          "tris": 27710
+        },
+        {
+          "id": "ph-13",
+          "title": "Windmill No. 9",
+          "authorId": "m-ivy-retopo",
+          "file": "",
+          "thumb": "",
+          "tris": 15260
+        },
+        {
+          "id": "ph-10",
+          "title": "Desert Rover",
+          "authorId": "m-noor-mesh",
+          "file": "",
+          "thumb": "",
+          "tris": 41890
+        }
+      ],
+      "planet": {
+        "seed": 4409,
+        "preset": "coral",
+        "ring": false,
+        "atmosphere": true,
+        "placements": [
+          {
+            "workId": "ph-12",
+            "dir": [
+              -3.424068996706826e-17,
+              0.8501477701712812,
+              0.5265441756137834
+            ],
+            "yaw": 4.1019155946547874e-17,
+            "scale": 1
+          },
+          {
+            "workId": "ph-13",
+            "dir": [
+              0.4842752600216464,
+              0.08523771884685889,
+              0.8707536987097735
+            ],
+            "yaw": -1.71892150524696,
+            "scale": 1
+          },
+          {
+            "workId": "ph-10",
+            "dir": [
+              -0.48427526002164606,
+              0.08523771884685849,
+              0.8707536987097735
+            ],
+            "yaw": 1.718921505246961,
+            "scale": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "paper-moon-co",
+      "name": "Paper Moon Co.",
+      "motto": "Folding our first planet.",
+      "color": "#c8c0e0",
+      "status": "under-construction",
+      "foundedDaysAgo": 4,
+      "members": [
+        {
+          "id": "m-origami-oz",
+          "handle": "origami_oz",
+          "displayName": "Oz Hart",
+          "role": "captain"
+        },
+        {
+          "id": "m-fold-faye",
+          "handle": "fold_faye",
+          "displayName": "Faye Lin",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 7703,
+        "preset": "glacier",
+        "ring": true,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "night-shift-nodes",
+      "name": "Night Shift Nodes",
+      "motto": "We render after midnight.",
+      "color": "#7f8fd6",
+      "status": "under-construction",
+      "foundedDaysAgo": 3,
+      "members": [
+        {
+          "id": "m-noctua-ned",
+          "handle": "noctua_ned",
+          "displayName": "Ned Ames",
+          "role": "captain"
+        },
+        {
+          "id": "m-lamp-lio",
+          "handle": "lamp_lio",
+          "displayName": "Lio Brandt",
+          "role": "builder"
+        },
+        {
+          "id": "m-owl-ottilie",
+          "handle": "owl_ottilie",
+          "displayName": "Ottilie Ross",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 8803,
+        "preset": "volcanic",
+        "ring": false,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "pixel-orchard",
+      "name": "Pixel Orchard",
+      "motto": "Planting our first trees.",
+      "color": "#b6c46a",
+      "status": "under-construction",
+      "foundedDaysAgo": 2,
+      "members": [
+        {
+          "id": "m-seedling-sol",
+          "handle": "seedling_sol",
+          "displayName": "Sol Maren",
+          "role": "captain"
+        },
+        {
+          "id": "m-graft-gus",
+          "handle": "graft_gus",
+          "displayName": "Gus Albrecht",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 9901,
+        "preset": "verdant",
+        "ring": false,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "salt-flats-studio",
+      "name": "Salt Flats Studio",
+      "motto": "Wide horizons, clean topology.",
+      "color": "#e0cfa8",
+      "status": "under-construction",
+      "foundedDaysAgo": 6,
+      "members": [
+        {
+          "id": "m-dune-dara",
+          "handle": "dune_dara",
+          "displayName": "Dara Quinn",
+          "role": "captain"
+        },
+        {
+          "id": "m-mirage-mo",
+          "handle": "mirage_mo",
+          "displayName": "Mo Haddad",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 10103,
+        "preset": "desert",
+        "ring": true,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "glasswing",
+      "name": "Glasswing",
+      "motto": "Translucent things only.",
+      "color": "#a9d8e8",
+      "status": "under-construction",
+      "foundedDaysAgo": 5,
+      "members": [
+        {
+          "id": "m-prism-pia",
+          "handle": "prism_pia",
+          "displayName": "Pia Sorensen",
+          "role": "captain"
+        },
+        {
+          "id": "m-ior-ike",
+          "handle": "ior_ike",
+          "displayName": "Ike Mensah",
+          "role": "builder"
+        },
+        {
+          "id": "m-frost-fen",
+          "handle": "frost_fen",
+          "displayName": "Fen Calder",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 11113,
+        "preset": "glacier",
+        "ring": false,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "rust-belt-rigs",
+      "name": "Rust Belt Rigs",
+      "motto": "Rigging anything that moves.",
+      "color": "#b5714f",
+      "status": "under-construction",
+      "foundedDaysAgo": 1,
+      "members": [
+        {
+          "id": "m-bone-bex",
+          "handle": "bone_bex",
+          "displayName": "Bex Hollis",
+          "role": "captain"
+        },
+        {
+          "id": "m-ik-ivo",
+          "handle": "ik_ivo",
+          "displayName": "Ivo Petrov",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 12107,
+        "preset": "desert",
+        "ring": false,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "coral-cartographers",
+      "name": "Coral Cartographers",
+      "motto": "Mapping the shallows.",
+      "color": "#f0a69a",
+      "status": "under-construction",
+      "foundedDaysAgo": 2,
+      "members": [
+        {
+          "id": "m-reef-rosa",
+          "handle": "reef_rosa",
+          "displayName": "Rosa Imai",
+          "role": "captain"
+        },
+        {
+          "id": "m-chart-chen",
+          "handle": "chart_chen",
+          "displayName": "Chen Yu",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 13109,
+        "preset": "coral",
+        "ring": true,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "obsidian-loop",
+      "name": "Obsidian Loop",
+      "motto": "Edge loops all the way down.",
+      "color": "#8a7f96",
+      "status": "under-construction",
+      "foundedDaysAgo": 7,
+      "members": [
+        {
+          "id": "m-loop-lena",
+          "handle": "loop_lena",
+          "displayName": "Lena Varga",
+          "role": "captain"
+        },
+        {
+          "id": "m-crease-cy",
+          "handle": "crease_cy",
+          "displayName": "Cy Whitlock",
+          "role": "builder"
+        },
+        {
+          "id": "m-pole-pax",
+          "handle": "pole_pax",
+          "displayName": "Pax Mori",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 14107,
+        "preset": "volcanic",
+        "ring": true,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "cloud-kiln",
+      "name": "Cloud Kiln",
+      "motto": "Soft shapes, slow bakes.",
+      "color": "#d8d4ee",
+      "status": "under-construction",
+      "foundedDaysAgo": 3,
+      "members": [
+        {
+          "id": "m-puff-pim",
+          "handle": "puff_pim",
+          "displayName": "Pim de Wit",
+          "role": "captain"
+        },
+        {
+          "id": "m-bake-bea",
+          "handle": "bake_bea",
+          "displayName": "Bea Lund",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 15101,
+        "preset": "coral",
+        "ring": false,
+        "atmosphere": true,
+        "placements": []
+      }
+    },
+    {
+      "id": "tiny-titans",
+      "name": "Tiny Titans",
+      "motto": "Miniatures with ambition.",
+      "color": "#e2b45c",
+      "status": "under-construction",
+      "foundedDaysAgo": 1,
+      "members": [
+        {
+          "id": "m-mini-max",
+          "handle": "mini_max",
+          "displayName": "Max Ferro",
+          "role": "captain"
+        },
+        {
+          "id": "m-scale-suki",
+          "handle": "scale_suki",
+          "displayName": "Suki Arden",
+          "role": "builder"
+        }
+      ],
+      "works": [],
+      "planet": {
+        "seed": 16103,
+        "preset": "verdant",
+        "ring": true,
+        "atmosphere": true,
+        "placements": []
+      }
+    }
+  ],
+  "you": {
+    "teamId": "lumen-guild",
+    "memberId": "you"
+  }
+}
