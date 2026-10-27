@@ -5,6 +5,7 @@ import { activeTeamCount, assembleSeed, memberId, showcaseDirs, UNDER_CONSTRUCTI
 const template = templateJson as unknown as Template;
 const works = (n: number, authors = n): WorkInput[] =>
   Array.from({ length: n }, (_, i) => ({ id: `w${i}`, title: `Work ${i}`, author: `artist${i % authors}`, file: '', thumb: '', tris: 1000 }));
+const work = (id: string, author: string): WorkInput => ({ id, title: id, author, file: '', thumb: '', tris: 1000 });
 
 describe('activeTeamCount', () => {
   it('10–24 件作品时每个团队平均 3–4 件，最多 6 个团队', () => {
@@ -41,6 +42,30 @@ describe('assembleSeed', () => {
     expect(uc).toHaveLength(UNDER_CONSTRUCTION);
     expect(uc.every((t) => t.works.length === 0 && t.planet.placements.length === 0)).toBe(true);
   });
+  it('作者比团队数少时，团队数跟着作者数走：没有空的有作品团队，作品一件不少', () => {
+    const active = assembleSeed(template, works(14, 3)).teams.filter((t) => t.status === 'active');
+    expect(active.every((t) => t.works.length > 0)).toBe(true);
+    expect(active.flatMap((t) => t.works)).toHaveLength(14);
+  });
+  it('handle 的不同写法（大小写、_ 和 -）算同一个人：进同一个团队，只算一个成员，用第一次出现的写法', () => {
+    const ids = ['x1', 'x2', 'x3'];
+    const seed = assembleSeed(template, [...works(9), work('x1', 'Mia_Makes'), work('x2', 'mia-makes'), work('x3', 'MIA_MAKES')]);
+    const homes = seed.teams.filter((t) => t.works.some((w) => ids.includes(w.id)));
+    expect(homes).toHaveLength(1);
+    expect(homes[0].works.filter((w) => ids.includes(w.id))).toHaveLength(3);
+    expect(homes[0].members.filter((m) => m.id === memberId('mia_makes'))).toEqual([
+      { id: memberId('mia_makes'), handle: 'Mia_Makes', displayName: 'Mia_Makes', role: 'builder' },
+    ]);
+  });
+  it('handle 前面的 @ 不存进成员', () => {
+    const seed = assembleSeed(template, [...works(9), work('x1', '@kenji_polys')]);
+    expect(seed.teams.flatMap((t) => t.members).filter((m) => m.id === memberId('kenji_polys'))).toEqual([
+      { id: memberId('kenji_polys'), handle: 'kenji_polys', displayName: 'kenji_polys', role: 'builder' },
+    ]);
+  });
+  it('同一个团队里成员 id 重复时报错（比如作者和虚构成员同名）', () => {
+    expect(() => assembleSeed(template, [work('x1', 'Hexa_Ines')])).toThrow(/m-hexa-ines/);
+  });
   it('演示身份在第一个团队里', () => {
     const seed = assembleSeed(template, works(10));
     expect(seed.you.teamId).toBe(seed.teams[0].id);
@@ -55,6 +80,18 @@ describe('assembleSeed', () => {
       for (const w of t.works) expect(t.members.some((m) => m.id === w.authorId)).toBe(true);
       expect(t.members.filter((m) => m.role === 'captain')).toHaveLength(1);
     }
+  });
+});
+
+describe('memberId', () => {
+  it('中文名保留原字，两个不同的名字得到两个不同的 id', () => {
+    expect(memberId('李明')).toBe('m-李明');
+    expect(memberId('王芳')).not.toBe(memberId('李明'));
+  });
+  it('全角按半角算；全是符号时用哈希兜底：非空，不同的输入不同', () => {
+    expect(memberId('＠Ｍｉａ＿Ｍａｋｅｓ')).toBe(memberId('mia_makes'));
+    expect(memberId('🦊')).toMatch(/^m-[a-z0-9]+$/);
+    expect(memberId('🦊')).not.toBe(memberId('🐱'));
   });
 });
 

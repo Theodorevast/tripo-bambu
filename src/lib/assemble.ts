@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import type { Member, PresetId, Seed, Team, Work } from '../data/types';
 import { faceYaw, SHOWCASE_POLE } from '../planet/placement.ts';
+import { hashString } from '../planet/rng.ts';
 
 export interface WorkInput {
   id: string;
@@ -38,8 +39,31 @@ export function activeTeamCount(works: number): number {
   return Math.min(MAX_ACTIVE, Math.max(1, Math.round(works / 3.5)));
 }
 
+// handle → 成员 id：NFKC 归一（全角变半角）、小写、去掉开头的 @，字母数字以外的连续字符换成 -。
+// 中文等 Unicode 字母原样保留；全是符号（比如只有 emoji）时用哈希兜底，id 不会是空的
 export function memberId(handle: string): string {
-  return `m-${handle.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  const base = handle.normalize('NFKC').toLowerCase().replace(/^@+/, '');
+  const slug = base.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+  return `m-${slug || hashString(base).toString(36)}`;
+}
+
+// 一个作者：id 是 memberId，handle 用第一次出现的写法（去掉开头的 @）
+interface AuthorGroup {
+  id: string;
+  handle: string;
+  works: WorkInput[];
+}
+
+// 同一个团队里成员 id 必须唯一：作者 handle 归一后可能和虚构成员撞上
+function assertUniqueMembers(team: Team): void {
+  const seen = new Map<string, string>();
+  for (const m of team.members) {
+    const first = seen.get(m.id);
+    if (first !== undefined) {
+      throw new Error(`团队 ${team.id} 里有两个成员的 id 都是 ${m.id}（${first} 和 ${m.handle}）：改 works.json 的 author 或 teams.template.json 的 crew`);
+    }
+    seen.set(m.id, m.handle);
+  }
 }
 
 // 展示位：1 件放在正中，多件均匀排在 34° 的圆锥上，镜头飞到星球时一眼能看全
@@ -59,22 +83,29 @@ export function showcaseDirs(n: number): Array<[number, number, number]> {
 }
 
 export function assembleSeed(template: Template, works: WorkInput[]): Seed {
-  const active = works.length === 0 ? 0 : activeTeamCount(works.length);
-  // 按作者分组，同一作者的作品进同一个团队；大组先放，每次放进当前作品最少的团队
-  const groups = new Map<string, WorkInput[]>();
-  for (const w of works) groups.set(w.author, [...(groups.get(w.author) ?? []), w]);
-  const buckets: WorkInput[][] = Array.from({ length: active }, () => []);
-  for (const g of [...groups.values()].sort((a, b) => b.length - a.length)) {
-    const i = buckets.reduce((best, bucket, k) => (bucket.length < buckets[best].length ? k : best), 0);
-    buckets[i].push(...g);
+  // 按作者分组：比的是 memberId，所以大小写、@、_ 和 - 不同的写法算同一个人
+  const groups = new Map<string, AuthorGroup>();
+  for (const w of works) {
+    const id = memberId(w.author);
+    let g = groups.get(id);
+    if (!g) groups.set(id, (g = { id, handle: w.author.replace(/^@+/, ''), works: [] }));
+    g.works.push(w);
+  }
+  // 团队数不超过作者数，否则会分出没有作品的「有作品团队」；没有作品时是 0
+  const active = Math.min(activeTeamCount(works.length), groups.size);
+  // 同一作者的作品进同一个团队；大组先放，每次放进当前作品最少的团队
+  const buckets: Array<{ authors: AuthorGroup[]; works: WorkInput[] }> = Array.from({ length: active }, () => ({ authors: [], works: [] }));
+  for (const g of [...groups.values()].sort((a, b) => b.works.length - a.works.length)) {
+    const i = buckets.reduce((best, bucket, k) => (bucket.works.length < buckets[best].works.length ? k : best), 0);
+    buckets[i].authors.push(g);
+    buckets[i].works.push(...g.works);
   }
   const crewOf = (tt: TemplateTeam): Member[] =>
     tt.crew.map((c, k) => ({ id: memberId(c.handle), handle: c.handle, displayName: c.displayName, role: k === 0 ? 'captain' : 'builder' }));
 
   const teams: Team[] = template.teams.slice(0, active).map((tt, i) => {
-    const ws = buckets[i];
-    const authors: Member[] = [...new Set(ws.map((w) => w.author))].map((a) => ({ id: memberId(a), handle: a, displayName: a, role: 'builder' }));
-    const members = [...crewOf(tt), ...authors];
+    const { authors, works: ws } = buckets[i];
+    const members = [...crewOf(tt), ...authors.map((g): Member => ({ id: g.id, handle: g.handle, displayName: g.handle, role: 'builder' }))];
     if (i === 0) members.push({ id: template.you.id, handle: template.you.handle, displayName: template.you.displayName, role: 'builder' });
     const dirs = showcaseDirs(ws.length);
     return {
@@ -96,5 +127,6 @@ export function assembleSeed(template: Template, works: WorkInput[]): Seed {
       planet: { seed: tt.seed, preset: tt.preset, ring: tt.ring, atmosphere: true, placements: [] },
     });
   }
+  for (const t of teams) assertUniqueMembers(t);
   return { teams, you: { teamId: teams[0]?.id ?? '', memberId: template.you.id } };
 }
