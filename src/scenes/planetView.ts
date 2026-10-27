@@ -38,6 +38,7 @@ export class PlanetView {
   readonly extraWorks = new Map<string, Work>(); // 拖进来的临时作品
   team: Team | null = null;
   private entry: PlanetEntry | null = null;
+  private loading: Promise<void> = Promise.resolve();
   private readonly world: World;
 
   constructor(world: World) {
@@ -48,10 +49,18 @@ export class PlanetView {
     return this.entry;
   }
 
-  async enter(team: Team): Promise<void> {
+  // 最近一次 enter 摆的作品都有了结果（模型挂好，或者中途离开、换团队而作废）时 resolve。
+  // 只给「模型都加载完了」的信号用，路由不要等它
+  get loaded(): Promise<void> {
+    return this.loading;
+  }
+
+  // 立即摆好全部展台（模型加载完之前半透明，spec 2.2）就返回，模型在后台加载，不等它们。
+  // 加载期间离开、换团队、又回到这个团队都没关系：迟到的模型由 place() 认出来丢掉
+  enter(team: Team): void {
     this.team = team;
     this.entry = this.world.planets.get(team.id) ?? null;
-    await Promise.all(team.planet.placements.map((p) => this.place(p)));
+    this.loading = Promise.all(team.planet.placements.map((p) => this.place(p))).then(() => {});
   }
 
   leave(): void {
@@ -64,6 +73,8 @@ export class PlanetView {
     return this.team?.works.find((w) => w.id === workId) ?? this.extraWorks.get(workId);
   }
 
+  // 展台和拾取盒当场摆上（在第一个 await 之前），模型加载完才挂；返回的 Promise 等模型挂好。
+  // 编辑器摆一件作品时会 await 它
   async place(p: Placement): Promise<PlacedWork | null> {
     const work = this.findWork(p.workId);
     const entry = this.entry;
@@ -87,7 +98,9 @@ export class PlanetView {
     this.sizeParts(pw, 1, 0.8);
     this.updateTransform(pw);
     const model = await this.library.load(work);
-    if (this.placed.get(work.id) !== pw) return null; // 加载期间被移除了
+    // 加载期间被移除了（编辑器删掉、离开星球、换了团队，或者离开后又回来、这件已经重新摆过）：按对象比，不按 id 找，
+    // 迟到的模型就不会挂到别的团队或者同一件作品的新展台上
+    if (this.placed.get(work.id) !== pw) return null;
     pw.model = model;
     model.object.position.y = PLINTH_HEIGHT;
     scaler.add(model.object);

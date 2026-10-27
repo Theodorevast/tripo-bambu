@@ -5,7 +5,9 @@ import type { World } from '../scenes/world';
 import { el } from './dom';
 import { WorkCard } from './workCard';
 
-// 星球页（非编辑状态）：悬停作品显示名字，点击弹出作品卡；建设中的星球显示提示
+// 星球页（非编辑状态）：悬停作品显示名字，点击弹出作品卡；建设中的星球显示提示。
+// enter() 不等模型（路由是串行的，等了就会卡住 Back、Members 这些操作）：展台马上摆好，模型在后台加载。
+// 给脚本的就绪信号：这次进入的模型全部挂好后，#app 加 data-planet-ready="<teamId>"；离开星球、换团队时去掉
 export class PlanetScreen implements PlanetLayer {
   readonly view: PlanetView;
   readonly card: WorkCard;
@@ -17,6 +19,7 @@ export class PlanetScreen implements PlanetLayer {
   private down: { x: number; y: number } | null = null;
   private active = false;
   private interactive = true;
+  private visit = 0; // 每次 enter / leave 加一：模型加载完时对不上号（已经离开或换了团队），就不设就绪信号
 
   constructor(world: World, root: HTMLElement, onMuseum: (teamId: string, workId: string) => void) {
     this.world = world;
@@ -30,13 +33,18 @@ export class PlanetScreen implements PlanetLayer {
     canvas.addEventListener('pointermove', (e) => {
       if (this.active && this.interactive && !world.rig.flying) this.setHovered(this.view.pick(e.clientX, e.clientY));
     });
-    canvas.addEventListener('pointerdown', (e) => { this.down = { x: e.clientX, y: e.clientY }; });
+    // 指针离开画布（移到顶栏、作品卡上，或者移出窗口）：清掉悬停，高亮、标签和手形光标都不留
+    canvas.addEventListener('pointerleave', () => this.setHovered(null));
+    // 只认主按钮：鼠标左键，触摸和笔尖按下时也是 0；右键、中键点作品不弹作品卡
+    canvas.addEventListener('pointerdown', (e) => { this.down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null; });
     canvas.addEventListener('pointerup', (e) => this.onUp(e));
     world.frameHooks.add(() => this.placeLabel());
   }
 
-  async enter(team: Team): Promise<void> {
+  enter(team: Team): void {
+    const visit = ++this.visit;
     this.active = true;
+    delete this.root.dataset.planetReady;
     if (team.status === 'under-construction') {
       this.note.replaceChildren(
         el('div', { className: 'display', textContent: `${team.name} is still building` }),
@@ -44,11 +52,17 @@ export class PlanetScreen implements PlanetLayer {
       );
       this.note.hidden = false;
     }
-    await this.view.enter(team);
+    this.view.enter(team);
+    this.view.loaded.then(
+      () => { if (visit === this.visit) this.root.dataset.planetReady = team.id; },
+      (err: unknown) => console.error(err),
+    );
   }
 
   leave(): void {
+    this.visit++;
     this.active = false;
+    delete this.root.dataset.planetReady;
     this.setHovered(null);
     this.card.hide();
     this.note.hidden = true;
@@ -67,7 +81,7 @@ export class PlanetScreen implements PlanetLayer {
   private onUp(e: PointerEvent): void {
     const d = this.down;
     this.down = null;
-    if (!this.active || !this.interactive || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
+    if (e.button !== 0 || !this.active || !this.interactive || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
     const pw = this.view.pick(e.clientX, e.clientY);
     if (pw && this.view.team) this.card.show(pw.work, this.view.team, pw.model?.failed ?? false);
     else this.card.hide();
@@ -85,11 +99,20 @@ export class PlanetScreen implements PlanetLayer {
   private placeLabel(): void {
     if (!this.hovered) return;
     const top = this.view.topOf(this.hovered);
-    // 作品转到星球背面（自动旋转、阻尼）时，指针没动也把标签藏起来
-    const at = this.view.occluded(this.world.rig.camera.position, top) ? null : this.world.toScreen(top);
-    this.label.hidden = !at;
-    if (!at) return;
-    // 标签以底边中点对准作品顶上；不压到顶栏：标签顶边至少在顶栏底边下面 8px（顶栏高度从 DOM 读）
+    // 作品转到星球背面（自动旋转、阻尼）时，指针没动也把整个悬停清掉：高亮和手形光标不留在空地上
+    if (this.view.occluded(this.world.rig.camera.position, top)) {
+      this.setHovered(null);
+      return;
+    }
+    // 锚点（作品顶上）在画面外（镜头拉近、转动后作品出了画面）或在镜头背后：不显示标签，悬停本身留着
+    const at = this.world.toScreen(top);
+    const r = this.world.renderer.domElement.getBoundingClientRect();
+    if (!at || at.x < r.left || at.x > r.right || at.y < r.top || at.y > r.bottom) {
+      this.label.hidden = true;
+      return;
+    }
+    this.label.hidden = false;
+    // 标签以底边中点对准作品顶上；不压到顶栏：标签顶边至少在顶栏底边下面 8px（顶栏高度从 DOM 读；标签先显示出来，offsetHeight 才有值）
     const bar = this.root.querySelector('.topbar');
     const minY = (bar ? bar.getBoundingClientRect().bottom : 0) + 8 + this.label.offsetHeight;
     this.label.style.transform = `translate(${at.x}px, ${Math.max(at.y, minY)}px) translate(-50%, -100%)`;
