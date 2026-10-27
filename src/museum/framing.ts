@@ -1,7 +1,8 @@
 import * as THREE from 'three/webgpu';
+import { WORK_SIZE } from '../planet/placement';
 
-// 归一化后的模型（最长边 2.0）包围球半径不超过 √3 ≈ 1.73，按 1.75 留一点余量
-const FIT_RADIUS = 1.75;
+// 归一化后的模型（最长边 WORK_SIZE）包围球半径不超过 WORK_SIZE·√3/2（最坏情况是立方体），再留 1% 余量
+const FIT_RADIUS = ((WORK_SIZE * Math.sqrt(3)) / 2) * 1.01;
 
 // 让这个球完整出现在画面里的镜头距离：竖直、水平两个半视角取小的（竖屏时水平方向更窄）
 export function fitDistance(camera: THREE.PerspectiveCamera): number {
