@@ -23,8 +23,8 @@ const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, stor
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
 app.planetLayer = {
-  enter: async (team) => {
-    await planetScreen.enter(team);
+  enter: (team) => {
+    planetScreen.enter(team); // 立即返回：展台马上摆好，模型在后台加载
     editor.restoreTempWorks(team); // 这次页面里摆过的临时作品不在存档里，回到自己的星球时重新摆上
   },
   leave: () => { editor.deactivate(); planetScreen.leave(); },
