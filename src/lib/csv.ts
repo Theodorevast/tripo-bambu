@@ -3,10 +3,13 @@
 // 格子比表头少时缺的列补空字符串。下面几种情况报错，报错带文件里的行号（从 1 数）：
 // 引号到文件末尾都没闭合；闭合引号后面除了空格还有别的字；跨行的引号在后面某行的逗号之后才闭合
 // （多半是少了闭合引号，后面的行被并进了这一格，所以跨行格子的最后一行里不能有逗号）；
-// 一行的格子比表头多（多半是没加引号的逗号）；表头空着的那一列里有内容
+// 一行的格子比表头多（多半是没加引号的逗号）；表头空着的那一列里有内容；文件里有 U+FFFD 替换符（不是 UTF-8 编码）
 export function parseCsv(text: string): Array<Record<string, string>> {
   const rows: Array<{ cells: string[]; line: number }> = [];
   const src = text.replace(/^\uFEFF/, '');
+  // Excel 普通「CSV」另存出来的是系统 ANSI 编码，按 UTF-8 读进来，非 ASCII 字符（比如作者名）会变成 U+FFFD 替换符：直接报错，不让它悄悄变成乱码
+  const bad = src.indexOf(String.fromCodePoint(0xfffd));
+  if (bad !== -1) throw new Error(`CSV 第 ${src.slice(0, bad).split('\n').length} 行有乱码字符：文件多半不是 UTF-8 编码。在 Excel 里用「另存为 → CSV UTF-8（逗号分隔）」重新保存`);
   let row: string[] = [];
   let cell = '';
   let quoted = false;
@@ -21,7 +24,7 @@ export function parseCsv(text: string): Array<Record<string, string>> {
       const tail = cell.slice(Math.max(cell.lastIndexOf('\n'), cell.lastIndexOf('\r')) + 1);
       if (tail.includes(',')) {
         const shown = tail.length > 30 ? `…${tail.slice(-30)}` : tail;
-        throw new Error(`CSV 第 ${quoteLine} 行：这里开始的引号一直到第 ${line} 行的「${shown}"」才闭合，中间的行都被并进了这一格（是不是少了闭合引号？格子里本来就有的引号要写成两个，并用双引号包住整格；真要换行的格子，最后一行里不能有逗号）`);
+        throw new Error(`CSV 第 ${quoteLine} 行：这里开始的引号一直到第 ${line} 行的「${shown}"」才闭合，中间的行都被并进了这一格（行号按文本文件数，用记事本打开能对上）。两种可能：① 少了闭合引号，或者格子里本来就有的 " 没写成两个 ""：把引号补好；② 这一格本来就要换行（比如在 Excel 里按了 Alt+Enter）：去掉这一格最后一行里的逗号，或者不要换行`);
       }
     }
     row.push(cell);

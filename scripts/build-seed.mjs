@@ -11,7 +11,14 @@ if (!Array.isArray(works) || works.length === 0) {
   console.error(`错误：${process.env.WORKS_IN ?? 'src/data/works.json'} 里一件作品都没有。已停止，没有写 seed.json。先跑 npm run prep，或检查 models-in/works.csv。`);
   process.exit(1);
 }
-const seed = assembleSeed(template, works);
+let seed;
+try {
+  seed = assembleSeed(template, works);
+} catch (err) {
+  // 作品 id 重复、成员 id 冲突这类错误：只打印说明，不打印 Node 的堆栈
+  console.error(`错误：${err.message}。已停止，没有写 seed.json。`);
+  process.exit(1);
+}
 writeFileSync(process.env.SEED_OUT ?? data('seed.json'), `${JSON.stringify(seed, null, 2)}\n`);
 const active = seed.teams.filter((t) => t.status === 'active');
 console.log(`seed.json：${seed.teams.length} 个团队（有作品 ${active.length} 个：${active.map((t) => `${t.name} ${t.works.length}`).join('、')}），作品 ${works.length} 件`);

@@ -67,6 +67,13 @@ describe('parseCsv', () => {
   });
 });
 
+describe('parseCsv 编码', () => {
+  it('文件里有 U+FFFD 替换符（Excel 按 ANSI 另存后按 UTF-8 读进来）：报错并指出行号', () => {
+    const garbled = `file,title,author\na.glb,Lamp,mia\nb.glb,Bench,Zo${String.fromCodePoint(0xfffd)}\n`;
+    expect(() => parseCsv(garbled)).toThrow(/第 3 行有乱码字符/);
+  });
+});
+
 describe('slugify', () => {
   it('文件名转 id', () => {
     expect(slugify('My Robot (v2).GLB')).toBe('my-robot-v2');
