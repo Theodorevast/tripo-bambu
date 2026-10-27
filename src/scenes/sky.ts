@@ -1,15 +1,26 @@
 import * as THREE from 'three/webgpu';
-import { color, mix, mx_fractal_noise_float, normalize, positionLocal, smoothstep } from 'three/tsl';
+import { color, equirectUV, mix, normalize, positionLocal, smoothstep, texture } from 'three/tsl';
 import { mulberry32 } from '../planet/rng';
+import { bakeNebula } from './nebula';
+
+// 星云贴图的尺寸：等距柱状投影，宽 = 2 × 高。星云很柔和，512 × 256 和逐像素算的结果只差 1/255，
+// 加大到 1024 × 512 也一样，只是烘焙时间变成 4 倍
+const NEBULA_W = 512;
+const NEBULA_H = 256;
 
 // 天空：大号背面球画星云渐变 + 2500 颗星星。WebGPU 的 Points 只能画 1 像素，所以星星用实例化小球
+// 星云是静态的：启动时在 CPU 上烘焙成一张贴图（nebula.ts，噪声和 TSL 的 mx_fractal_noise_float 相同），
+// 每帧每像素只采样一次，不用现算 7 个八度的噪声
 export function createSky(): THREE.Group {
   const sky = new THREE.Group();
-  const dir = normalize(positionLocal);
-  const n1 = mx_fractal_noise_float(dir.mul(2.2), 4, 2.0, 0.5, 1.0).mul(0.5).add(0.5);
-  const n2 = mx_fractal_noise_float(dir.mul(3.1).add(7.3), 3, 2.0, 0.5, 1.0).mul(0.5).add(0.5);
+  const nebula = new THREE.DataTexture(bakeNebula(NEBULA_W, NEBULA_H), NEBULA_W, NEBULA_H, THREE.RGFormat, THREE.UnsignedByteType);
+  nebula.wrapS = THREE.RepeatWrapping; // 经度 0° 和 360° 是同一条线：插值跨过接缝时取另一边的像素
+  nebula.magFilter = THREE.LinearFilter;
+  nebula.minFilter = THREE.LinearFilter; // 画面上贴图总是被放大，不用 mipmap
+  nebula.needsUpdate = true;
+  const n = texture(nebula, equirectUV(normalize(positionLocal))); // R = 大片紫色星云，G = 零星的暗红
   const domeMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false });
-  domeMat.colorNode = mix(mix(color('#07080d'), color('#1b1530'), smoothstep(0.45, 0.85, n1)), color('#2a1c24'), smoothstep(0.62, 0.95, n2));
+  domeMat.colorNode = mix(mix(color('#07080d'), color('#1b1530'), smoothstep(0.45, 0.85, n.r)), color('#2a1c24'), smoothstep(0.62, 0.95, n.g));
   const dome = new THREE.Mesh(new THREE.SphereGeometry(4000, 48, 24), domeMat);
   dome.renderOrder = -1;
   sky.add(dome);
