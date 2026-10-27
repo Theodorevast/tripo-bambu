@@ -140,7 +140,9 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .ti-check { position: absolute; top: 4px; right: 6px; color: var(--accent); font-weight: 600; }
 .ti-temp { position: absolute; top: 4px; left: 6px; color: var(--accent); }
 
-/* 编辑条：跟着选中的作品走 */
+/* 编辑条：摆在选中作品旁边（位置由 EditPanel.moveBar 算，夹在顶栏和作品栏之间，不靠 z-index 躲顶栏）。
+   不设 z-index：顶栏（6）压在 Members / Museum 页上面，那些页面又要压住编辑条，编辑条抬高就成了死循环。
+   DOM 里排在作品栏和外观面板后面，小窗口里碰到它们时压在上面 */
 #app > .edit-bar { position: absolute; left: 0; top: 0; display: grid; gap: 8px; width: 260px; padding: 14px; background: var(--panel-solid); border: 1px solid var(--accent); border-radius: var(--radius); }
 .eb-title { font-size: 20px; }
 .edit-bar label { display: grid; grid-template-columns: 56px 1fr; align-items: center; }

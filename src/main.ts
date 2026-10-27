@@ -4,7 +4,7 @@ import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import './ui/styles.css';
-import { App } from './app';
+import { App, type Sheet } from './app';
 import seedJson from './data/seed.json';
 import { browserStorage, LocalStore } from './data/store';
 import type { Seed } from './data/types';
@@ -22,15 +22,38 @@ const world = await World.create(document.querySelector<HTMLCanvasElement>('#sta
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
-app.planetLayer = { enter: (team) => planetScreen.enter(team), leave: () => { editor.deactivate(); planetScreen.leave(); } };
-app.onEdit = () => editor.toggle();
+app.planetLayer = {
+  enter: async (team) => {
+    await planetScreen.enter(team);
+    editor.restoreTempWorks(team); // 这次页面里摆过的临时作品不在存档里，回到自己的星球时重新摆上
+  },
+  leave: () => { editor.deactivate(); planetScreen.leave(); },
+};
+// Members / Museum 打开时先退出编辑：看不见星球时 Delete、Q / E 不能再改它，拖到一半的位置也先存好
+let openSheet: Sheet | null = null;
+const sheet = (s: Sheet): Sheet => ({
+  open: (team, route) => {
+    editor.deactivate();
+    openSheet = s;
+    return s.open(team, route);
+  },
+  close: () => {
+    if (openSheet === s) openSheet = null;
+    s.close();
+  },
+});
+// 顶栏压在 Members / Museum 上面，开着页面也点得到 Edit：先回星球页（关掉页面），再切换编辑
+app.onEdit = () => {
+  if (openSheet) app.closeSheet();
+  editor.toggle();
+};
 installDebugHooks(app, planetScreen);
-app.members = new MembersPage(app.root, seed.you.memberId, () => app.closeSheet(), (workId) => {
+app.members = sheet(new MembersPage(app.root, seed.you.memberId, () => app.closeSheet(), (workId) => {
   const team = app.currentTeam;
   if (team) app.navigate({ view: 'museum', teamId: team.id, workId });
-});
-app.museum = new MuseumPage(app.root, world, () => app.closeSheet(), (workId) => {
+}));
+app.museum = sheet(new MuseumPage(app.root, world, () => app.closeSheet(), (workId) => {
   const team = app.currentTeam;
   if (team) app.navigate(workId ? { view: 'museum', teamId: team.id, workId } : { view: 'museum', teamId: team.id });
-});
+}));
 await app.start();

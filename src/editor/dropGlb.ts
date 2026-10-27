@@ -8,8 +8,8 @@ export function checkDrop(file: { name: string; size: number }): DropCheck {
   return { ok: true };
 }
 
-// 整个窗口都能接住拖进来的文件；无论是否在编辑模式，都阻止浏览器直接打开文件
-export function listenForDrops(handlers: { active(): boolean; drop(file: File): void; hover(on: boolean): void; inactiveDrop(): void }): void {
+// 整个窗口都能接住拖进来的文件（一次可以拖好几个，全部交给 drop）；无论是否在编辑模式，都阻止浏览器直接打开文件
+export function listenForDrops(handlers: { active(): boolean; drop(files: File[]): void; hover(on: boolean): void; inactiveDrop(): void }): void {
   addEventListener('dragover', (e) => {
     e.preventDefault();
     if (handlers.active()) handlers.hover(true);
@@ -20,9 +20,9 @@ export function listenForDrops(handlers: { active(): boolean; drop(file: File): 
   addEventListener('drop', (e) => {
     e.preventDefault();
     handlers.hover(false);
-    const file = e.dataTransfer?.files[0];
-    if (!file) return;
-    if (handlers.active()) handlers.drop(file);
+    const files = [...(e.dataTransfer?.files ?? [])];
+    if (!files.length) return;
+    if (handlers.active()) handlers.drop(files);
     else handlers.inactiveDrop();
   });
 }

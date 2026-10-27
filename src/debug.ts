@@ -25,6 +25,9 @@ export function installDebugHooks(app: App, screen: PlanetScreen): void {
       return app.world.toScreen(pw.root.localToWorld(new THREE.Vector3(0, y, 0)));
     },
     placedIds: () => [...screen.view.placed.keys()],
-    teamPlanet: (teamId) => app.teams.find((t) => t.id === teamId)?.planet ?? null,
+    teamPlanet: (teamId) => {
+      const planet = app.teams.find((t) => t.id === teamId)?.planet;
+      return planet ? structuredClone(planet) : null; // 给副本：调用方改不到正在用的配方
+    },
   };
 }
