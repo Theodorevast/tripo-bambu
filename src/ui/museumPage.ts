@@ -5,11 +5,12 @@ import type { Team, Work } from '../data/types';
 import { frameModel } from '../museum/framing';
 import { MultiView } from '../museum/multiview';
 import { Viewer } from '../museum/viewer';
-import type { Route } from '../router';
+import { toHash, type Route } from '../router';
 import { addStudioLights } from '../scenes/lights';
 import type { World } from '../scenes/world';
-import { el, formatTris } from './dom';
+import { el } from './dom';
 import { toast } from './toast';
+import { authorLine, failedNote, workNumber } from './workCard';
 
 // Task 2 的检查不通过时改成 false：卡片改用静态缩略图，查看器不受影响
 export const LIVE_CARD_PREVIEWS = true;
@@ -21,6 +22,9 @@ interface Card {
 }
 
 // Museum：团队作品网格，每张卡片里一个慢慢自转的模型；点开进入大图查看器
+// open() 不等任何模型（路由是串行的，等了就会卡住 Esc、返回这些操作）：网格和查看器面板马上出来，模型在后台加载
+// 给脚本的就绪信号：每张卡片的模型挂好后 .mc-preview 加 ready 类；全部挂好后 section.museum 加 data-ready="true"；
+// 查看器的模型画出第一帧后 .viewer-stage 加 ready 类
 export class MuseumPage implements Sheet {
   private readonly node = el('section', { className: 'sheet museum' });
   private readonly canvas = el('canvas', { className: 'museum-canvas' });
@@ -30,6 +34,7 @@ export class MuseumPage implements Sheet {
   private readonly onClose: () => void;
   private readonly onSelect: (workId: string | null) => void;
   private multiview: MultiView | null = null;
+  private multiviewReady: Promise<MultiView> | null = null;
   private teamId: string | null = null;
   private token = 0;
   private readonly onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !this.viewer.isOpen) this.onClose(); };
@@ -48,18 +53,19 @@ export class MuseumPage implements Sheet {
     root.append(this.node, this.canvas);
   }
 
-  async open(team: Team, route: Route): Promise<void> {
-    if (this.teamId !== team.id) await this.renderGrid(team);
+  open(team: Team, route: Route): void {
+    if (this.teamId !== team.id) this.renderGrid(team);
     const workId = route.view === 'museum' ? route.workId : undefined;
-    if (!workId) {
-      this.viewer.close();
+    const work = workId ? team.works.find((w) => w.id === workId) : undefined;
+    if (work) {
+      this.viewer.open(work, team);
       return;
     }
-    const work = team.works.find((w) => w.id === workId);
-    if (work) await this.viewer.open(work, team);
-    else {
+    this.viewer.close();
+    if (workId) {
+      // 地址里的作品不存在：网格已经显示着，只把地址就地改成网格的（不加历史记录，后退不会又回到坏地址）
       toast('That work is not in this museum');
-      this.onSelect(null);
+      history.replaceState(history.state, '', toHash({ view: 'museum', teamId: team.id }));
     }
   }
 
@@ -68,6 +74,7 @@ export class MuseumPage implements Sheet {
     this.token++;
     this.teamId = null;
     this.node.hidden = true;
+    delete this.node.dataset.ready;
     this.canvas.hidden = true;
     this.viewer.close();
     this.multiview?.clearViews();
@@ -76,30 +83,47 @@ export class MuseumPage implements Sheet {
     removeEventListener('keydown', this.onKey);
   }
 
-  private async renderGrid(team: Team): Promise<void> {
+  private renderGrid(team: Team): void {
     const token = ++this.token;
     this.teamId = team.id;
     this.world.paused = true; // 主画面被盖住了，停掉省 GPU
     addEventListener('keydown', this.onKey);
-    const cards = team.works.map((w, i) => this.card(team, w, i));
+    const cards = team.works.map((w) => this.card(team, w));
+    const count = team.works.length;
     this.node.replaceChildren(el('div', { className: 'sheet-panel wide' },
       el('header', { className: 'sheet-head' },
         el('div', {},
-          el('div', { className: 'mono', textContent: `${team.works.length} works · ${team.name}` }),
+          el('div', { className: 'mono', textContent: `${count} ${count === 1 ? 'work' : 'works'} · ${team.name}` }),
           el('h1', { className: 'display', textContent: 'Museum' }),
         ),
         el('button', { className: 'sheet-close', textContent: 'Close', onclick: () => this.onClose() }),
       ),
       cards.length ? el('div', { className: 'museum-grid' }, ...cards.map((c) => c.node)) : el('p', { className: 'empty display', textContent: 'No works yet' }),
     ));
+    delete this.node.dataset.ready;
     this.node.hidden = false;
+    this.startPreviews(cards, token).then(
+      () => { if (token === this.token) this.node.dataset.ready = 'true'; },
+      (err: unknown) => console.error(err),
+    );
+  }
+
+  // 卡片预览：共用一个 canvas，每张卡片一个视口；模型各自加载，好一个挂一个
+  private async startPreviews(cards: Card[], token: number): Promise<void> {
     if (!LIVE_CARD_PREVIEWS || cards.length === 0) return;
-    this.multiview ??= await MultiView.create(this.canvas);
+    // 存 Promise 而不是结果：两次打开挨得很近时也只建一个渲染器
+    this.multiviewReady ??= MultiView.create(this.canvas).then((mv) => (this.multiview = mv));
+    const mv = await this.multiviewReady;
     if (token !== this.token) return;
-    const mv = this.multiview;
     mv.clearViews();
     this.canvas.hidden = this.viewer.isOpen;
-    mv.renderer.setAnimationLoop(() => mv.render(1 / 60));
+    let last = -1;
+    mv.renderer.setAnimationLoop((t) => {
+      // 按真实帧间隔转，刷新率高的屏幕上也是每秒 0.5 弧度；切回标签页时最多补 0.1 秒
+      const dt = last < 0 ? 0 : Math.min((t - last) / 1000, 0.1);
+      last = t;
+      mv.render(dt);
+    });
     await Promise.all(cards.map(async (c) => {
       const model = await this.library.load(c.work);
       if (token !== this.token) return;
@@ -108,13 +132,13 @@ export class MuseumPage implements Sheet {
       scene.add(model.object);
       const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 100);
       frameModel(camera, model.height);
+      if (model.failed) c.node.append(failedNote());
       c.preview.classList.add('ready');
       mv.add({ element: c.preview, scene, camera, tick: (dt) => { model.object.rotation.y += dt * 0.5; } });
     }));
   }
 
-  private card(team: Team, work: Work, i: number): Card {
-    const author = team.members.find((m) => m.id === work.authorId);
+  private card(team: Team, work: Work): Card {
     const preview = el('div', { className: 'mc-preview' });
     if (!LIVE_CARD_PREVIEWS) {
       preview.classList.add('ready');
@@ -128,8 +152,8 @@ export class MuseumPage implements Sheet {
     },
       preview,
       el('div', { className: 'mc-title display', textContent: work.title }),
-      el('div', { className: 'mc-by', textContent: `by @${author?.handle ?? 'unknown'}` }),
-      el('div', { className: 'mono', textContent: `No. ${String(i + 1).padStart(3, '0')} · ${formatTris(work.tris)}` }),
+      el('div', { className: 'mc-by', textContent: authorLine(work, team) }),
+      el('div', { className: 'mono', textContent: workNumber(work, team) }),
     );
     node.setAttribute('role', 'button');
     return { node, preview, work };

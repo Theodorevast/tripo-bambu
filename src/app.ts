@@ -63,9 +63,11 @@ export class App {
     window.__ready = true;
   }
 
-  navigate(route: Route): void {
+  // replace：替换当前这条历史记录（重定向用），后退时不会回到出错的地址又被弹回来
+  navigate(route: Route, opts: { replace?: boolean } = {}): void {
     const hash = toHash(route);
     if (location.hash === hash || (hash === '#/' && location.hash === '')) void this.queue(route);
+    else if (opts.replace) location.replace(hash);
     else location.hash = hash;
   }
 
@@ -95,7 +97,7 @@ export class App {
     const team = route.view === 'galaxy' ? null : this.teams.find((t) => t.id === route.teamId) ?? null;
     if (route.view !== 'galaxy' && !team) {
       toast('That team does not exist');
-      this.navigate({ view: 'galaxy' });
+      this.navigate({ view: 'galaxy' }, { replace: true });
       return;
     }
     // 同一团队的同一种页面之间切换（比如 Museum 里打开某件作品）不关页面
