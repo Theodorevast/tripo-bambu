@@ -1,5 +1,7 @@
 import type { PlanetStore } from './data/store';
 import type { Seed, Team } from './data/types';
+import { isCurrentRoute } from './lib/currentRoute';
+import { LatestQueue } from './lib/latestQueue';
 import { parseRoute, toHash, type Route } from './router';
 import type { World } from './scenes/world';
 import { GalaxyUi } from './ui/galaxyUi';
@@ -8,7 +10,8 @@ import { Topbar } from './ui/topbar';
 
 // 星球页上叠加的内容（作品、编辑器）和覆盖整屏的页面（Members、Museum）由 main.ts 装进来
 export interface PlanetLayer {
-  enter(team: Team): Promise<void>;
+  // 立即返回：展台马上摆好，模型在后台加载。路由不等模型（等了，加载期间 Back、Members 这些操作都会卡住）
+  enter(team: Team): void;
   leave(): void;
 }
 
@@ -30,7 +33,11 @@ export class App {
   museum: Sheet | null = null;
   onEdit: () => void = () => {};
   private currentTeamId: string | null = null;
-  private routing: Promise<void> = Promise.resolve();
+  // 路由排队：一次切换（镜头飞行）进行中又来了新的跳转，只留最新的一个，等这次结束后执行，中间的跳过
+  private readonly routes = new LatestQueue<Route>((route) => this.show(route), (err) => {
+    console.error(err);
+    toast('Something went wrong. Please try again.');
+  });
 
   constructor(world: World, root: HTMLElement, store: PlanetStore, you: Seed['you'], teams: Team[]) {
     this.world = world;
@@ -53,6 +60,11 @@ export class App {
 
   get currentTeam(): Team | null {
     return this.teams.find((t) => t.id === this.currentTeamId) ?? null;
+  }
+
+  // 有跳转正在处理（或排着）；自查脚本用它等路由处理完
+  get routing(): boolean {
+    return this.routes.busy;
   }
 
   async start(): Promise<void> {
@@ -82,22 +94,17 @@ export class App {
     this.world.updateTeam(team);
   }
 
-  // 路由串行处理：上一次切换（飞行、加载模型）结束后再处理下一次
+  // 返回的 Promise 在这次跳转（或取代它的更新的那次）处理完时 resolve
   private queue(route: Route): Promise<void> {
-    this.routing = this.routing
-      .then(() => this.show(route))
-      .catch((err: unknown) => {
-        console.error(err);
-        toast('Something went wrong. Please try again.');
-      });
-    return this.routing;
+    return this.routes.push(route);
   }
 
   private async show(route: Route): Promise<void> {
     const team = route.view === 'galaxy' ? null : this.teams.find((t) => t.id === route.teamId) ?? null;
     if (route.view !== 'galaxy' && !team) {
       toast('That team does not exist');
-      this.navigate({ view: 'galaxy' }, { replace: true });
+      // 地址栏已经换成别的了（用户在排队期间又去了别处，那次跳转已经排上）：只提示，不把新地址改回星系
+      if (isCurrentRoute(route)) this.navigate({ view: 'galaxy' }, { replace: true });
       return;
     }
     // 同一团队的同一种页面之间切换（比如 Museum 里打开某件作品）不关页面
@@ -120,7 +127,7 @@ export class App {
       this.currentTeamId = team.id;
       this.topbar.showTeam(team, team.id === this.you.teamId);
       await this.world.focus(team.id);
-      await this.planetLayer?.enter(team);
+      this.planetLayer?.enter(team); // 不等模型
     }
     if (route.view === 'members') await this.members?.open(team, route);
     if (route.view === 'museum') await this.museum?.open(team, route);

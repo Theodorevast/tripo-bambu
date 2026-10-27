@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import type { Sheet } from '../app';
 import { ModelLibrary, thumbUrl } from '../assets/models';
 import type { Team, Work } from '../data/types';
+import { isCurrentRoute } from '../lib/currentRoute';
 import { frameModel } from '../museum/framing';
 import { MultiView } from '../museum/multiview';
 import { Viewer } from '../museum/viewer';
@@ -63,9 +64,10 @@ export class MuseumPage implements Sheet {
     }
     this.viewer.close();
     if (workId) {
-      // 地址里的作品不存在：网格已经显示着，只把地址就地改成网格的（不加历史记录，后退不会又回到坏地址）
+      // 地址里的作品不存在：网格已经显示着，只把地址就地改成网格的（不加历史记录，后退不会又回到坏地址）。
+      // 地址栏已经换成别的了（排队期间用户又去了别处，比如 Members）就不改，免得把那条新记录改成 Museum 的地址
       toast('That work is not in this museum');
-      history.replaceState(history.state, '', toHash({ view: 'museum', teamId: team.id }));
+      if (isCurrentRoute(route)) history.replaceState(history.state, '', toHash({ view: 'museum', teamId: team.id }));
     }
   }
 
