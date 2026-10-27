@@ -32,10 +32,13 @@ check('Delete 删除作品', !(await page.evaluate(() => window.__app.placedIds(
 
 await page.locator('.tray-item', { hasText: target.title }).click();
 await page.waitForTimeout(400);
+// 近景取景下星球中心落在作品栏底下：往上 250 px 点在星球表面上，先确认那一点没有界面挡着
 const center = await page.evaluate((id) => window.__app.planetScreenPos(id), team.id);
-await page.mouse.move(center.x, center.y);
+const drop = { x: center.x, y: center.y - 250 };
+check('摆放点上没有界面遮挡', await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id === 'stage', drop));
+await page.mouse.move(drop.x, drop.y);
 await page.waitForTimeout(100);
-await page.mouse.click(center.x, center.y);
+await page.mouse.click(drop.x, drop.y);
 await page.waitForTimeout(600);
 check('从作品栏摆回星球', (await page.evaluate(() => window.__app.placedIds())).includes(target.id));
 
