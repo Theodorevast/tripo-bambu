@@ -157,7 +157,7 @@ interface PlanetRecipe {
 
 - 位置：`dir × (max(heightAt(dir), 海平面半径) + 展台高度)`。落在水面上的作品立在一个漂浮的展台上。
 - 朝向：先用 `Quaternion.setFromUnitVectors((0,1,0), dir)` 把模型的「上」对准法线，再绕 `dir` 转 `yaw`。
-- 统一尺寸：按包围盒把每个模型缩放到同一个高度（基础半径 10 的星球上高 2.0，可调），再乘 `scale`；模型水平居中，底部贴住展台。所有作品一样高，大模型就不会把小模型衬成一个小点。
+- 统一尺寸：按包围盒把每个模型的最长边缩放到同一个长度（基础半径 10 的星球上为 2.0，可调），再乘 `scale`；模型水平居中，底部贴住展台。所有作品一样大，大模型就不会把小模型衬成一个小点。用最长边而不用高度，是因为按高度统一会把扁平的模型（比如一辆车）放得非常宽。
 - 拾取：射线直接打星球网格。顶点是在 CPU 上移动的，所以打中的就是真实地表；网格约 2 万面，不需要 BVH。把打中的点归一化，就得到 `dir`。
 
 ## 5. 数据
@@ -193,7 +193,7 @@ interface Team {
 }
 ```
 
-- `src/data/seed.json`：所有团队的初始数据。作品作者用用户表里的名字，团队名、口号和其余成员是虚构的。每个有作品的团队放 3–4 件作品，团队数由作品总数决定（4–6 个）。另有 10 个 under construction 的团队。
+- `src/data/seed.json`：所有团队的初始数据，由 `scripts/build-seed.mjs` 生成，输入是 `src/data/teams.template.json`（16 个虚构团队的名字、口号、配色、星球参数和虚构成员）和 `src/data/works.json`（作品清单，由第 6 节的处理脚本生成；GLB 到之前是占位作品）。作品作者用用户表里的名字，团队名、口号和其余成员是虚构的。每个有作品的团队放 3–4 件作品，团队数 = 作品总数 ÷ 3.5 四舍五入，最多 6 个（10–12 件作品时是 3 个，13 件起是 4–6 个）。同一作者的作品放进同一个团队。另有 10 个 under construction 的团队。
 - 星系里的位置不存储，由团队在列表里的顺序确定性地算出来。
 - `PlanetStore` 接口：
 
@@ -224,6 +224,7 @@ lighthouse.glb,Old Lighthouse,mia,
 2. 输出到 `public/models/<workId>.glb`。
 3. 用 Playwright 打开一个只渲染单个模型的页面，在中性背景上截一张 512×512 的缩略图，存成 `public/thumbs/<workId>.webp`。
 4. 写 `models-in/prep-report.json`：每个文件处理前后的大小和面数。面数超过 50 万，或者处理后仍然超过 15 MB 的，在报告里标出来，由用户决定要不要换。
+5. 写 `src/data/works.json`，然后运行 `npm run seed` 重新生成 `seed.json`。
 
 运行时用 `GLTFLoader` + `MeshoptDecoder` 加载。
 
@@ -251,7 +252,8 @@ public/models/  public/thumbs/
 ```
 
 - 技术栈照搬万圣节项目：Vite 8、TypeScript、three 0.186（`three/webgpu`）、vitest、playwright-core。
-- 星系和星球共用一个渲染器；Museum 页的预览另用一个 canvas。
+- 星系和星球共用一个渲染器；Museum 页的卡片预览共用一个 canvas，大图查看器另用一个 canvas。
+- 上面是主要模块；完整的文件清单以实现计划（`docs/superpowers/plans/2026-10-27-community-planets.md`）为准。
 - 所有自定义材质都用 TSL 写。`WebGPURenderer` 不支持 `ShaderMaterial`、`RawShaderMaterial`、`onBeforeCompile` 和 `EffectComposer`，所以用 GLSL 写的现成星球代码只能参考，不能直接拿来用。
 - 界面是原生 HTML/CSS，盖在 canvas 上面。
 
@@ -278,7 +280,8 @@ seed.json + 本地修改 → PlanetStore → Team / PlanetRecipe → generate �
 | 浏览器不支持 WebGPU | three.js 自动改用 WebGL2 |
 | 拖进来的文件不是 GLB，或者超过 100 MB | 拒绝，并显示提示 |
 | 本地存储不能用 | 修改只存在内存里，刷新后恢复初始数据 |
-| 地址里的团队或作品不存在 | 回到星系，并显示提示 |
+| 地址里的团队不存在 | 回到星系，并显示提示 |
+| 地址里的作品不在这个团队的 Museum 里 | 留在该团队的 Museum 网格，并显示提示 |
 
 ## 10. 测试
 
@@ -344,7 +347,7 @@ seed.json + 本地修改 → PlanetStore → Team / PlanetRecipe → generate �
 
 1. 演示身份是第一个有作品的团队里的一位虚构成员
 2. 五套星球预设及其配色（第 4.2 节）
-3. 所有作品统一高度（2.0，可调），缩放范围 0.5–2 倍，旋转每次 15°
+3. 所有作品统一最长边（2.0，可调），缩放范围 0.5–2 倍，旋转每次 15°
 4. 从电脑拖进来的 GLB 不写进存档，也不进 Museum
 5. 不做作品重叠检测，不给模型减面；每件作品在星球上最多出现一次
 6. 加「Reset demo」按钮和 hash 路由
