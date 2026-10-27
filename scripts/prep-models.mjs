@@ -1,10 +1,11 @@
-// 处理社区作品：压缩 GLB（不减面）、截缩略图、写 works.json 和处理报告
+// 处理社区作品：压缩 GLB（默认不减面）、截缩略图、写 works.json 和处理报告
 // 默认读 models-in/（GLB + works.csv），输出到 public/models、public/thumbs、src/data/works.json
 // 测试时可用环境变量换目录：PREP_IN、PREP_OUT、WORKS_OUT
+// 可选减面：npm run prep -- --max-tris=300000，面数超过这个值的模型按比例减到它附近（spec 6 默认不减面，用户同意后才开）
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { dedup, meshopt, prune, textureCompress, weld } from '@gltf-transform/functions';
-import { MeshoptEncoder } from 'meshoptimizer';
+import { dedup, meshopt, prune, simplify, textureCompress, weld } from '@gltf-transform/functions';
+import { MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 import { parseCsv, slugify } from '../src/lib/csv.ts';
 import { launch, startServer } from './lib/browser.mjs';
@@ -16,6 +17,13 @@ const WORKS = process.env.WORKS_OUT ?? 'src/data/works.json';
 const MAX_TRIS = 500_000;
 const MAX_MB = 15;
 const MB = 1024 * 1024;
+const maxTrisArg = process.argv.find((a) => a.startsWith('--max-tris='));
+const TARGET_TRIS = maxTrisArg ? Number(maxTrisArg.slice('--max-tris='.length)) : Infinity;
+if (!(TARGET_TRIS > 0)) {
+  console.error('错误：--max-tris 要写成正整数，比如 --max-tris=300000。已停止，没有写任何文件。');
+  process.exit(1);
+}
+if (Number.isFinite(TARGET_TRIS)) await MeshoptSimplifier.ready;
 
 // 给报告里的一件作品记一个问题；同一件可能有好几个问题，用分号连起来
 function addProblem(entry, error) {
@@ -48,12 +56,17 @@ for (const row of rows) {
   while (used.has(id)) id = `${id}-2`;
   used.add(id);
   let doc;
+  let trisIn = 0;
   try {
     doc = await io.read(src);
+    trisIn = countTris(doc);
+    // 误差上限是模型尺寸的 1%：减不到目标面数时宁可多留一些，也不让轮廓变形
+    const reduce = trisIn > TARGET_TRIS ? [simplify({ simplifier: MeshoptSimplifier, ratio: TARGET_TRIS / trisIn, error: 0.01 })] : [];
     await doc.transform(
       dedup(),
       prune(),
       weld(),
+      ...reduce,
       textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [2048, 2048] }),
       meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
     );
@@ -68,13 +81,13 @@ for (const row of rows) {
   const tris = countTris(doc);
   const before = statSync(src).size;
   const after = statSync(out).size;
-  const entry = { id, file: row.file, tris, mbBefore: +(before / MB).toFixed(2), mbAfter: +(after / MB).toFixed(2), flag: tris > MAX_TRIS || after > MAX_MB * MB };
+  const entry = { id, file: row.file, tris, ...(tris < trisIn ? { trisBefore: trisIn } : {}), mbBefore: +(before / MB).toFixed(2), mbAfter: +(after / MB).toFixed(2), flag: tris > MAX_TRIS || after > MAX_MB * MB };
   // spec 6 要求贴图一律 WebP；textureCompress 不认识的格式（比如 KTX2）会原样留下
   const notWebp = [...new Set(doc.getRoot().listTextures().map((t) => t.getMimeType()).filter((m) => m !== 'image/webp'))];
   if (notWebp.length) addProblem(entry, `texture not converted to webp (${notWebp.join(', ')})`);
   report.push(entry);
   works.push({ id, title: row.title || id, author: row.author || 'unknown', file: `${id}.glb`, thumb: `${id}.webp`, tris, ...(row.description ? { description: row.description } : {}) });
-  console.log(`${entry.flag ? '⚠' : '✓'} ${row.file} → ${id}.glb  ${tris.toLocaleString('en-US')} tris  ${(before / MB).toFixed(1)} → ${(after / MB).toFixed(1)} MB${entry.error ? `  ${entry.error}` : ''}`);
+  console.log(`${entry.flag ? '⚠' : '✓'} ${row.file} → ${id}.glb  ${tris < trisIn ? `${trisIn.toLocaleString('en-US')} → ` : ''}${tris.toLocaleString('en-US')} tris  ${(before / MB).toFixed(1)} → ${(after / MB).toFixed(1)} MB${entry.error ? `  ${entry.error}` : ''}`);
 }
 
 // 缩略图：Vite 开发服务器把 OUT 当作 public 目录，逐个打开 dev/thumb.html 截图
