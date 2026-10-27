@@ -22,10 +22,47 @@ export function thumbUrl(file: string): string {
   return `${import.meta.env.BASE_URL}thumbs/${file}`;
 }
 
+// 贴图的各向异性过滤：斜着看的表面（侧面、顶面、地面）不糊。三个渲染器（主画面、Museum 卡片、查看器）共用一个值：
+// World.create 在主渲染器初始化后设成 min(16, 它支持的最大值)；设之前是 1，等于不开（three 的默认）
+let anisotropy = 1;
+
+export function setModelAnisotropy(value: number): void {
+  anisotropy = Math.max(1, Math.floor(value));
+}
+
+// 模型里所有材质用到的贴图（去重；材质可以是数组）
+export function modelTextures(root: THREE.Object3D): THREE.Texture[] {
+  const found = new Set<THREE.Texture>();
+  root.traverse((o) => {
+    const material = (o as THREE.Mesh).material;
+    if (!material) return;
+    for (const m of Array.isArray(material) ? material : [material]) {
+      for (const value of Object.values(m)) if ((value as THREE.Texture | null)?.isTexture) found.add(value as THREE.Texture);
+    }
+  });
+  return [...found];
+}
+
+export function applyAnisotropy(root: THREE.Object3D, value: number): void {
+  for (const texture of modelTextures(root)) texture.anisotropy = value;
+}
+
+// meshopt 解码放进 Worker（GLTFLoader 有 decodeGltfBufferAsync 就走它），解压几何不占主线程。整个页面开一次，node 里跑测试时没有 Worker
+let decoderWorkers = false;
+function startDecoderWorkers(): void {
+  if (decoderWorkers || typeof Worker === 'undefined') return;
+  decoderWorkers = true;
+  MeshoptDecoder.useWorkers(2);
+}
+
 // 每个渲染器用自己的实例：GPU 资源不跨渲染器共享
 export class ModelLibrary {
   private readonly loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   private readonly cache = new Map<string, Promise<THREE.Object3D>>();
+
+  constructor() {
+    startDecoderWorkers();
+  }
 
   async load(work: Pick<Work, 'id' | 'file'>): Promise<LoadedModel> {
     if (!work.file) return normalize(placeholderModel(work.id), false);
@@ -40,7 +77,11 @@ export class ModelLibrary {
   private fetch(url: string): Promise<THREE.Object3D> {
     let p = this.cache.get(url);
     if (!p) {
-      p = this.loader.loadAsync(url).then((gltf) => gltf.scene);
+      // 各向异性要在第一次上传贴图之前设好（WebGL2 在上传时设采样参数，WebGPU 按它建采样器）
+      p = this.loader.loadAsync(url).then((gltf) => {
+        applyAnisotropy(gltf.scene, anisotropy);
+        return gltf.scene;
+      });
       this.cache.set(url, p);
       p.catch(() => this.cache.delete(url));
     }

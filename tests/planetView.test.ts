@@ -5,6 +5,7 @@ import type { Team } from '../src/data/types';
 import { PlanetObject } from '../src/planet/planetObject';
 import { BASE_RADIUS, PRESETS } from '../src/planet/presets';
 import { PlanetView, plinthRadius } from '../src/scenes/planetView';
+import type { Entrance, Stage } from '../src/scenes/stager';
 import type { World } from '../src/scenes/world';
 
 const team: Team = {
@@ -30,15 +31,18 @@ const other: Team = {
   planet: { ...team.planet, seed: 8, preset: 'glacier' },
 };
 
-// PlanetView 只用到 world.planets 和 world.rayFrom；home 是星球在星系里的位置（和 World.setTeams 一样，星球的 group 也放到那里）
-function fakeWorld(home = new THREE.Vector3()): World {
+// 新模型立刻放行（真实页面里 Stager 要等贴图上传、着色器编译，再排到某一帧才挂上）
+const instantStage: Stage = { precompile: async () => {}, prepare: async () => ({ start() {}, cancel() {} }) };
+
+// PlanetView 只用到 world.planets、world.stage 和 world.rayFrom；home 是星球在星系里的位置（和 World.setTeams 一样，星球的 group 也放到那里）
+function fakeWorld(home = new THREE.Vector3(), stage: Stage = instantStage): World {
   const entries = [team, other].map((t, i) => {
     const planet = new PlanetObject(t.planet);
     const at = i === 0 ? home : new THREE.Vector3(60, 0, 0);
     planet.group.position.copy(at);
     return [t.id, { team: t, planet, hit: new THREE.Mesh(), home: at }] as const;
   });
-  return { planets: new Map(entries) } as unknown as World;
+  return { planets: new Map(entries), stage } as unknown as World;
 }
 
 // 进入星球并等这次进入的模型都挂好
@@ -264,5 +268,56 @@ describe('PlanetView：模型在后台加载，进入星球不等它们', () => 
     const m = models.release('w1');
     expect(await placing).toBeNull();
     expect(m.object.parent).toBeNull();
+  });
+});
+
+// 准备阶段（贴图上传、着色器编译、排队）由测试手动放行：pending 里是每次 prepare 的模型、alive 和放行函数
+function manualStage() {
+  const pending: Array<{ object: THREE.Object3D; alive: () => boolean; resolve: (e: Entrance | null) => void }> = [];
+  const stage: Stage = {
+    precompile: async () => {},
+    prepare: (object, alive = () => true) => new Promise((resolve) => pending.push({ object, alive, resolve })),
+  };
+  return { stage, pending };
+}
+
+describe('PlanetView：模型先准备好（贴图、着色器）再挂上，挂上后缩放淡入', () => {
+  it('准备好之前模型不挂、展台还是半透明；轮到它时挂上、展台变实，并开始缩放淡入', async () => {
+    const { stage, pending } = manualStage();
+    const view = new PlanetView(fakeWorld(undefined, stage));
+    view.enter(team);
+    await settle();
+    expect(pending).toHaveLength(2);
+    const w1 = view.placed.get('w1')!;
+    expect(w1.model).toBeNull();
+    expect(pending[0].object.parent).toBeNull();
+    expect(opacity(view, 'w1')).toBe(0.4);
+    const entrance = { start: vi.fn(), cancel: vi.fn() };
+    pending[0].resolve(entrance);
+    await settle();
+    expect(w1.model?.object).toBe(pending[0].object);
+    expect(pending[0].object.parent).toBe(w1.scaler);
+    expect(opacity(view, 'w1')).toBe(1);
+    expect(entrance.start).toHaveBeenCalledOnce();
+    expect(entrance.cancel).not.toHaveBeenCalled();
+  });
+
+  it('准备期间离开星球：alive() 变成 false；准备完了也不挂，交回的 Entrance 被取消', async () => {
+    const { stage, pending } = manualStage();
+    const world = fakeWorld(undefined, stage);
+    const view = new PlanetView(world);
+    view.enter(team);
+    await settle();
+    expect(pending[0].alive()).toBe(true);
+    view.leave();
+    expect(pending[0].alive()).toBe(false);
+    const late = { start: vi.fn(), cancel: vi.fn() };
+    pending[0].resolve(late);
+    pending[1].resolve(null); // Stager 自己发现不要了
+    await view.loaded;
+    expect(late.cancel).toHaveBeenCalledOnce();
+    expect(late.start).not.toHaveBeenCalled();
+    expect(pending[0].object.parent).toBeNull();
+    expect(world.planets.get('t')!.planet.works.children).toHaveLength(0);
   });
 });

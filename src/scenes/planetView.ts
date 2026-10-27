@@ -23,6 +23,14 @@ export function plinthRadius(footprint: number): number {
   return Math.max(0.55, footprint * 0.95);
 }
 
+const plinthGeometry = () => new THREE.CylinderGeometry(1, 1.06, PLINTH_DEPTH, 40);
+
+// 展台材质：模型挂上之前半透明（spec 2.2），挂上后不透明。emissiveIntensity 从 0 开始（自发光颜色是黑的，看不出区别）：
+// three 把数值属性按「是不是 0」算进着色器的缓存键，从 0 开始，换成不透明时才对得上预热过的那份（见构造函数）
+function plinthMaterial(color: THREE.ColorRepresentation, loading: boolean, glow = 0): THREE.MeshStandardNodeMaterial {
+  return new THREE.MeshStandardNodeMaterial({ color, roughness: 0.55, metalness: 0.15, transparent: loading, opacity: loading ? 0.4 : 1, emissiveIntensity: glow });
+}
+
 // 射线从起点到进入星球遮挡球的距离，打不中为 Infinity。遮挡球以星球中心为心、半径取最低可能的地形，
 // 比这个距离更远的东西一定在地表背后
 function occluderDistance(ray: THREE.Ray, entry: PlanetEntry): number {
@@ -40,9 +48,16 @@ export class PlanetView {
   private entry: PlanetEntry | null = null;
   private loading: Promise<void> = Promise.resolve();
   private readonly world: World;
+  // 展台的三种状态（加载中半透明、不透明、不透明且高亮）各编译一份管线，这组网格一直留着、不挂上场景：
+  // 进星球时摆出的展台、模型挂上时换成不透明的展台都直接用现成的，不在那一帧同步编译
+  private readonly warmPlinths = new THREE.Group();
 
   constructor(world: World) {
     this.world = world;
+    for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
+      this.warmPlinths.add(new THREE.Mesh(plinthGeometry(), plinthMaterial('#d9b77e', loading, glow)));
+    }
+    world.stage.precompile(this.warmPlinths).catch((err: unknown) => console.error(err));
   }
 
   get planet(): PlanetEntry | null {
@@ -82,10 +97,7 @@ export class PlanetView {
     const root = new THREE.Group();
     const scaler = new THREE.Group();
     // 模型加载完之前展台是半透明的（spec 2.2）
-    const plinth = new THREE.Mesh(
-      new THREE.CylinderGeometry(1, 1.06, PLINTH_DEPTH, 40),
-      new THREE.MeshStandardNodeMaterial({ color: this.team?.color ?? '#d9b77e', roughness: 0.55, metalness: 0.15, transparent: true, opacity: 0.4 }),
-    );
+    const plinth = new THREE.Mesh(plinthGeometry(), plinthMaterial(this.team?.color ?? '#d9b77e', true));
     plinth.position.y = PLINTH_HEIGHT - PLINTH_DEPTH / 2;
     const proxy = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicNodeMaterial());
     proxy.visible = false;
@@ -100,16 +112,25 @@ export class PlanetView {
     const model = await this.library.load(work);
     // 加载期间被移除了（编辑器删掉、离开星球、换了团队，或者离开后又回来、这件已经重新摆过）：按对象比，不按 id 找，
     // 迟到的模型就不会挂到别的团队或者同一件作品的新展台上
-    if (this.placed.get(work.id) !== pw) return null;
+    const current = () => this.placed.get(work.id) === pw;
+    if (!current()) return null;
+    // 挂上之前：贴图逐帧上传、着色器在后台编译好，再排队（每帧最多挂一个）。准备期间被移除了就到此为止
+    const entrance = await this.world.stage.prepare(model.object, current);
+    if (!entrance) return null;
+    if (!current()) {
+      entrance.cancel();
+      return null;
+    }
     pw.model = model;
     model.object.position.y = PLINTH_HEIGHT;
     scaler.add(model.object);
     this.sizeParts(pw, model.height, model.footprint);
     this.updateTransform(pw); // 展台半径要等模型加载完才知道，重新贴地
-    const plinthMaterial = plinth.material as THREE.MeshStandardNodeMaterial;
-    plinthMaterial.opacity = 1;
-    plinthMaterial.transparent = false;
-    plinthMaterial.needsUpdate = true;
+    const solid = plinth.material as THREE.MeshStandardNodeMaterial;
+    solid.opacity = 1;
+    solid.transparent = false;
+    solid.needsUpdate = true;
+    entrance.start(); // 缩放加淡入
     return pw;
   }
 

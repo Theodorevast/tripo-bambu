@@ -1,13 +1,16 @@
 import * as THREE from 'three/webgpu';
+import { setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { LOD_HIGH, LOD_LOW } from '../planet/generate';
-import { SHOWCASE_POLE } from '../planet/placement';
 import { PlanetObject } from '../planet/planetObject';
 import { BASE_RADIUS } from '../planet/presets';
 import { CameraRig, type Framing } from './camera';
 import { galaxyPositions } from './layout';
 import { addStudioLights } from './lights';
+import { useLook } from './look';
+import { galaxyFraming, planetFraming } from './shots';
 import { createSky } from './sky';
+import { compileUnculled, Stager } from './stager';
 
 export interface PlanetEntry {
   team: Team;
@@ -16,51 +19,31 @@ export interface PlanetEntry {
   home: THREE.Vector3; // 星球在星系里的位置
 }
 
-const POLE = new THREE.Vector3(...SHOWCASE_POLE);
-
-// 星系全景：离中心 270、仰角 30°，画面中心压到星系中心下方 25（lift 为负）——
-// 离镜头近的星球在画面里偏低，整片星系往上提一点，上下才匀称。
-// 按 1440×900（宽高比 1.6）算：自转一整圈里 14 颗星球连光环都在画面里，横向约占 104–1336 px、纵向约占 107–858 px
-export const GALAXY_VIEW: Framing = {
-  target: new THREE.Vector3(0, 0, 0),
-  position: new THREE.Vector3(0, Math.sin(Math.PI / 6), Math.cos(Math.PI / 6)).multiplyScalar(270),
-  lift: -25,
-  minDistance: 140,
-  maxDistance: 500,
-  autoRotate: true,
-};
-const GALAXY_ASPECT = 1.6; // GALAXY_VIEW 是按这个宽高比调的；更窄的窗口把镜头按比例拉远，左右两边的星球才不出画
-
-export function galaxyFraming(aspect: number): Framing {
-  const k = Math.max(1, GALAXY_ASPECT / aspect);
-  const v = GALAXY_VIEW;
-  return { ...v, position: v.position.clone().multiplyScalar(k), minDistance: v.minDistance * k, maxDistance: v.maxDistance * k };
-}
-
-// 星球视图（小王子式取景）：镜头沿展示方向、离星球中心 PLANET_DISTANCE，平视星球再抬头 PLANET_LIFT，
-// 星球的上缘落在画面中上部，初始作品（showcaseDirs）就站在这道地平线上、衬着星空，星球下半部分可以出画。
-// 镜头仍绕星球中心转，远近限制按到星球中心的距离算
-export const PLANET_DISTANCE = 24;
-export const PLANET_LIFT = 8.5;
-export function planetFraming(home: THREE.Vector3): Framing {
-  return { target: home.clone(), position: home.clone().addScaledVector(POLE, PLANET_DISTANCE), lift: PLANET_LIFT, minDistance: 15, maxDistance: 70, autoRotate: false };
-}
-
 // 光环浓淡：星球视图里聚焦星球的光环压到很淡（近景里它会横穿画面），别的星球的光环也压一些；回星系全部恢复
 export const RING_FOCUSED = 0.2;
 export const RING_OTHERS = 0.4;
 const RING_FADE = 4; // 每秒逼近目标的速率：约 1 秒淡完，和 1.2 秒的镜头飞行同时进行
+
+// 像素预算：主画面按「总像素封顶」定像素比，以后加后处理时靠它控制开销。
+// 例：1440×900 的 2 倍屏 → √(3110400 / 1296000) ≈ 1.55；1920×1080 的 1 倍屏不受影响（1）
+export const MAX_RENDER_PIXELS = 1920 * 1080 * 1.5;
+
+export function budgetPixelRatio(width: number, height: number, dpr: number): number {
+  return Math.min(dpr, 2, Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, width * height)));
+}
 
 // 3D 世界：一个渲染器、一个场景，星系里所有星球都在里面；聚焦就是把镜头飞到某颗星球前面
 export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
   readonly rig: CameraRig;
+  readonly stage: Stager; // 新模型上场：贴图逐帧上传、着色器后台编译、每帧最多挂一个、缩放加淡入
   readonly planets = new Map<string, PlanetEntry>();
   readonly frameHooks = new Set<(dt: number) => void>();
   focused: PlanetEntry | null = null;
   hovered: PlanetEntry | null = null;
   paused = false; // Museum 打开时主画面被盖住，停止渲染
+  private warming = false; // warmUp() 预编译期间不画：画了就会在主线程上同步编译
   private readonly halo: THREE.Mesh;
   private readonly ringGoals = new Map<PlanetObject, number>(); // 各星球光环要淡到多少，frame() 里逐帧逼近
   private readonly timer = new THREE.Timer();
@@ -70,6 +53,7 @@ export class World {
   private constructor(renderer: THREE.WebGPURenderer) {
     this.renderer = renderer;
     this.rig = new CameraRig(renderer.domElement);
+    this.stage = new Stager(renderer, this.scene, this.rig.camera);
     this.scene.add(createSky());
     addStudioLights(this.scene);
     // 悬停光圈：每帧转到正对镜头
@@ -82,14 +66,24 @@ export class World {
     this.rig.jump(this.galaxyView());
     this.resize();
     addEventListener('resize', () => this.resize());
+    // 标签页切到后台：停掉主循环；回来时重新开始，计时器从这一刻算起，第一帧的 dt 不会把后台那段时间补上
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        renderer.setAnimationLoop(null);
+        return;
+      }
+      this.timer.reset();
+      renderer.setAnimationLoop((t) => this.frame(t));
+    });
     renderer.setAnimationLoop((t) => this.frame(t));
   }
 
   static async create(canvas: HTMLCanvasElement): Promise<World> {
     const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
     await renderer.init();
-    renderer.toneMapping = THREE.NeutralToneMapping;
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    useLook(renderer);
+    // 模型贴图的各向异性：三个渲染器共用这个值（WebGPU 固定支持 16；WebGL2 看扩展，没有时是 0）
+    setModelAnisotropy(Math.min(16, renderer.getMaxAnisotropy()));
     return new World(renderer);
   }
 
@@ -109,6 +103,21 @@ export class World {
       this.scene.add(planet.group, hit);
       this.planets.set(team.id, { team, planet, hit, home });
     });
+  }
+
+  // 开场前把场景里所有东西（星球、天空、悬停光圈）的着色器在后台编译好。编译期间不画（画布保持黑色，界面照常能点）；
+  // 不预编译的话第一帧在主线程上同步编译：实测 WebGL2 一个任务约 0.5 秒，WebGPU 约 0.15 秒、画面停约 0.4 秒。
+  // 每颗星球（和天空、光圈）各调一次 compileAsync、同时进行：一次 compileAsync 里的着色器是一个编完再编下一个，
+  // 二十多个排队在 WebGL2 上要 0.6–2 秒；分开同时编，驱动在后台并行编译。几颗星球共用的着色器可能各编一遍，结果一样
+  async warmUp(): Promise<void> {
+    this.warming = true;
+    this.halo.visible = true; // 悬停光圈平时藏着，第一次悬停才画：一起编译
+    try {
+      await Promise.all(this.scene.children.map((o) => compileUnculled(this.renderer, o, this.rig.camera, this.scene)));
+    } finally {
+      this.halo.visible = this.hovered !== null;
+      this.warming = false;
+    }
   }
 
   updateTeam(team: Team): void {
@@ -171,6 +180,11 @@ export class World {
     prev?.planet.setDetail(LOD_LOW);
   }
 
+  // 镜头表（shots.ts）改了（?tune 面板）：当前视图按新参数重新取景，立刻生效
+  applyShots(): void {
+    this.rig.reframe(this.focused ? planetFraming(this.focused.home) : this.galaxyView());
+  }
+
   // 定下各星球光环的目标浓淡；实际的 setRingStrength 在 frame() 里逐帧做，镜头飞行的同时慢慢淡入淡出
   private fadeRings(focused: PlanetEntry | null): void {
     for (const e of this.planets.values()) {
@@ -190,16 +204,18 @@ export class World {
 
   private frame(time: number): void {
     this.timer.update(time);
-    const dt = Math.min(this.timer.getDelta(), 0.1);
+    // 夹到 0–0.1 秒：卡了一下也不让动画一步跳太远。切回标签页时计时器已经重置，第一帧的 dt 很小（偶尔是负的，夹成 0）
+    const dt = THREE.MathUtils.clamp(this.timer.getDelta(), 0, 0.1);
     this.rig.update(dt);
     this.stepRings(dt);
+    this.stage.tick(dt);
     if (this.hovered) {
       this.halo.position.copy(this.hovered.home);
       this.halo.scale.setScalar(BASE_RADIUS * 1.55);
       this.halo.quaternion.copy(this.rig.camera.quaternion);
     }
     for (const hook of this.frameHooks) hook(dt);
-    if (!this.paused) this.renderer.render(this.scene, this.rig.camera);
+    if (!this.paused && !this.warming) this.renderer.render(this.scene, this.rig.camera);
   }
 
   // 按当前窗口的宽高比取星系全景（窗口变化后下一次回星系才生效，不在用户拖动、缩放时挪镜头）
@@ -208,6 +224,7 @@ export class World {
   }
 
   private resize(): void {
+    this.renderer.setPixelRatio(budgetPixelRatio(innerWidth, innerHeight, devicePixelRatio || 1));
     this.renderer.setSize(innerWidth, innerHeight, false);
     this.rig.resize(innerWidth, innerHeight);
   }

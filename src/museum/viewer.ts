@@ -3,6 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ModelLibrary } from '../assets/models';
 import type { Team, Work } from '../data/types';
 import { addStudioLights } from '../scenes/lights';
+import { useLook } from '../scenes/look';
+import { compileUnculled } from '../scenes/stager';
 import { el } from '../ui/dom';
 import { workInfo } from '../ui/workCard';
 import { fitDistance, frameModel } from './framing';
@@ -86,10 +88,13 @@ export class Viewer {
     const renderer = await this.rendererReady;
     const model = await this.library.load(work);
     if (token !== this.token) return;
+    // 挂上场景之前在后台编译好着色器、传好贴图和几何：第一帧不在主线程上同步编译（这期间舞台显示 Loading）
+    frameModel(this.camera, model.height);
+    await compileUnculled(renderer, model.object, this.camera, this.scene);
+    if (token !== this.token) return;
     if (model.failed) this.showInfo(work, team, true);
     this.current = model.object;
     this.scene.add(model.object);
-    frameModel(this.camera, model.height);
     const controls = this.controls!;
     controls.target.set(0, model.height * 0.5, 0);
     controls.update();
@@ -102,8 +107,13 @@ export class Viewer {
     const renderer = new THREE.WebGPURenderer({ canvas: this.canvas, antialias: true, alpha: true });
     await renderer.init();
     renderer.setClearColor(0x000000, 0);
-    renderer.toneMapping = THREE.NeutralToneMapping;
+    useLook(renderer);
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    // 标签页切到后台：停掉查看器的循环；回来时还开着、模型也在，就接着画（OrbitControls 的阻尼按帧算，没有时间差要补）
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) renderer.setAnimationLoop(null);
+      else if (this.isOpen && this.current) renderer.setAnimationLoop(() => this.frame(renderer));
+    });
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
     this.controls.enablePan = false;

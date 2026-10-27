@@ -4,7 +4,7 @@ import templateJson from '../src/data/teams.template.json';
 import { activeTeamCount, ARC_FAN_MAX, ARC_POLAR, assembleSeed, FRONT_POLAR, memberId, showcaseDirs, UNDER_CONSTRUCTION, type Template, type WorkInput } from '../src/lib/assemble';
 import { PLINTH_HEIGHT, placementTransform, SHOWCASE_POLE, SHOWCASE_UP, WORK_SIZE } from '../src/planet/placement';
 import { BASE_RADIUS, PRESETS } from '../src/planet/presets';
-import { PLANET_DISTANCE } from '../src/scenes/world';
+import { SHOTS } from '../src/scenes/shots';
 
 const template = templateJson as unknown as Template;
 const works = (n: number, authors = n): WorkInput[] =>
@@ -130,7 +130,7 @@ describe('showcaseDirs', () => {
   const right = pole.clone().negate().cross(up); // 到达镜头的屏幕右方
   const polarOf = (d: [number, number, number]) => new THREE.Vector3(...d).angleTo(pole);
   const fanOf = (d: [number, number, number]) => { const v = new THREE.Vector3(...d); return Math.atan2(v.dot(right), v.dot(up)); };
-  const eye = pole.clone().multiplyScalar(PLANET_DISTANCE); // 到达镜头（星球本地坐标）
+  const eye = pole.clone().multiplyScalar(SHOTS.planet.distance); // 到达镜头（星球本地坐标）
   const maxAmp = Math.max(...Object.values(PRESETS).map((p) => p.amp));
 
   it('n 个方向在半径 10 的星球上两两相距超过 √2 × WORK_SIZE：两件作品最大的展台（半径 ≈ 0.95 × √2/2 × WORK_SIZE）也碰不到', () => {

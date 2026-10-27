@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { useLook } from '../scenes/look';
 
 // 一个 canvas 画多个小视口，每个视口跟着页面上一个元素走（scissor）
 // WebGPU 的 render() 在 autoClear 打开时会清空整张画布（scissor 管不住 loadOp clear），
@@ -25,7 +26,7 @@ export class MultiView {
     await renderer.init();
     renderer.autoClear = false;
     renderer.setClearColor(0x000000, 0);
-    renderer.toneMapping = THREE.NeutralToneMapping;
+    useLook(renderer);
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     return new MultiView(renderer);
   }

@@ -8,6 +8,7 @@ import { MultiView } from '../museum/multiview';
 import { Viewer } from '../museum/viewer';
 import { toHash, type Route } from '../router';
 import { addStudioLights } from '../scenes/lights';
+import { compileUnculled } from '../scenes/stager';
 import type { World } from '../scenes/world';
 import { el } from './dom';
 import { toast } from './toast';
@@ -38,6 +39,8 @@ export class MuseumPage implements Sheet {
   private multiviewReady: Promise<MultiView> | null = null;
   private teamId: string | null = null;
   private token = 0;
+  private previewing = false; // 卡片预览的渲染循环该不该跑（Museum 开着、预览已经开始）
+  private watchingVisibility = false;
   private readonly onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !this.viewer.isOpen) this.onClose(); };
 
   constructor(root: HTMLElement, world: World, onClose: () => void, onSelect: (workId: string | null) => void) {
@@ -79,6 +82,7 @@ export class MuseumPage implements Sheet {
     delete this.node.dataset.ready;
     this.canvas.hidden = true;
     this.viewer.close();
+    this.previewing = false;
     this.multiview?.clearViews();
     this.multiview?.renderer.setAnimationLoop(null);
     this.world.paused = false;
@@ -119,13 +123,11 @@ export class MuseumPage implements Sheet {
     if (token !== this.token) return;
     mv.clearViews();
     this.canvas.hidden = this.viewer.isOpen;
-    let last = -1;
-    mv.renderer.setAnimationLoop((t) => {
-      // 按真实帧间隔转，刷新率高的屏幕上也是每秒 0.5 弧度；切回标签页时最多补 0.1 秒
-      const dt = last < 0 ? 0 : Math.min((t - last) / 1000, 0.1);
-      last = t;
-      mv.render(dt);
-    });
+    this.previewing = true;
+    this.watchVisibility();
+    this.runPreviews(mv);
+    // 卡片一张张上：着色器在后台编译好、贴图和几何传好再加进网格。一次只编译一张，不挤在同一帧里
+    let queue: Promise<unknown> = Promise.resolve();
     await Promise.all(cards.map(async (c) => {
       const model = await this.library.load(c.work);
       if (token !== this.token) return;
@@ -134,10 +136,37 @@ export class MuseumPage implements Sheet {
       scene.add(model.object);
       const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 100);
       frameModel(camera, model.height);
+      const compiled = queue.then(() => (token === this.token ? compileUnculled(mv.renderer, scene, camera, scene) : undefined));
+      queue = compiled.catch(() => {});
+      await compiled;
+      if (token !== this.token) return;
       if (model.failed) c.node.append(failedNote());
       c.preview.classList.add('ready');
       mv.add({ element: c.preview, scene, camera, tick: (dt) => { model.object.rotation.y += dt * 0.5; } });
     }));
+  }
+
+  // 卡片预览的渲染循环：按真实帧间隔转，刷新率高的屏幕上也是每秒 0.5 弧度；每次开始时第一帧的 dt 是 0，
+  // 切回标签页时不补后台那段时间
+  private runPreviews(mv: MultiView): void {
+    let last = -1;
+    mv.renderer.setAnimationLoop((t) => {
+      const dt = last < 0 ? 0 : Math.min((t - last) / 1000, 0.1);
+      last = t;
+      mv.render(dt);
+    });
+  }
+
+  // 标签页切到后台：停掉卡片预览的循环；回来时 Museum 还开着就重新开始
+  private watchVisibility(): void {
+    if (this.watchingVisibility) return;
+    this.watchingVisibility = true;
+    document.addEventListener('visibilitychange', () => {
+      const mv = this.multiview;
+      if (!mv || !this.previewing) return;
+      if (document.hidden) mv.renderer.setAnimationLoop(null);
+      else this.runPreviews(mv);
+    });
   }
 
   private card(team: Team, work: Work): Card {

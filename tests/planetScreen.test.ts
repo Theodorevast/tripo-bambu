@@ -43,6 +43,8 @@ function setup() {
     frameHooks,
     planets,
     toScreen,
+    // 新模型立刻放行（真实页面里 Stager 要等贴图上传、着色器编译，再排到某一帧才挂上）
+    stage: { precompile: async () => {}, prepare: async () => ({ start() {}, cancel() {} }) },
   } as unknown as World;
   const screen = new PlanetScreen(world, root as unknown as HTMLElement, () => {});
   const label = root.querySelector('.float-label')!;

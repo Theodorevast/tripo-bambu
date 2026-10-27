@@ -56,4 +56,6 @@ app.museum = sheet(new MuseumPage(app.root, world, () => app.closeSheet(), (work
   const team = app.currentTeam;
   if (team) app.navigate(workId ? { view: 'museum', teamId: team.id, workId } : { view: 'museum', teamId: team.id });
 }));
+// 星球都摆进场景了：开场之前在后台把着色器编译好，开场飞行的第一帧不卡
+await world.warmUp();
 await app.start();
