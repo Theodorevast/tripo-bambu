@@ -29,6 +29,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #17130c; }
 button.primary:hover { background: #e6c793; color: #17130c; }
 button[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+button.primary[aria-pressed='true'] { color: #17130c; } /* 金底主按钮按下时（Done）保持深色字，不然金字压金底 */
 button.danger { color: var(--danger); border-color: rgba(224, 122, 95, 0.4); }
 button.danger:hover { border-color: var(--danger); color: var(--danger); }
 

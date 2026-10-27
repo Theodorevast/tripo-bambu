@@ -47,6 +47,8 @@ export class App {
     });
     this.galaxyUi = new GalaxyUi(world, root, (teamId) => this.navigate({ view: 'planet', teamId }));
     world.setTeams(teams);
+    // 开场飞行期间顶栏就显示星系标题；直接打开星球页时，show() 在第一次 await 之前就换成 showTeam
+    this.topbar.showGalaxy(teams.length, teams.reduce((n, t) => n + t.works.length, 0));
   }
 
   get currentTeam(): Team | null {

@@ -22,6 +22,7 @@ export class Topbar {
       el('button', { textContent: 'Museum', onclick: () => act.museum() }),
       this.editButton,
     );
+    this.actions.hidden = true; // 按钮组只在星球页显示（showTeam）
     const who = el('div', { className: 'tb-who mono' }, `Signed in as @${youHandle} · `, el('span', { className: 'you-tag', textContent: 'You' }));
     root.append(el('header', { className: 'topbar' }, this.title, this.actions, who));
   }

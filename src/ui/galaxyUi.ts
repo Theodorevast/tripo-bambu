@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
-import type { PlanetEntry, World } from '../scenes/world';
+import type { Team } from '../data/types';
+import type { World } from '../scenes/world';
 import { el } from './dom';
 
 // 星系页：悬停星球显示团队名和人数，点击（不是拖动）进入星球
@@ -7,7 +8,7 @@ export class GalaxyUi {
   private enabled = true;
   private readonly world: World;
   private readonly label = el('div', { className: 'float-label' });
-  private shown: PlanetEntry | null = null;
+  private shown: Team | null = null; // 按团队数据缓存：World.updateTeam 换掉 e.team 后标签会重建
   private down: { x: number; y: number } | null = null;
 
   constructor(world: World, root: HTMLElement, onPick: (teamId: string) => void) {
@@ -46,8 +47,8 @@ export class GalaxyUi {
     const at = h ? this.world.toScreen(new THREE.Vector3(0, 15, 0).add(h.home)) : null;
     this.label.hidden = !at;
     if (!h || !at) return;
-    if (this.shown !== h) {
-      this.shown = h;
+    if (this.shown !== h.team) {
+      this.shown = h.team;
       this.label.replaceChildren(
         el('span', { className: 'display', textContent: h.team.name }),
         el('span', { className: 'mono', textContent: `${h.team.members.length} members · ${h.team.works.length} works` }),
