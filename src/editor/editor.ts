@@ -361,11 +361,13 @@ export class Editor {
   private async commitPlacement(work: Work, dir: Vec3): Promise<void> {
     const placement: Placement = { workId: work.id, dir, yaw: faceYaw(dir, this.towardCamera()), scale: 1 };
     this.cancelPlacing();
-    const pw = await this.view.place(placement);
+    // place() 在等模型之前就把展台记进 view.placed：先存，模型还没加载完就离开星球（路由不等模型）摆放也不会丢
+    const placing = this.view.place(placement);
+    if (this.view.placed.has(work.id)) this.save();
+    const pw = await placing;
     if (this.active) this.refreshTray();
     if (!pw) return;
-    this.save();
-    // 模型加载期间点了 Done：摆放照样存下，但不再选中，编辑条不会在编辑模式外冒出来
+    // 模型加载期间点了 Done：摆放已经存下了，但不再选中，编辑条不会在编辑模式外冒出来
     if (this.active) this.select(pw);
   }
 

@@ -199,7 +199,8 @@ check('拖动时镜头不跟着转（参照作品在屏幕上不动）', Math.hy
 
 // 拖到作品栏上面：指针被画布抓住，作品照样跟着走
 await setEditing(true);
-const liveDir = () => page.evaluate((id) => window.__view?.placed.get(id)?.placement.dir ?? [0, 0, 0], target.id);
+// 拿不到应用里的 PlanetView 时返回 null，这一项记 ✗，不让两个 [0,0,0] 的夹角（π/2）蒙混过关
+const liveDir = () => page.evaluate((id) => window.__view?.placed.get(id)?.placement.dir ?? null, target.id);
 const trayTop = await page.evaluate(() => document.querySelector('.tray').getBoundingClientRect().top);
 const a = await workPos(target.id);
 let dragOverTray = false;
@@ -214,7 +215,7 @@ if (a) {
   const dirOver = await liveDir();
   await page.mouse.up();
   await page.waitForTimeout(200);
-  dragOverTray = overTray && angle(dirEdge, dirOver) > 0.02;
+  dragOverTray = overTray && !!dirEdge && !!dirOver && angle(dirEdge, dirOver) > 0.02;
 }
 check('拖到作品栏上面时作品照样跟着走（指针捕获）', dragOverTray);
 
