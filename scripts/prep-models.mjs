@@ -25,6 +25,9 @@ if (!(TARGET_TRIS > 0)) {
 }
 if (Number.isFinite(TARGET_TRIS)) await MeshoptSimplifier.ready;
 
+// 标题转成 id：只留小写字母和数字，其余连续字符换成 -（不像 slugify 那样去掉结尾的「.扩展名」）
+const slugTitle = (title) => (title ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
 // 给报告里的一件作品记一个问题；同一件可能有好几个问题，用分号连起来
 function addProblem(entry, error) {
   entry.flag = true;
@@ -52,8 +55,11 @@ for (const row of rows) {
     report.push({ file: row.file ?? '', error: 'file not found', flag: true });
     continue;
   }
-  let id = slugify(row.file);
-  while (used.has(id)) id = `${id}-2`;
+  // 作品 id 出现在分享链接里（#/t/<团队>/museum/<id>）：优先用英文标题，标题转不出字母数字（比如中文）时退回文件名。
+  // tmp- 开头的 id 留给拖进来的临时作品；重名时依次加 -2、-3
+  let id = slugTitle(row.title) || slugify(row.file);
+  if (id.startsWith('tmp-')) id = `w-${id}`;
+  for (let n = 2, base = id; used.has(id); n++) id = `${base}-${n}`;
   used.add(id);
   let doc;
   let trisIn = 0;
