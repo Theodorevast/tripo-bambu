@@ -45,7 +45,10 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .tb-title { justify-self: start; }
 .tb-name { font-size: 28px; line-height: 1.1; }
 .tb-motto { font-family: var(--font-display); font-style: italic; color: var(--ink-dim); font-size: 16px; }
+/* 按钮组本身不接鼠标、只有按钮接：窄屏上它占满一整行（z-index 6），不然会盖住下面页面的 Close 和作品卡的 × */
 .tb-actions { display: flex; gap: 8px; }
+#app > .topbar > .tb-actions { pointer-events: none; }
+.tb-actions > button { pointer-events: auto; }
 /* 固定在第 3 列：星系页按钮组隐藏（display: none）后，身份栏也要留在右边，不会被排进中间列 */
 .tb-who { grid-column: 3; justify-self: end; }
 .you-tag { color: var(--accent); }

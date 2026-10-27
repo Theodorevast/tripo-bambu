@@ -16,7 +16,9 @@ export function createSky(): THREE.Group {
   const nebula = new THREE.DataTexture(bakeNebula(NEBULA_W, NEBULA_H), NEBULA_W, NEBULA_H, THREE.RGFormat, THREE.UnsignedByteType);
   nebula.wrapS = THREE.RepeatWrapping; // 经度 0° 和 360° 是同一条线：插值跨过接缝时取另一边的像素
   nebula.magFilter = THREE.LinearFilter;
-  nebula.minFilter = THREE.LinearFilter; // 画面上贴图总是被放大，不用 mipmap
+  // 不用 mipmap：主要是 equirectUV 的 atan2 在 u = 0/1 处跳变，同一个 2×2 像素块里的导数暴涨会选到最小一级 mipmap，接缝处多出一条 1–2 px 的线；
+  // 而且画面上贴图总是被放大，mipmap 本来也用不上
+  nebula.minFilter = THREE.LinearFilter;
   nebula.needsUpdate = true;
   const n = texture(nebula, equirectUV(normalize(positionLocal))); // R = 大片紫色星云，G = 零星的暗红
   const domeMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false });
