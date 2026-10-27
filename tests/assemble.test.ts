@@ -88,6 +88,17 @@ describe('memberId', () => {
     expect(memberId('李明')).toBe('m-李明');
     expect(memberId('王芳')).not.toBe(memberId('李明'));
   });
+  it('只差一个组合附标（天城文、泰文的元音符号）的两个名字，id 也不同', () => {
+    expect(memberId('मीना')).not.toBe(memberId('मोना'));
+    expect(memberId('สุดา')).not.toBe(memberId('สีดา'));
+  });
+  it('emoji 后面的变体选择符（U+FE0F，也算附标）没挂在字母数字上，不进 id', () => {
+    const heart = '\u2764\uFE0F'; // ❤️
+    const sun = '\u2600\uFE0F'; // ☀️
+    expect(memberId(heart)).toMatch(/^m-[a-z0-9]+$/);
+    expect(memberId(heart)).not.toBe(memberId(sun));
+    expect(memberId(`mia ${heart} makes`)).toBe(memberId('mia_makes'));
+  });
   it('全角按半角算；全是符号时用哈希兜底：非空，不同的输入不同', () => {
     expect(memberId('＠Ｍｉａ＿Ｍａｋｅｓ')).toBe(memberId('mia_makes'));
     expect(memberId('🦊')).toMatch(/^m-[a-z0-9]+$/);

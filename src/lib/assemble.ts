@@ -39,11 +39,15 @@ export function activeTeamCount(works: number): number {
   return Math.min(MAX_ACTIVE, Math.max(1, Math.round(works / 3.5)));
 }
 
-// handle → 成员 id：NFKC 归一（全角变半角）、小写、去掉开头的 @，字母数字以外的连续字符换成 -。
-// 中文等 Unicode 字母原样保留；全是符号（比如只有 emoji）时用哈希兜底，id 不会是空的
+// handle → 成员 id：NFKC 归一（全角变半角）、小写、去掉开头的 @，字母、组合附标、数字以外的连续字符换成 -。
+// 中文等 Unicode 字母、挂在字母上的附标（天城文、泰文的元音符号）原样保留；
+// 全是符号（比如只有 emoji）时用哈希兜底，id 不会是空的
 export function memberId(handle: string): string {
   const base = handle.normalize('NFKC').toLowerCase().replace(/^@+/, '');
-  const slug = base.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+  const slug = base
+    .replace(/(?<![\p{L}\p{M}\p{N}])\p{M}+/gu, '') // 没挂在字母数字上的附标（比如 emoji 后的变体选择符 U+FE0F）不算名字
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
   return `m-${slug || hashString(base).toString(36)}`;
 }
 
