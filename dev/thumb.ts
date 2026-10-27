@@ -15,6 +15,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color('#1a1b22');
 addStudioLights(scene);
 const model = await new ModelLibrary().load({ id: file, file });
+canvas.dataset.failed = String(model.failed); // GLTFLoader 读不了时画的是灰色占位方块：prep-models 读这个属性记进报告
 model.object.rotation.y = -Math.PI / 6;
 scene.add(model.object);
 const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 100);
