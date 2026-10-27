@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import type { Member, PresetId, Seed, Team, Work } from '../data/types';
-import { faceYaw, SHOWCASE_POLE } from '../planet/placement.ts';
+import { faceYaw, SHOWCASE_POLE, SHOWCASE_UP } from '../planet/placement.ts';
+import { BASE_RADIUS } from '../planet/presets.ts';
 import { hashString } from '../planet/rng.ts';
 
 export interface WorkInput {
@@ -32,7 +33,14 @@ export interface Template {
 
 export const MAX_ACTIVE = 6;
 export const UNDER_CONSTRUCTION = 10;
-const CONE = THREE.MathUtils.degToRad(34); // 作品围着展示方向摆成一圈，和它的夹角
+
+// 展示位的弧（小王子式取景，见 showcaseDirs）
+export const ARC_POLAR = THREE.MathUtils.degToRad(60); // 后排和展示方向的夹角：比到达镜头看到的轮廓线（约 65°）靠前一点，展台露在地平线上
+export const FRONT_POLAR = THREE.MathUtils.degToRad(36); // 前排（6 件起才有）
+export const ARC_FAN_MAX = THREE.MathUtils.degToRad(50); // 一排最多向左右各张开这么多
+const ARC_GAP = 3.9; // 相邻两件的间距（半径 10 的星球上量）；再宽，4 件时两边的作品斜得像要滑下去
+const ARC_MIN_GAP = 3.7; // 一排张不开时最多挤到这么近：两件作品最大的展台（半径约 0.95 × √2/2 × WORK_SIZE ≈ 1.75）也碰不到
+const ARC_ROW_MAX = 5; // 一排最多几件
 
 // 团队数 = 作品数 ÷ 3.5 四舍五入，1–6 个
 export function activeTeamCount(works: number): number {
@@ -70,20 +78,31 @@ function assertUniqueMembers(team: Team): void {
   }
 }
 
-// 展示位：1 件放在正中，多件均匀排在 34° 的圆锥上，镜头飞到星球时一眼能看全
+// 展示位（小王子式取景）：作品沿到达镜头看到的星球上缘排成一道弧，立在地平线上、衬着星空，星球是脚下的舞台。
+// 方向 = cos(polar)·展示方向 + sin(polar)·(cos(fan)·屏幕上方 + sin(fan)·屏幕右方)：
+// polar 是和展示方向的夹角，fan 是相对屏幕正上方的扇角，一排里左右对称、相邻两件隔 ARC_GAP。
+// 5 件以内排一排；6 件起分前后两排，前排更靠近镜头、在画面里低一些
 export function showcaseDirs(n: number): Array<[number, number, number]> {
   const pole = new THREE.Vector3(...SHOWCASE_POLE);
-  if (n === 1) return [[pole.x, pole.y, pole.z]];
-  const t = new THREE.Vector3().crossVectors(pole, new THREE.Vector3(0, 1, 0)).normalize();
-  const b = new THREE.Vector3().crossVectors(t, pole).normalize();
-  return Array.from({ length: n }, (_, k) => {
-    const phi = (2 * Math.PI * k) / n + Math.PI / 2;
-    const d = pole.clone().multiplyScalar(Math.cos(CONE))
-      .addScaledVector(t, Math.sin(CONE) * Math.cos(phi))
-      .addScaledVector(b, Math.sin(CONE) * Math.sin(phi))
-      .normalize();
-    return [d.x, d.y, d.z];
-  });
+  const up = new THREE.Vector3(...SHOWCASE_UP);
+  const right = pole.clone().negate().cross(up); // 镜头朝 -pole 看、头顶朝 up 时的屏幕右方
+  const row = (count: number, polar: number): Array<[number, number, number]> => {
+    const ring = BASE_RADIUS * Math.sin(polar); // 这一排所在小圆的半径
+    const stepFor = (gap: number) => 2 * Math.asin(Math.min(1, gap / (2 * ring))); // 小圆上弦长为 gap 的圆心角
+    let step = stepFor(ARC_GAP);
+    if (count > 1) step = Math.max(Math.min(step, (2 * ARC_FAN_MAX) / (count - 1)), stepFor(ARC_MIN_GAP));
+    return Array.from({ length: count }, (_, k) => {
+      const fan = (k - (count - 1) / 2) * step;
+      const d = pole.clone().multiplyScalar(Math.cos(polar))
+        .addScaledVector(up, Math.sin(polar) * Math.cos(fan))
+        .addScaledVector(right, Math.sin(polar) * Math.sin(fan))
+        .normalize();
+      return [d.x, d.y, d.z];
+    });
+  };
+  if (n <= ARC_ROW_MAX) return row(n, ARC_POLAR);
+  const back = Math.ceil(n / 2);
+  return [...row(back, ARC_POLAR), ...row(n - back, FRONT_POLAR)];
 }
 
 export function assembleSeed(template: Template, works: WorkInput[]): Seed {

@@ -20,6 +20,30 @@ describe('PlanetObject', () => {
     expect(p.terrain).not.toBe(terrain);
     expect(p.sea).toBe(0);
   });
+  it('setRingStrength 调光环浓淡：夹在 0–1；重建光环后保留；强度为 0 时光环不画', () => {
+    const p = new PlanetObject(base);
+    expect(p.ringStrength).toBe(1);
+    p.setRingStrength(0.25);
+    expect(p.ringStrength).toBe(0.25);
+    p.setRecipe({ ...base, seed: 9 }); // 换种子会重建光环
+    expect(p.ringStrength).toBe(0.25);
+    const ring = p.group.getObjectByName('ring')!;
+    expect(ring.visible).toBe(true);
+    p.setRingStrength(-1);
+    expect(p.ringStrength).toBe(0);
+    expect(ring.visible).toBe(false);
+    p.setRingStrength(3);
+    expect(p.ringStrength).toBe(1);
+    expect(ring.visible).toBe(true);
+  });
+  it('没有光环时也能调；之后打开光环，新光环用当前强度', () => {
+    const p = new PlanetObject({ ...base, ring: false });
+    p.setRingStrength(0);
+    expect(p.group.getObjectByName('ring')).toBeUndefined();
+    p.setRecipe({ ...base, ring: true });
+    expect(p.ringStrength).toBe(0);
+    expect(p.group.getObjectByName('ring')!.visible).toBe(false);
+  });
   it('setDetail 切换细分；换配方后细分保持不变；作品组一直在', () => {
     const p = new PlanetObject(base);
     p.setDetail(LOD_HIGH);

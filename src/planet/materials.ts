@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { cameraPosition, color, dot, float, length, modelPosition, normalize, positionLocal, positionWorld, pow, saturate, sin, smoothstep, sqrt } from 'three/tsl';
+import { cameraPosition, color, dot, float, length, modelPosition, normalize, positionLocal, positionWorld, pow, saturate, sin, smoothstep, sqrt, uniform } from 'three/tsl';
 import type { PresetId } from '../data/types';
 import { BASE_RADIUS, PRESETS } from './presets';
 
@@ -37,13 +37,14 @@ export function atmosphereMaterial(preset: PresetId): THREE.MeshBasicNodeMateria
   return m;
 }
 
-// 光环：RingGeometry 在 XY 平面；按到中心的距离画约 6 道深浅交替的环带（sin(t·38) 在 t 的 0..1 上约 6 个周期），内外缘淡出
-export function ringMaterial(preset: PresetId, inner: number, outer: number): THREE.MeshBasicNodeMaterial {
+// 光环：RingGeometry 在 XY 平面；按到中心的距离画约 6 道深浅交替的环带（sin(t·38) 在 t 的 0..1 上约 6 个周期），内外缘淡出。
+// strength 是整体不透明度的倍数（0..1），用 uniform 传进来：聚焦时淡化光环只改它的值，不用重建材质
+export function ringMaterial(preset: PresetId, inner: number, outer: number, strength: THREE.UniformNode<'float', number> = uniform(1)): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, transparent: true, depthWrite: false });
   const t = length(positionLocal.xy).sub(inner).div(outer - inner);
   const bands = sin(t.mul(38)).mul(0.5).add(0.5).mul(0.35).add(0.45);
   const edge = smoothstep(0, 0.08, t).mul(float(1).sub(smoothstep(0.85, 1, t)));
   m.colorNode = color(PRESETS[preset].ring);
-  m.opacityNode = bands.mul(edge).mul(0.75);
+  m.opacityNode = bands.mul(edge).mul(0.75).mul(strength);
   return m;
 }

@@ -1,6 +1,10 @@
+import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 import templateJson from '../src/data/teams.template.json';
-import { activeTeamCount, assembleSeed, memberId, showcaseDirs, UNDER_CONSTRUCTION, type Template, type WorkInput } from '../src/lib/assemble';
+import { activeTeamCount, ARC_FAN_MAX, ARC_POLAR, assembleSeed, FRONT_POLAR, memberId, showcaseDirs, UNDER_CONSTRUCTION, type Template, type WorkInput } from '../src/lib/assemble';
+import { PLINTH_HEIGHT, placementTransform, SHOWCASE_POLE, SHOWCASE_UP, WORK_SIZE } from '../src/planet/placement';
+import { BASE_RADIUS, PRESETS } from '../src/planet/presets';
+import { PLANET_DISTANCE } from '../src/scenes/world';
 
 const template = templateJson as unknown as Template;
 const works = (n: number, authors = n): WorkInput[] =>
@@ -107,14 +111,67 @@ describe('memberId', () => {
 });
 
 describe('showcaseDirs', () => {
-  it('n 个方向在半径 10 的星球上两两相距 3 以上', () => {
-    for (let n = 1; n <= 7; n++) {
+  const pole = new THREE.Vector3(...SHOWCASE_POLE);
+  const up = new THREE.Vector3(...SHOWCASE_UP);
+  const right = pole.clone().negate().cross(up); // 到达镜头的屏幕右方
+  const polarOf = (d: [number, number, number]) => new THREE.Vector3(...d).angleTo(pole);
+  const fanOf = (d: [number, number, number]) => { const v = new THREE.Vector3(...d); return Math.atan2(v.dot(right), v.dot(up)); };
+  const eye = pole.clone().multiplyScalar(PLANET_DISTANCE); // 到达镜头（星球本地坐标）
+  const maxAmp = Math.max(...Object.values(PRESETS).map((p) => p.amp));
+
+  it('n 个方向在半径 10 的星球上两两相距超过 √2 × WORK_SIZE：两件作品最大的展台（半径 ≈ 0.95 × √2/2 × WORK_SIZE）也碰不到', () => {
+    for (let n = 1; n <= 10; n++) {
       const d = showcaseDirs(n);
       expect(d).toHaveLength(n);
       for (let i = 0; i < n; i++) {
+        expect(Math.hypot(...d[i])).toBeCloseTo(1, 9);
         for (let j = i + 1; j < n; j++) {
-          expect(10 * Math.hypot(d[i][0] - d[j][0], d[i][1] - d[j][1], d[i][2] - d[j][2])).toBeGreaterThan(3);
+          expect(BASE_RADIUS * Math.hypot(d[i][0] - d[j][0], d[i][1] - d[j][1], d[i][2] - d[j][2])).toBeGreaterThan(Math.SQRT2 * WORK_SIZE);
         }
+      }
+    }
+  });
+  it('5 件以内排成一道弧：和展示方向夹角都是 ARC_POLAR，相对屏幕正上方左右对称、从左到右排，张开不超过 ARC_FAN_MAX', () => {
+    for (let n = 1; n <= 5; n++) {
+      const d = showcaseDirs(n);
+      const fans = d.map(fanOf);
+      for (const x of d) expect(polarOf(x)).toBeCloseTo(ARC_POLAR, 9);
+      for (const f of fans) expect(Math.abs(f)).toBeLessThanOrEqual(ARC_FAN_MAX + 1e-9);
+      for (let k = 1; k < n; k++) expect(fans[k]).toBeGreaterThan(fans[k - 1]);
+      expect(fans.reduce((s, f) => s + f, 0)).toBeCloseTo(0, 9);
+    }
+    expect(fanOf(showcaseDirs(1)[0])).toBeCloseTo(0, 9); // 1 件时立在正上方
+  });
+  it('6 件起分前后两排：后排 ⌈n/2⌉ 件在 ARC_POLAR，其余在更靠近镜头的 FRONT_POLAR', () => {
+    for (const n of [6, 7, 8]) {
+      const polars = showcaseDirs(n).map(polarOf);
+      expect(polars.filter((p) => Math.abs(p - ARC_POLAR) < 1e-9)).toHaveLength(Math.ceil(n / 2));
+      expect(polars.filter((p) => Math.abs(p - FRONT_POLAR) < 1e-9)).toHaveLength(Math.floor(n / 2));
+    }
+  });
+  it('后排作品立在到达镜头看到的地平线上：平地上的展台顶面在轮廓线前面看得见，作品上半截高出最高的地形、衬着星空', () => {
+    const flat = new THREE.Sphere(new THREE.Vector3(), BASE_RADIUS);
+    const highest = new THREE.Sphere(new THREE.Vector3(), BASE_RADIUS * (1 + maxAmp));
+    for (let n = 1; n <= 5; n++) {
+      for (const d of showcaseDirs(n)) {
+        const dir = new THREE.Vector3(...d);
+        const plinthTop = dir.clone().multiplyScalar(BASE_RADIUS + PLINTH_HEIGHT);
+        const toTop = new THREE.Ray(eye.clone(), plinthTop.clone().sub(eye).normalize());
+        const hit = toTop.intersectSphere(flat, new THREE.Vector3());
+        expect(hit === null || hit.distanceTo(eye) >= plinthTop.distanceTo(eye) - 1e-6).toBe(true);
+        const midWork = dir.clone().multiplyScalar(BASE_RADIUS + PLINTH_HEIGHT + WORK_SIZE / 2);
+        expect(new THREE.Ray(eye.clone(), midWork.sub(eye).normalize()).intersectSphere(highest, new THREE.Vector3())).toBeNull();
+      }
+    }
+  });
+  it('初始作品的正面都朝向到达镜头（展示方向在切平面上的投影）', () => {
+    const flat = () => BASE_RADIUS;
+    for (const t of assembleSeed(template, works(14)).teams) {
+      for (const p of t.planet.placements) {
+        const { position, quaternion } = placementTransform(p, flat, 0);
+        const n = position.clone().normalize();
+        const want = eye.clone().sub(position).projectOnPlane(n).normalize();
+        expect(new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion).dot(want)).toBeCloseTo(1, 6);
       }
     }
   });

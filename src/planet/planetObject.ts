@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { uniform } from 'three/tsl';
 import type { PlanetRecipe } from '../data/types';
 import { buildTerrainGeometry, LOD_LOW } from './generate';
 import { atmosphereMaterial, ringMaterial, surfaceMaterial, waterMaterial } from './materials';
@@ -15,6 +16,8 @@ export class PlanetObject {
   private recipe!: PlanetRecipe;
   private detail = LOD_LOW;
   private parts: THREE.Object3D[] = [];
+  private ring: THREE.Mesh | null = null;
+  private readonly ringStrengthNode = uniform(1); // 每次重建光环都用同一个 uniform，强度跨重建保留
 
   constructor(recipe: PlanetRecipe) {
     this.group.add(this.works);
@@ -23,6 +26,16 @@ export class PlanetObject {
 
   get currentRecipe(): PlanetRecipe {
     return this.recipe;
+  }
+
+  get ringStrength(): number {
+    return this.ringStrengthNode.value;
+  }
+
+  // 光环浓淡（0..1，1 是原样）：星球视图里把聚焦星球的光环压淡，回星系再恢复。强度为 0 时干脆不画
+  setRingStrength(k: number): void {
+    this.ringStrengthNode.value = THREE.MathUtils.clamp(k, 0, 1);
+    if (this.ring) this.ring.visible = this.ringStrengthNode.value > 0;
   }
 
   // 只有外观字段（种子、预设、光环、大气）变化才重建；摆放变化由 PlanetView 处理
@@ -45,6 +58,7 @@ export class PlanetObject {
       disposeTree(p);
     }
     this.parts = [];
+    this.ring = null;
     const { preset } = this.recipe;
     this.height = makeHeightFn(this.recipe.seed, preset);
     this.sea = seaRadius(preset);
@@ -57,8 +71,11 @@ export class PlanetObject {
     if (this.recipe.ring) {
       const inner = BASE_RADIUS * 1.45;
       const outer = BASE_RADIUS * 2.15;
-      const ring = new THREE.Mesh(new THREE.RingGeometry(inner, outer, 128, 1), ringMaterial(preset, inner, outer));
+      const ring = new THREE.Mesh(new THREE.RingGeometry(inner, outer, 128, 1), ringMaterial(preset, inner, outer, this.ringStrengthNode));
+      ring.name = 'ring';
       ring.rotation.set(-Math.PI / 2 + 0.38, 0, 0.22); // 放到赤道面再稍微倾斜
+      ring.visible = this.ringStrengthNode.value > 0;
+      this.ring = ring;
       this.addPart(ring);
     }
   }

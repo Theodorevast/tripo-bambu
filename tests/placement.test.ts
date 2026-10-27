@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
-import { clampScale, faceYaw, fitToSize, groundRadius, placementTransform, SHOWCASE_POLE, WORK_SIZE } from '../src/planet/placement';
+import { clampScale, faceYaw, fitToSize, groundRadius, placementTransform, SHOWCASE_POLE, SHOWCASE_UP, WORK_SIZE } from '../src/planet/placement';
 
 const flat = () => 10; // 平地：处处半径 10
 const dirs: Array<[number, number, number]> = [[0, 1, 0], [1, 0, 0], [0, -1, 0], [0.3, -0.5, 0.81]];
@@ -43,6 +43,15 @@ describe('faceYaw', () => {
   });
   it('SHOWCASE_POLE 是单位向量', () => {
     expect(Math.hypot(...SHOWCASE_POLE)).toBeCloseTo(1, 9);
+  });
+  it('到达镜头几乎平视星球：展示方向和水平面的夹角不到 10°（往下看时作品背后会排满星系盘里的邻居）', () => {
+    expect(Math.abs(SHOWCASE_POLE[1])).toBeLessThan(Math.sin(THREE.MathUtils.degToRad(10)));
+  });
+  it('SHOWCASE_UP 是单位向量，和展示方向垂直，朝上', () => {
+    const up = new THREE.Vector3(...SHOWCASE_UP);
+    expect(up.length()).toBeCloseTo(1, 9);
+    expect(up.dot(new THREE.Vector3(...SHOWCASE_POLE))).toBeCloseTo(0, 9);
+    expect(up.y).toBeGreaterThan(0.9);
   });
 });
 

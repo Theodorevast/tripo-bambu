@@ -2,19 +2,28 @@ import * as THREE from 'three/webgpu';
 import type { Placement } from '../data/types';
 import type { HeightFn } from './noise';
 
-export const WORK_SIZE = 2.0; // 所有作品统一的最长边
+export const WORK_SIZE = 2.6; // 所有作品统一的最长边（spec 4.3 的 2.0 可调；小王子式近景里 2.6 才压得住星球）
 export const PLINTH_HEIGHT = 0.18; // 展台露出地面的高度
 export const SCALE_MIN = 0.5;
 export const SCALE_MAX = 2;
 export const YAW_STEP = Math.PI / 12; // 15°
 
-// 展示方向：镜头飞到星球时从这个方向看过去，初始作品也围着它摆
+const UP = new THREE.Vector3(0, 1, 0);
+
+// 展示方向：从星球中心指向到达镜头。镜头几乎和星球中心一样高、稍微偏右：
+// 星系是扁平的圆盘，镜头一往下看，作品背后的天空就会排满邻居星球；平视时作品背后只有星空
 export const SHOWCASE_POLE: [number, number, number] = (() => {
-  const v = new THREE.Vector3(0, 0.45, 1).normalize();
-  return [v.x, v.y, v.z];
+  const az = THREE.MathUtils.degToRad(8); // 从 +Z 往 +X 偏 8°，主光（lights.ts，右上前方）更多照在作品正面
+  const el = THREE.MathUtils.degToRad(-2);
+  return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
 })();
 
-const UP = new THREE.Vector3(0, 1, 0);
+// 到达镜头的屏幕上方：世界 +Y 去掉沿展示方向的分量（OrbitControls 让镜头的 up 保持 +Y，不会侧倾）
+export const SHOWCASE_UP: [number, number, number] = (() => {
+  const pole = new THREE.Vector3(...SHOWCASE_POLE);
+  const v = UP.clone().addScaledVector(pole, -UP.dot(pole)).normalize();
+  return [v.x, v.y, v.z];
+})();
 
 // 作品落点的地面半径：有海时不低于海平面（作品立在漂浮的展台上）
 export function groundRadius(dir: THREE.Vector3, height: HeightFn, sea: number): number {
