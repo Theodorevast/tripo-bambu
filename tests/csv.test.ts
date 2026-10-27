@@ -46,6 +46,25 @@ describe('parseCsv', () => {
     ]);
     expect(() => parseCsv('file,title,,\na.glb,Lamp,oops,\n')).toThrow(/第 2 行/);
   });
+  it('表头叫 __proto__ 的列也是自有属性、值不丢，返回的仍是普通对象', () => {
+    const [row] = parseCsv('file,__proto__\na.glb,x\n');
+    expect(Object.hasOwn(row, '__proto__')).toBe(true);
+    expect(row['__proto__']).toBe('x');
+    expect(Object.keys(row)).toEqual(['file', '__proto__']);
+    expect(Object.getPrototypeOf(row)).toBe(Object.prototype);
+  });
+  it('少了闭合引号、后面某行逗号之后的引号（英寸号）紧挨逗号或换行：报错，不把几行悄悄并成一格', () => {
+    // 第 2 行的 "Big Lamp 没闭合；第 3 行 12" 后面紧跟逗号，被当成了闭合引号，合并后的行和表头一样宽
+    expect(() => parseCsv('file,title,author,description\na.glb,"Big Lamp,mia,\nb.glb,Bench 12",zoe,\nc.glb,Chair,kai,\n'))
+      .toThrow(/第 2 行：这里开始的引号一直到第 3 行的「b\.glb,Bench 12"」才闭合/);
+    // 引号紧挨换行（最后一列），中间整行被吞掉，CRLF 也一样
+    expect(() => parseCsv('file,title,author,description\r\na.glb,Lamp,mia,"A brass lamp\r\nb.glb,Bench,zoe,\r\nc.glb,Chair,kai,Oak 12"\r\n'))
+      .toThrow(/第 2 行：这里开始的引号一直到第 4 行/);
+    // 真正跨行的格子照常解析：最后一行里没有逗号
+    expect(parseCsv('file,title,author\na.glb,"Big Lamp, brass\nsecond line",mia\n')).toEqual([
+      { file: 'a.glb', title: 'Big Lamp, brass\nsecond line', author: 'mia' },
+    ]);
+  });
 });
 
 describe('slugify', () => {
