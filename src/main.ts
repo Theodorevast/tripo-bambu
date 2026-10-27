@@ -56,6 +56,10 @@ app.museum = sheet(new MuseumPage(app.root, world, () => app.closeSheet(), (work
   const team = app.currentTeam;
   if (team) app.navigate(workId ? { view: 'museum', teamId: team.id, workId } : { view: 'museum', teamId: team.id });
 }));
+// 地址带 ?tune：实时调参面板。动态加载，Tweakpane 打成单独的包，平时不下载
+if (new URLSearchParams(location.search).has('tune')) {
+  import('./tune').then((m) => m.installTune(world), (err: unknown) => console.error(err));
+}
 // 星球都摆进场景了：开场之前在后台把着色器编译好，开场飞行的第一帧不卡
 await world.warmUp();
 await app.start();
