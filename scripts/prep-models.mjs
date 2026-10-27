@@ -16,6 +16,7 @@ const OUT = process.env.PREP_OUT ?? 'public';
 const WORKS = process.env.WORKS_OUT ?? 'src/data/works.json';
 const MAX_TRIS = 500_000;
 const MAX_MB = 15;
+const WEBP_QUALITY = 90; // 模型贴图（缩略图另算，见下面的 82）
 const MB = 1024 * 1024;
 const maxTrisArg = process.argv.find((a) => a.startsWith('--max-tris='));
 const TARGET_TRIS = maxTrisArg ? Number(maxTrisArg.slice('--max-tris='.length)) : Infinity;
@@ -87,7 +88,8 @@ for (const row of rows) {
       prune(),
       weld(),
       ...reduce,
-      textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [2048, 2048] }),
+      // WebP 质量：quality 是 textureCompress 自己的选项，它原样转给 sharp 的 webp()；不写时 sharp 用默认的 80
+      textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [2048, 2048], quality: WEBP_QUALITY }),
       meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
     );
   } catch (err) {
