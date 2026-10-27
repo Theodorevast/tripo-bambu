@@ -59,7 +59,7 @@ export function memberId(handle: string): string {
   return `m-${slug || hashString(base).toString(36)}`;
 }
 
-// 一个作者：id 是 memberId，handle 用第一次出现的写法（去掉开头的 @）
+// 一个作者：id 是 memberId，handle 用第一次出现的写法（去掉开头的 @ 和全角 ＠，其余原样）
 interface AuthorGroup {
   id: string;
   handle: string;
@@ -72,9 +72,21 @@ function assertUniqueMembers(team: Team): void {
   for (const m of team.members) {
     const first = seen.get(m.id);
     if (first !== undefined) {
-      throw new Error(`团队 ${team.id} 里有两个成员的 id 都是 ${m.id}（${first} 和 ${m.handle}）：改 works.json 的 author 或 teams.template.json 的 crew`);
+      throw new Error(`团队 ${team.id} 里有两个成员的 id 都是 ${m.id}（${first} 和 ${m.handle}）：改 models-in/works.csv 的 author 列（然后重新运行 npm run prep），或 teams.template.json 的 crew`);
     }
     seen.set(m.id, m.handle);
+  }
+}
+
+// 作品 id 对应 public/models/<id>.glb，所有团队共用：重复了就会有两件作品用同一个模型文件
+function assertUniqueWorks(works: WorkInput[]): void {
+  const seen = new Map<string, WorkInput>();
+  for (const w of works) {
+    const first = seen.get(w.id);
+    if (first) {
+      throw new Error(`作品 id ${w.id} 重复了：「${first.title}」和「${w.title}」会用同一个 public/models/${w.id}.glb。改 models-in/works.csv（作品 id 由 file 列的文件名生成），然后重新运行 npm run prep`);
+    }
+    seen.set(w.id, w);
   }
 }
 
@@ -106,12 +118,13 @@ export function showcaseDirs(n: number): Array<[number, number, number]> {
 }
 
 export function assembleSeed(template: Template, works: WorkInput[]): Seed {
+  assertUniqueWorks(works);
   // 按作者分组：比的是 memberId，所以大小写、@、_ 和 - 不同的写法算同一个人
   const groups = new Map<string, AuthorGroup>();
   for (const w of works) {
     const id = memberId(w.author);
     let g = groups.get(id);
-    if (!g) groups.set(id, (g = { id, handle: w.author.replace(/^@+/, ''), works: [] }));
+    if (!g) groups.set(id, (g = { id, handle: w.author.replace(/^[@＠]+/, ''), works: [] }));
     g.works.push(w);
   }
   // 团队数不超过作者数，否则会分出没有作品的「有作品团队」；没有作品时是 0

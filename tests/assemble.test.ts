@@ -70,6 +70,20 @@ describe('assembleSeed', () => {
   it('同一个团队里成员 id 重复时报错（比如作者和虚构成员同名）', () => {
     expect(() => assembleSeed(template, [work('x1', 'Hexa_Ines')])).toThrow(/m-hexa-ines/);
   });
+  it('成员 id 重复的报错让人改 models-in/works.csv 的 author 列或 teams.template.json 的 crew（works.json 是生成出来的）', () => {
+    expect(() => assembleSeed(template, [work('x1', 'Hexa_Ines')])).toThrow(/models-in\/works\.csv 的 author 列.*teams\.template\.json 的 crew/);
+  });
+  it('handle 前面的全角 ＠ 也不存进成员；其余部分原样保留，不做 NFKC', () => {
+    const members = assembleSeed(template, [...works(9), work('x1', '＠mia'), work('x2', '＠Ｚｏｅ')]).teams.flatMap((t) => t.members);
+    expect(members.filter((m) => m.id === memberId('mia'))).toEqual([{ id: memberId('mia'), handle: 'mia', displayName: 'mia', role: 'builder' }]);
+    expect(members.filter((m) => m.id === memberId('zoe'))).toEqual([{ id: memberId('zoe'), handle: 'Ｚｏｅ', displayName: 'Ｚｏｅ', role: 'builder' }]);
+  });
+  it('作品 id 全局不能重复（对应 public/models/<id>.glb）：不在同一个团队也报错，写明两件作品的标题，让人改 models-in/works.csv 再跑 npm run prep', () => {
+    const a: WorkInput = { id: 'lamp', title: 'Brass Lamp', author: 'mia', file: 'lamp.glb', thumb: 'lamp.webp', tris: 1000 };
+    const b: WorkInput = { ...a, title: 'Lava Lamp', author: 'zoe' };
+    // 9 + 2 件、11 个作者 → 3 个团队，mia 分进第 1 个、zoe 分进第 2 个
+    expect(() => assembleSeed(template, [...works(9), a, b])).toThrow(/「Brass Lamp」.*「Lava Lamp」.*models-in\/works\.csv.*npm run prep/);
+  });
   it('演示身份在第一个团队里', () => {
     const seed = assembleSeed(template, works(10));
     expect(seed.you.teamId).toBe(seed.teams[0].id);
