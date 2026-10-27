@@ -51,7 +51,7 @@ export class PlanetObject {
     this.rebuildTerrain();
     if (this.sea > 0) this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(this.sea, 12), waterMaterial(preset)));
     if (this.recipe.atmosphere) {
-      const r = BASE_RADIUS * (1 + PRESETS[preset].amp) * 1.12;
+      const r = BASE_RADIUS * (1 + PRESETS[preset].amp) * 1.05; // 薄外壳：比最高的地形再高 5%，光晕只占轮廓外窄窄一圈
       this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 8), atmosphereMaterial(preset)));
     }
     if (this.recipe.ring) {
