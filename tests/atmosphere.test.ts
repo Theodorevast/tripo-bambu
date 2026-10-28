@@ -235,6 +235,7 @@ describe('createAtmosphere', () => {
     for (const o of Object.values(atmo.objects)) expect(o.parent).toBe(scene);
     expect(atmo.sun.parent).toBe(scene);
     expect((scene as unknown as { fogNode: unknown }).fogNode).toBeTruthy();
+    expect((scene as unknown as { environmentNode: unknown }).environmentNode).toBeTruthy(); // 解析的天空环境光：金属反射天空
     const cam = new THREE.PerspectiveCamera(45, 1.6, 0.1, 6000);
     cam.position.set(0, 2 * R, 3 * R);
     cam.lookAt(0, 0, 0);
@@ -251,6 +252,7 @@ describe('createAtmosphere', () => {
     for (const o of Object.values(atmo.objects)) expect(o.parent).toBeNull();
     expect(atmo.sun.parent).toBeNull();
     expect((scene as unknown as { fogNode: unknown }).fogNode ?? null).toBeNull();
+    expect((scene as unknown as { environmentNode: unknown }).environmentNode ?? null).toBeNull();
   });
 
   it('切预设约 2 秒平滑过渡：太阳高度、曝光逐帧变化，到时间正好到位', () => {

@@ -49,9 +49,7 @@ async function perf(backend, view, preset) {
   const canvas = await page.evaluate(() => `${document.querySelector('#c').width}x${document.querySelector('#c').height}`);
   await page.evaluate(() => window.__sky.waitFrames(150));
   const burst = backend === 'webgl2' ? 8 : 1;
-  const bakes0 = await page.evaluate(() => window.__sky.atmosphere.envBakes);
   const on = await page.evaluate((k) => window.__sky.measure(240, k), burst);
-  const bakes = (await page.evaluate(() => window.__sky.atmosphere.envBakes)) - bakes0; // 静止镜头下应该是 0：环境贴图不会每帧重烘
   await page.evaluate(() => window.__sky.showAtmosphere(false));
   await page.evaluate(() => window.__sky.waitFrames(150));
   const off = await page.evaluate((k) => window.__sky.measure(240, k), burst);
@@ -60,7 +58,7 @@ async function perf(backend, view, preset) {
   const b = stats(off.gpu);
   const row = { backend: actual, view, preset, canvas, burst, on: a.median, off: b.median, delta: a.median - b.median, onP90: a.p90, offP90: b.p90, samples: [a.n, b.n] };
   results.push(row);
-  console.log(`${actual.padEnd(7)} ${view.padEnd(6)} ${preset.padEnd(6)} ${canvas}  on ${a.median.toFixed(3)} ms (p90 ${a.p90.toFixed(3)})  off ${b.median.toFixed(3)} ms  → sky+sea ${(a.median - b.median).toFixed(3)} ms  [${a.n}/${b.n} samples, burst ${burst}, env bakes while measuring ${bakes}]`);
+  console.log(`${actual.padEnd(7)} ${view.padEnd(6)} ${preset.padEnd(6)} ${canvas}  on ${a.median.toFixed(3)} ms (p90 ${a.p90.toFixed(3)})  off ${b.median.toFixed(3)} ms  → sky+sea ${(a.median - b.median).toFixed(3)} ms  [${a.n}/${b.n} samples, burst ${burst}]`);
   await page.close();
 }
 

@@ -45,7 +45,7 @@ import {
 //   不现算噪声），找到云顶后按法线、高度打光：顶部受光偏暖，凹处和底部偏冷偏暗，远处按距离融进地平线的雾色。
 //   星球用解析球求交：视线先碰到星球就不画云；云贴近星球表面时变透明，和星球表面的高度雾一起做软过渡。
 // - 远处积云：几十个朝向镜头的圆形面片（球形假法线 + 噪声侵蚀的软边），几朵一簇，像绘本里的积云，一次绘制。
-// - 光照：低角度暖色平行光（sun）；环境光用天空自己烘一张很小的 PMREM 环境贴图（scene.environment），
+// - 光照：低角度暖色平行光（sun）；环境光是解析的天空环境（scene.environmentNode，和天空共用一套颜色，不烘贴图），
 //   金属材质反射的是天空和云海，不会发黑；scene.fogNode 是偏天空色的距离雾 + 云海附近的高度雾。
 // - 色调映射 AgX（理由见报告），曝光随预设。不加全屏 bloom：太阳光晕直接画在天空和云的着色里，作品不会被糊。
 //
@@ -85,7 +85,6 @@ export interface Atmosphere {
   readonly preset: AtmospherePreset;
   readonly objects: { sky: THREE.Mesh; sea: THREE.Mesh; clouds: THREE.Mesh };
   visible: boolean; // 天空、云海、远处积云和雾一起显示 / 隐藏（量开销时对比用；光照和环境贴图不受影响）
-  envBakes: number; // 环境贴图烘焙的次数（自查用）
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -556,7 +555,8 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   const uGround = colorUniform(palette.ground);
   const uGradUpper = uniform(palette.gradUpper).setGroup(renderGroup);
   const uGradZenith = uniform(palette.gradZenith).setGroup(renderGroup);
-  const uBelow = uniform(palette.envBelow).setGroup(renderGroup); // 环境贴图里地平线以下（云海）的亮度倍数
+  const uBelow = uniform(palette.envBelow).setGroup(renderGroup);
+  const uEnvIntensity = uniform(palette.envIntensity).setGroup(renderGroup); // 不用 scene.environmentIntensity：它走 objectGroup，静态物体上不刷新 // 环境贴图里地平线以下（云海）的亮度倍数
 
   // ---- 噪声贴图
   const noiseTex = new THREE.DataTexture(bakeCloudNoise(NOISE_SIZE), NOISE_SIZE, NOISE_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
@@ -591,12 +591,12 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const hz = hazeColor(dir);
     let col = mix(hz, uUpper, smoothstep(0.0, uGradUpper, eh));
     col = mix(col, uZenith, smoothstep(uGradUpper.mul(0.6), uGradZenith, eh));
-    // 高空的细云条（绘本感）：把方向投到一块「天花板」上采样噪声，沿一个方向拉长；只在中低空出现，跟着云海一起慢慢飘
+    // 高空的细云条（绘本感，只画在天空球上；环境光里不要，免得在所有材质的光照代码里多一次贴图采样）：把方向投到一块「天花板」上采样噪声，沿一个方向拉长；只在中低空出现，跟着云海一起慢慢飘
     const flat = dir.sub(uUp.mul(e));
     const suv = vec2(dot(flat, uE1), dot(flat, uE2)).div(eh.add(0.12)).mul(0.3).add(uFlow1.mul(1.5));
     const sn = noise.sample(suv.mul(vec2(0.7, 3.2))).b;
     const streak = smoothstep(0.52, 0.86, sn).mul(smoothstep(0.02, 0.14, eh)).mul(float(1).sub(smoothstep(0.32, 0.75, eh))).mul(uStreaks);
-    col = mix(col, hz.mul(1.25).add(glow(dir).mul(0.6)), streak);
+    if (!env) col = mix(col, hz.mul(1.25).add(glow(dir).mul(0.6)), streak);
     const below = smoothstep(0.0, -0.035, e);
     if (env) return mix(col.add(glow(dir)), mix(hz.mul(uBelow), uGround, smoothstep(-0.08, -0.45, e)), below);
     // 日轮：半径约 1.4° 的软边圆盘（HDR，色调映射后是白的）
@@ -835,33 +835,27 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   sun.shadow.mapSize.set(2048, 2048);
   scene.add(sun, sun.target);
 
-  // ---- 环境贴图：天空自己烘一张很小的 PMREM（只有天空球，地平线以下是压暗的云海色）
-  const envScene = new THREE.Scene();
-  const envSky = new THREE.Mesh(skyGeo, makeSkyMaterial(true));
-  envSky.frustumCulled = false;
-  envScene.add(envSky);
-  let pmrem: THREE.PMREMGenerator | null = null;
-  let envTarget: THREE.RenderTarget | null = null;
-  const prevEnvironment = scene.environment;
-  const bakedUp = new THREE.Vector3(0, 0, 0);
-  const bakedSun = new THREE.Vector3(0, 0, 0);
-  let bakedVersion = -1;
-  let paletteVersion = 0;
-  let sinceBake = Infinity;
-  const self = { envBakes: 0 };
-
-  const bakeEnvironment = () => {
-    if (!renderer.initialized) return;
-    pmrem ??= new THREE.PMREMGenerator(renderer);
-    uBelow.value = palette.envBelow;
-    envTarget = pmrem.fromScene(envScene, 0, 0.1, 10, { size: 64, ...(envTarget ? { renderTarget: envTarget } : {}) }) as THREE.RenderTarget;
-    scene.environment = envTarget.texture;
-    bakedUp.copy(frame.up);
-    bakedSun.copy(sunDir);
-    bakedVersion = paletteVersion;
-    sinceBake = 0;
-    self.envBakes++;
+  // ---- 环境光：解析的天空环境（scene.environmentNode），不烘贴图
+  // PBR 材质（MeshStandard / Physical，社区作品都是）的环境反射和环境漫反射都从这里取。three 的 EnvironmentNode 在「镜面」上下文里
+  // 给出世界空间的反射方向和粗糙度，在「漫反射」上下文里给出法线、粗糙度 1（结果再乘 π）。光滑的金属看到清楚的天空（地平线以下是
+  // 远处云海，正下方是草地反上来的光），粗糙的表面拿到半球平均的天光：所以金属不会发黑，阴影偏天空的蓝紫，朝下的面泛一点草绿。
+  // 和天空共用 uniform：切预设、「上」方向转动都实时跟着变。原先用的 PMREM 每烘一次约 0.8–0.9 ms（二十来个小渲染通道），
+  // 漫游时「上」一直在转就得一直烘，换成解析的以后没有这笔开销
+  const envSoft = (n: V3) => {
+    const skyMean = uHorizon.mul(0.25).add(uHorizonSun.mul(0.1)).add(uUpper.mul(0.35)).add(uZenith.mul(0.3));
+    const below = mix(uGround, mix(uHorizon, uHorizonSun, 0.3).mul(uBelow), 0.3);
+    const hemi = mix(below, skyMean, smoothstep(-0.8, 0.5, dot(n, uUp))); // 侧面朝向的表面也主要拿天光：阴影偏天空的蓝紫
+    return hemi.add(uGlow.mul(uGlowStrength).mul(saturate(dot(n, uSun)).mul(0.12))); // 朝太阳一侧多一点光晕的暖光
   };
+  const envNode = Fn((builder: THREE.NodeBuilder) => {
+    const ctx = builder.context as unknown as { getUV?: () => V3; getTextureLevel?: () => F };
+    const dir = ctx.getUV ? normalize(ctx.getUV()) : vec3(0, 1, 0);
+    const rough = ctx.getTextureLevel ? ctx.getTextureLevel() : float(1);
+    return mix(skyColor(dir, true), envSoft(dir), smoothstep(0.08, 0.7, rough)).mul(uEnvIntensity);
+  })();
+  const sceneWithEnv = scene as THREE.Scene & { environmentNode?: unknown };
+  const prevEnvNode = sceneWithEnv.environmentNode ?? null;
+  sceneWithEnv.environmentNode = envNode;
 
   renderer.toneMapping = THREE.AgXToneMapping;
 
@@ -908,8 +902,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uCloudDeep.value.set(palette.cloudDeep.r, palette.cloudDeep.g, palette.cloudDeep.b);
     sun.color.copy(palette.sunLight);
     sun.intensity = palette.sunIntensity;
-    scene.environmentIntensity = palette.envIntensity;
-    paletteVersion++;
+    uEnvIntensity.value = palette.envIntensity;
   };
   applyPalette();
 
@@ -1011,12 +1004,6 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
 
     // 曝光（色调映射在创建时设成 AgX；曝光随预设过渡）
     renderer.toneMappingExposure = palette.exposure * params.exposure;
-
-    // 环境贴图：颜色变了（过渡中每 0.2 秒一次）、「上」转了 2° 以上、太阳挪了 1° 以上时重烘
-    sinceBake += dt;
-    const turned = bakedUp.lengthSq() === 0 || bakedUp.dot(frame.up) < Math.cos(THREE.MathUtils.degToRad(2)) || bakedSun.dot(sunDir) < Math.cos(THREE.MathUtils.degToRad(1));
-    const recolor = bakedVersion !== paletteVersion && (sinceBake > 0.2 || transition >= 1);
-    if (turned || recolor) bakeEnvironment();
   };
 
   const api: Atmosphere = {
@@ -1044,16 +1031,13 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       scene.remove(sky, sea, clouds, sun, sun.target);
       skyGeo.dispose();
       skyMat.dispose();
-      (envSky.material as THREE.Material).dispose();
       seaGeo.dispose();
       seaMat.dispose();
       cloudGeo.dispose();
       cloudMat.dispose();
       noiseTex.dispose();
-      if (scene.environment === envTarget?.texture) scene.environment = prevEnvironment;
+      if (sceneWithEnv.environmentNode === envNode) sceneWithEnv.environmentNode = prevEnvNode;
       if (sceneWithFog.fogNode === fogNode) sceneWithFog.fogNode = prevFogNode;
-      envTarget?.dispose();
-      pmrem?.dispose();
       sun.dispose();
     },
     params,
@@ -1073,12 +1057,6 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       sea.visible = v;
       clouds.visible = v && params.farClouds;
       sceneWithFog.fogNode = v ? fogNode : prevFogNode;
-    },
-    get envBakes() {
-      return self.envBakes;
-    },
-    set envBakes(v: number) {
-      self.envBakes = v;
     },
   };
   centerGoal.set(0, 0, 0);
