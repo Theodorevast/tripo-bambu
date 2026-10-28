@@ -7,10 +7,8 @@ import { PRESETS } from './presets';
 const sphereNormal = () => normalize(positionWorld.sub(modelPosition));
 const toCamera = () => normalize(cameraPosition.sub(positionWorld));
 
-// 小水塘：水面是一层球壳，地形高过它的地方把它挡住，只在洼地里露出来。偏青的浅水，比较光滑，有一点通透
-export function waterMaterial(preset: PresetId): THREE.MeshStandardNodeMaterial {
-  return new THREE.MeshStandardNodeMaterial({ color: PRESETS[preset].water, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.62 });
-}
+// 水面（小水塘）：材质、几何都在 nature/water.ts（按地表网格挑出水塘、带水深；浅深渐变、岸边白沫、闪光、水底光斑）
+export { waterMaterial } from '../nature/water';
 
 // 大气：背面渲染的薄外壳，叠加混合。d 是视线和外壳法线夹角的余弦，r 是外壳半径（本地单位），
 // 这条视线离球心最近的距离就是 b = r·√(1 − d²)。t 把 b 换算到「星球半径 → 外壳边缘」的 0..1：

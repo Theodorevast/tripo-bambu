@@ -9,6 +9,7 @@ import { applyLook, LOOK, TONE_MAPPINGS } from './scenes/look';
 import { SHOTS } from './scenes/shots';
 import { SKY, WEATHER, type World } from './scenes/world';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
+import { tuneWater, WATER, WATER_COLORS } from './nature/water';
 import { toast } from './ui/toast';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
@@ -58,6 +59,7 @@ export function tuneJson(world?: World): string {
       walk: WALK,
       museumLook: LOOK,
       museumLights: LIGHTS,
+      water: { ...WATER, colors: WATER_COLORS },
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
     2,
@@ -107,6 +109,8 @@ export function installTune(world: World): void {
     f.on('change', () => applyGroundPalette());
     void id;
   }
+
+  tuneWater(pane); // —— Water ——（nature/water.ts）
 
   // —— Grass ——
   const grass = pane.addFolder({ title: 'Grass', expanded: false });

@@ -17,12 +17,14 @@ import { installDebugHooks } from './debug';
 import { Editor } from './editor/editor';
 import { installWalkDebug } from './play/debug';
 import { WalkMode } from './play/walkMode';
+import { installWater } from './nature/water';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 // 本机有私有的真实模型时（开发环境，.tmp/local-models/），「你的星球」上的占位作品换成它们（assets/localWorks.ts）
 const seed = await applyLocalWorks(seedJson as unknown as Seed);
 const store = new LocalStore(seed, browserStorage());
 const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!);
+installWater(world); // 水面每帧取雨量、角色涉水放波纹
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);

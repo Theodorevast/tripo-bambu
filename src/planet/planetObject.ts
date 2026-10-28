@@ -4,7 +4,8 @@ import type { Placement, PlanetRecipe, PresetId } from '../data/types';
 import { buildTerrainGeometry, LOD_LOW } from './generate';
 import { groundMaterial } from './ground';
 import { maskWorks, PlanetMask } from './mask';
-import { atmosphereMaterial, ringMaterial, waterMaterial } from './materials';
+import { atmosphereMaterial, ringMaterial } from './materials';
+import { createWater } from '../nature/water';
 import { makeHeightFn, seaRadius, type HeightFn } from './noise';
 import { MAX_PLINTH_RADIUS } from './placement';
 import { PLANET_RADIUS, PRESETS } from './presets';
@@ -100,7 +101,7 @@ export class PlanetObject {
     this.sea = seaRadius(preset);
     this.rebuildMask(false);
     this.rebuildTerrain();
-    if (this.sea > 0) this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(this.sea, 24), waterMaterial(preset)));
+    if (this.sea > 0) this.addPart(createWater(this));
     if (this.recipe.atmosphere) {
       const r = R * (1 + PRESETS[preset].amp) * 1.05; // 薄外壳：比最高的地形再高 5%，光晕只占轮廓外窄窄一圈
       this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 8), atmosphereMaterial(preset, R, this.haloStrengthNode)));
