@@ -14,6 +14,8 @@ import { MembersPage } from './ui/membersPage';
 import { MuseumPage } from './ui/museumPage';
 import { installDebugHooks } from './debug';
 import { Editor } from './editor/editor';
+import { installWalkDebug } from './play/debug';
+import { WalkMode } from './play/walkMode';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 const seed = seedJson as unknown as Seed;
@@ -22,17 +24,19 @@ const world = await World.create(document.querySelector<HTMLCanvasElement>('#sta
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
+const walk = new WalkMode(app, planetScreen);
 app.planetLayer = {
   enter: (team) => {
     planetScreen.enter(team); // 立即返回：展台马上摆好，模型在后台加载
     editor.restoreTempWorks(team); // 这次页面里摆过的临时作品不在存档里，回到自己的星球时重新摆上
   },
-  leave: () => { editor.deactivate(); planetScreen.leave(); },
+  leave: () => { walk.exit(true); editor.deactivate(); planetScreen.leave(); },
 };
 // Members / Museum 打开时先退出编辑：看不见星球时 Delete、Q / E 不能再改它，拖到一半的位置也先存好
 let openSheet: Sheet | null = null;
 const sheet = (s: Sheet): Sheet => ({
   open: (team, route) => {
+    walk.exit(true);
     editor.deactivate();
     openSheet = s;
     return s.open(team, route);
@@ -45,9 +49,16 @@ const sheet = (s: Sheet): Sheet => ({
 // 顶栏压在 Members / Museum 上面，开着页面也点得到 Edit：先回星球页（关掉页面），再切换编辑
 app.onEdit = () => {
   if (openSheet) app.closeSheet();
+  walk.exit(true); // 编辑和漫游互斥：漫游中点 Edit，镜头立刻回到轨道镜头再进编辑
   editor.toggle();
 };
+app.onWalk = () => {
+  if (openSheet) app.closeSheet();
+  editor.deactivate();
+  walk.toggle();
+};
 installDebugHooks(app, planetScreen);
+installWalkDebug(app, walk);
 app.members = sheet(new MembersPage(app.root, seed.you.memberId, () => app.closeSheet(), (workId) => {
   const team = app.currentTeam;
   if (team) app.navigate({ view: 'museum', teamId: team.id, workId });
@@ -63,3 +74,4 @@ if (new URLSearchParams(location.search).has('tune')) {
 // 星球都摆进场景了：开场之前在后台把着色器编译好，开场飞行的第一帧不卡
 await world.warmUp();
 await app.start();
+void walk.preload(); // 角色模型在后台加载、预编译：第一次点 Walk 时不卡

@@ -32,6 +32,7 @@ export class App {
   members: Sheet | null = null;
   museum: Sheet | null = null;
   onEdit: () => void = () => {};
+  onWalk: () => void = () => {};
   private currentTeamId: string | null = null;
   // 路由排队：一次切换（镜头飞行）进行中又来了新的跳转，只留最新的一个，等这次结束后执行，中间的跳过
   private readonly routes = new LatestQueue<Route>((route) => this.show(route), (err) => {
@@ -50,6 +51,7 @@ export class App {
       back: () => this.navigate({ view: 'galaxy' }),
       members: () => { if (this.currentTeamId) this.navigate({ view: 'members', teamId: this.currentTeamId }); },
       museum: () => { if (this.currentTeamId) this.navigate({ view: 'museum', teamId: this.currentTeamId }); },
+      walk: () => this.onWalk(),
       edit: () => this.onEdit(),
     });
     this.galaxyUi = new GalaxyUi(world, root, (teamId) => this.navigate({ view: 'planet', teamId }));

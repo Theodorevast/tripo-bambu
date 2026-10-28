@@ -1,0 +1,4 @@
+/* 漫游模式：作品标签和操作提示。样式先从简：标签沿用悬浮标签（.float-label）的外观，只是能点；整体样式由换皮任务统一 */
+#app > .float-label.walk-label { pointer-events: auto; cursor: pointer; }
+.walk-label .wl-by { color: var(--ink-dim); font-size: 12px; }
+#app > .walk-hint { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 8px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); text-align: center; pointer-events: none; }

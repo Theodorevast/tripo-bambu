@@ -18,6 +18,8 @@ const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2
 export class CameraRig {
   readonly camera = new THREE.PerspectiveCamera(45, 1, 0.1, 6000);
   readonly controls: OrbitControls;
+  // 外部接管镜头（漫游的跟随镜头）：设了就每帧只调它摆镜头，OrbitControls、飞行、抬头都不碰镜头
+  drive: ((dt: number) => void) | null = null;
   private lift = 0;
   private flight: { fromPos: THREE.Vector3; fromTarget: THREE.Vector3; fromLift: number; fromFov: number; to: Framing; elapsed: number; seconds: number; done: () => void } | null = null;
 
@@ -63,6 +65,11 @@ export class CameraRig {
   }
 
   update(dt: number): void {
+    if (this.drive) {
+      this.drive(dt);
+      this.camera.updateMatrixWorld();
+      return;
+    }
     const fl = this.flight;
     if (!fl) {
       this.controls.update(dt);
