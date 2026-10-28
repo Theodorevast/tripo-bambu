@@ -8,7 +8,6 @@ import { MultiView } from '../museum/multiview';
 import { Viewer } from '../museum/viewer';
 import { toHash, type Route } from '../router';
 import { addStudioLights } from '../scenes/lights';
-import { compileUnculled } from '../scenes/stager';
 import type { World } from '../scenes/world';
 import { el } from './dom';
 import { toast } from './toast';
@@ -136,7 +135,7 @@ export class MuseumPage implements Sheet {
       scene.add(model.object);
       const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 100);
       frameModel(camera, model.height);
-      const compiled = queue.then(() => (token === this.token ? compileUnculled(mv.renderer, scene, camera, scene) : undefined));
+      const compiled = queue.then(() => (token === this.token ? mv.compile(scene, camera) : undefined));
       queue = compiled.catch(() => {});
       await compiled;
       if (token !== this.token) return;
