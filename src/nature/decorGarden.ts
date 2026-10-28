@@ -332,8 +332,13 @@ export class Gardens {
   }
 
   // 预编译用：每种零件先画 1 个（数量 0 的网格编译时会被跳过）
+  // 也要设 visible：没有花园时 pack() 把空网格都藏起来了，compileAsync 跳过不可见的，开场就白编了（WebGL2 上实测 0 ms，第一次画时才同步编译）
   showOneEach(on: boolean): void {
-    for (const m of this.meshes) m.count = on ? 1 : 0;
+    for (const m of this.meshes) {
+      m.count = on ? 1 : 0;
+      m.visible = on;
+    }
+    this.group.visible = on || this.group.visible;
     if (!on) this.packed = false;
   }
 
