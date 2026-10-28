@@ -16,6 +16,13 @@ const canvas = document.querySelector<HTMLCanvasElement>('#c')!;
 const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, forceWebGL: params.has('webgl'), trackTimestamp: true });
 await renderer.init();
 const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+// 显卡名字：写进自查结果，性能数字要知道是哪块卡上量的
+function adapterName(): string {
+  const b = renderer.backend as { adapter?: { info?: { vendor?: string; architecture?: string; description?: string } }; gl?: WebGL2RenderingContext };
+  if (b.adapter?.info) return [b.adapter.info.vendor, b.adapter.info.architecture, b.adapter.info.description].filter(Boolean).join(' ');
+  const ext = b.gl?.getExtension('WEBGL_debug_renderer_info');
+  return ext && b.gl ? String(b.gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown';
+}
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.95;
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -292,7 +299,8 @@ function view(name: string): void {
     } else {
       sun.azimuth = 150;
       sun.elevation = 17;
-      walker.pitch = -0.16;
+      // fill：往下看，整屏都是近处的草（量 GPU 时间的最坏情况）
+      walker.pitch = name === 'fill' ? -0.62 : -0.16;
     }
     setMode('ground');
   }
@@ -379,23 +387,24 @@ if (!params.has('nopane')) {
 // —— GPU 计时：草开着和关着各画若干帧，取中位数相减 ——
 const gpuSamples: number[] = [];
 let sampling = false;
+// 拿不到时间戳（浏览器没开放 timestamp-query 或 WebGL 的计时扩展）时，等满 4 倍帧数就放弃，返回 NaN
 async function sampleGpu(frames: number): Promise<number> {
   gpuSamples.length = 0;
   sampling = true;
-  while (gpuSamples.length < frames) await new Promise((r) => requestAnimationFrame(r));
+  for (let i = 0; i < frames * 4 && gpuSamples.length < frames; i++) await new Promise((r) => requestAnimationFrame(r));
   sampling = false;
+  if (gpuSamples.length === 0) return NaN;
   const s = [...gpuSamples].sort((a, b) => a - b);
   return s[Math.floor(s.length / 2)];
 }
-async function measure(frames = 90): Promise<{ withGrass: number; without: number; grass: number; backend: string; supported: boolean }> {
-  const supported = renderer.hasFeature('timestamp-query') || backend === 'WebGL2';
+async function measure(frames = 90): Promise<{ withGrass: number; without: number; grass: number; backend: string; samples: number }> {
   grass.object.visible = false;
   await sampleGpu(20);
   const without = await sampleGpu(frames);
   grass.object.visible = true;
   await sampleGpu(20);
   const withGrass = await sampleGpu(frames);
-  return { withGrass, without, grass: withGrass - without, backend, supported };
+  return { withGrass, without, grass: withGrass - without, backend, samples: gpuSamples.length };
 }
 
 // —— 主循环 ——
@@ -441,6 +450,7 @@ Object.assign(window, {
     renderer,
     camera,
     backend,
+    adapter: adapterName(),
     view,
     measure,
     stats: () => ({ ...grass.stats, bands: [...grass.stats.bands], backend, frameMs: live.frameMs, camHeight: camera.position.distanceTo(center) - R }),

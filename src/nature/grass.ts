@@ -876,8 +876,6 @@ export function createGrassField(opts: GrassOptions): GrassField {
   const tmpDir = new THREE.Vector3();
   const camWorld = new THREE.Vector3();
   const camLocal = new THREE.Vector3();
-  const camDir = new THREE.Vector3();
-  const sphere = new THREE.Sphere();
   const frustum = new THREE.Frustum();
   const projView = new THREE.Matrix4();
   const bufferSize = new THREE.Vector2();
@@ -942,33 +940,42 @@ export function createGrassField(opts: GrassOptions): GrassField {
     return true;
   };
 
-  const writeEntry = (list: (typeof lists)[number], e: number, slot: number, tile: number, scale: number) => {
+  // 写绘制列表的一项（热路径：不建闭包、不建对象）。值没变就不标记上传
+  const writeEntry = (list: (typeof lists)[number], entry: number, slot: number, tile: number) => {
+    // 瓦片的密度倍数：面积（让每平方米的草一样多）× 新瓦片的淡入
+    const scale = tiles.area[tile] * Math.min(1, (clock - slotBirth[slot]) / BIRTH_FADE);
     const d = list.data;
     const fr = tiles.frame;
     const o = tile * 9;
-    const set = (i: number, v: number) => {
-      if (d[i] !== v) {
-        d[i] = v;
-        list.dirty = true;
-      }
-    };
     const row = MAX_LIST * 4;
-    const i0 = e * 4;
-    set(i0, fr[o]);
-    set(i0 + 1, fr[o + 1]);
-    set(i0 + 2, fr[o + 2]);
-    set(i0 + 3, slot);
-    set(row + i0, fr[o + 3]);
-    set(row + i0 + 1, fr[o + 4]);
-    set(row + i0 + 2, fr[o + 5]);
-    set(row + i0 + 3, tile);
-    set(2 * row + i0, fr[o + 6]);
-    set(2 * row + i0 + 1, fr[o + 7]);
-    set(2 * row + i0 + 2, fr[o + 8]);
-    set(2 * row + i0 + 3, scale);
+    const i0 = entry * 4;
+    let changed = false;
+    for (let r = 0; r < 3; r++) {
+      const k = r * row + i0;
+      const a = fr[o + r * 3];
+      const b = fr[o + r * 3 + 1];
+      const c = fr[o + r * 3 + 2];
+      const w = r === 0 ? slot : r === 1 ? tile : scale;
+      if (d[k] !== a || d[k + 1] !== b || d[k + 2] !== c || d[k + 3] !== w) {
+        d[k] = a;
+        d[k + 1] = b;
+        d[k + 2] = c;
+        d[k + 3] = w;
+        changed = true;
+      }
+    }
+    if (changed) list.dirty = true;
   };
 
-  const colorsSeen = { key: '' };
+  // 颜色字符串变了才重新解析（不每帧拼字符串）
+  const colorsSeen = { root: '', lush: '', fresh: '', dry: '', tip: '', shadow: '' };
+  const syncColor = (key: keyof typeof colorsSeen) => {
+    const v = settings.colors[key];
+    if (v !== colorsSeen[key]) {
+      colorsSeen[key] = v;
+      U[key].value.set(v);
+    }
+  };
   const applySettings = () => {
     U.fullRadius.value = settings.fullRadius;
     U.radius.value = settings.radius;
@@ -981,17 +988,12 @@ export function createGrassField(opts: GrassOptions): GrassField {
     U.dryness.value = settings.dryness;
     U.windDir.value.copy(settings.windDir).normalize();
     U.sea.value = planet.sea ?? -1;
-    const c = settings.colors;
-    const key = `${c.root}${c.lush}${c.fresh}${c.dry}${c.tip}${c.shadow}`;
-    if (key !== colorsSeen.key) {
-      colorsSeen.key = key;
-      U.root.value.set(c.root);
-      U.lush.value.set(c.lush);
-      U.fresh.value.set(c.fresh);
-      U.dry.value.set(c.dry);
-      U.tip.value.set(c.tip);
-      U.shadow.value.set(c.shadow);
-    }
+    syncColor('root');
+    syncColor('lush');
+    syncColor('fresh');
+    syncColor('dry');
+    syncColor('tip');
+    syncColor('shadow');
   };
 
   const clearLists = () => {
@@ -1001,9 +1003,12 @@ export function createGrassField(opts: GrassOptions): GrassField {
     stats.bands.fill(0);
   };
 
+  // 视锥的 6 个平面 (nx, ny, nz, d)，每帧从 THREE.Frustum 抄一次；逐块测试只读这个数组，不往 Vector3 里写（V8 里写 Vector3 的字段会装箱分配）
+  const planes = new Float64Array(24);
+
   function update(camera: THREE.Camera, timeSec: number): void {
     frame++;
-    const dt = lastTime < 0 ? 0 : THREE.MathUtils.clamp(timeSec - lastTime, 0, 0.1);
+    const dt = lastTime < 0 ? 0 : Math.min(0.1, Math.max(0, timeSec - lastTime));
     lastTime = timeSec;
     clock += dt;
     applySettings();
@@ -1020,40 +1025,61 @@ export function createGrassField(opts: GrassOptions): GrassField {
     camWorld.setFromMatrixPosition(camera.matrixWorld);
     camLocal.copy(camWorld).sub(planet.center);
     U.cam.value.copy(camLocal);
-    const camDist = camLocal.length();
+    const lx = camLocal.x;
+    const ly = camLocal.y;
+    const lz = camLocal.z;
+    const camDist = Math.sqrt(lx * lx + ly * ly + lz * lz);
     if (camDist < 1e-6) {
       clearLists();
       return;
     }
-    camDir.copy(camLocal).divideScalar(camDist);
+    const ux = lx / camDist;
+    const uy = ly / camDist;
+    const uz = lz / camDist;
     // 每像素对应的视角：远处的草不细于约 1 个像素
     opts.renderer.getDrawingBufferSize(bufferSize);
-    const fov = (camera as THREE.PerspectiveCamera).isPerspectiveCamera ? THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).getEffectiveFOV()) : 1;
+    const persp = camera as THREE.PerspectiveCamera;
+    const fov = persp.isPerspectiveCamera ? (persp.getEffectiveFOV() * Math.PI) / 180 : 1;
     U.pixelAngle.value = fov / Math.max(1, bufferSize.y);
 
     const radius = settings.radius;
+    const flowerRadius = settings.flowerRadius;
+    const fullRadius = settings.fullRadius;
     const prefetch = radius + 8;
     const groundR = planet.radius;
-    // 球冠：星球上到镜头距离不超过 prefetch 的点（地形起伏留余量）
-    const capCos = (groundR * groundR + camDist * camDist - prefetch * prefetch) / (2 * groundR * camDist);
     if (camDist - (groundR + maxRelief) > prefetch) {
       clearLists();
       return;
     }
-    const capAngle = Math.acos(THREE.MathUtils.clamp(capCos, -1, 1)) + maxRelief / groundR;
+    // 球冠：星球上到镜头距离不超过 prefetch 的点（地形起伏留余量）
+    const capCos = (groundR * groundR + camDist * camDist - prefetch * prefetch) / (2 * groundR * camDist);
+    const capAngle = Math.acos(Math.min(1, Math.max(-1, capCos))) + maxRelief / groundR;
 
     projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(projView, camera.coordinateSystem, camera.reversedDepth);
+    // 平面换到星球局部坐标：n·(p + center) + d = n·p + (d + n·center)
+    const pcx = planet.center.x;
+    const pcy = planet.center.y;
+    const pcz = planet.center.z;
+    for (let i = 0; i < 6; i++) {
+      const p = frustum.planes[i];
+      planes[i * 4] = p.normal.x;
+      planes[i * 4 + 1] = p.normal.y;
+      planes[i * 4 + 2] = p.normal.z;
+      planes[i * 4 + 3] = p.constant + p.normal.x * pcx + p.normal.y * pcy + p.normal.z * pcz;
+    }
 
-    for (const l of lists) l.len = 0;
+    for (let b = 0; b < lists.length; b++) lists[b].len = 0;
     flowerList.len = 0;
     stats.generated = 0;
     const genStart = performance.now();
     const firstFrame = frame === 1;
     const flowerOn = settings.flowers > 0;
+    const bladeReach = HEIGHT_MAX * settings.height * 1.4;
+    const fullDensity = density * densityScale * BLADES_PER_TILE;
 
     // 从镜头脚下的瓦片开始广度优先，大致由近到远
-    const start = tiles.tileOf(camDir.x, camDir.y, camDir.z);
+    const start = tiles.tileOf(ux, uy, uz);
     let head = 0;
     let tail = 0;
     queue[tail++] = start;
@@ -1064,7 +1090,7 @@ export function createGrassField(opts: GrassOptions): GrassField {
       const cx = tc[t * 3];
       const cy = tc[t * 3 + 1];
       const cz = tc[t * 3 + 2];
-      const ang = Math.acos(THREE.MathUtils.clamp(cx * camDir.x + cy * camDir.y + cz * camDir.z, -1, 1));
+      const ang = Math.acos(Math.min(1, Math.max(-1, cx * ux + cy * uy + cz * uz)));
       if (ang - tiles.spread[t] > capAngle && t !== start) continue;
       for (let k = 0; k < 4; k++) {
         const nb = tiles.neighbors[t * 4 + k];
@@ -1082,23 +1108,37 @@ export function createGrassField(opts: GrassOptions): GrassField {
       }
       slotSeen[slot] = frame;
       // 瓦片到镜头的最近距离（偏小，保证名次淡出的那几根也画到）
-      const rMid = (slotRmin[slot] + slotRmax[slot]) / 2;
-      const halfDiag = tiles.spread[t] * slotRmax[slot];
-      const slack = halfDiag + (slotRmax[slot] - slotRmin[slot]) / 2 + 0.1;
-      const dx = cx * rMid - camLocal.x;
-      const dy = cy * rMid - camLocal.y;
-      const dz = cz * rMid - camLocal.z;
+      const rMin = slotRmin[slot];
+      const rMax = slotRmax[slot];
+      const rMid = (rMin + rMax) / 2;
+      const slack = tiles.spread[t] * rMax + (rMax - rMin) / 2 + 0.1;
+      const dx = cx * rMid - lx;
+      const dy = cy * rMid - ly;
+      const dz = cz * rMid - lz;
       const dNear = Math.max(0, Math.sqrt(dx * dx + dy * dy + dz * dz) - slack);
-      if (dNear >= radius && (!flowerOn || dNear >= settings.flowerRadius)) continue;
-      sphere.center.set(cx * rMid + planet.center.x, cy * rMid + planet.center.y, cz * rMid + planet.center.z);
-      sphere.radius = slack + HEIGHT_MAX * settings.height * 1.4;
-      if (!frustum.intersectsSphere(sphere)) continue;
+      if (dNear >= radius && (!flowerOn || dNear >= flowerRadius)) continue;
+      // 视锥：包围球（瓦片 + 起伏 + 草高）在某个平面外侧就跳过
+      const sx = cx * rMid;
+      const sy = cy * rMid;
+      const sz = cz * rMid;
+      const sr = slack + bladeReach;
+      let inside = true;
+      for (let i = 0; i < 24; i += 4) {
+        if (planes[i] * sx + planes[i + 1] * sy + planes[i + 2] * sz + planes[i + 3] < -sr) {
+          inside = false;
+          break;
+        }
+      }
+      if (!inside) continue;
+      // 和 densityAt() 同一条曲线（这里内联，不让浮点数跨函数传递）
+      const nearD = Math.max(dNear, 1e-3);
+      const near = Math.min(1, (fullRadius / nearD) * (fullRadius / nearD));
+      const ft = Math.min(1, Math.max(0, (dNear - radius * 0.55) / (radius * 0.45)));
       const birth = Math.min(1, (clock - slotBirth[slot]) / BIRTH_FADE);
-      const scale = tiles.area[t] * birth;
-      const needed = density * densityScale * densityAt(dNear, settings.fullRadius, radius) * scale * BLADES_PER_TILE;
+      const needed = fullDensity * near * (1 - ft * ft * (3 - 2 * ft)) * tiles.area[t] * birth;
       const band = bandFor(needed);
-      if (band >= 0 && lists[band].len < MAX_LIST) writeEntry(lists[band], lists[band].len++, slot, t, scale);
-      if (flowerOn && dNear < settings.flowerRadius && flowerList.len < MAX_LIST) writeEntry(flowerList, flowerList.len++, slot, t, scale);
+      if (band >= 0 && lists[band].len < MAX_LIST) writeEntry(lists[band], lists[band].len++, slot, t);
+      if (flowerOn && dNear < flowerRadius && flowerList.len < MAX_LIST) writeEntry(flowerList, flowerList.len++, slot, t);
     }
 
     // 实例数、上传改过的列表
