@@ -1,4 +1,4 @@
-// 生机层自查：node dev/life.check.mjs [--out <目录>] [--no-func] [--no-perf] [--no-webgpu-perf] [--no-video] [--no-webgl] [--quick]
+// 生机层自查：node dev/life.check.mjs [--out <目录>] [--no-func] [--no-perf] [--no-webgpu-perf] [--webgl-perf] [--no-video] [--no-webgl] [--quick]
 // 1. 功能：脚步扬尘出现 / 停下后消失、踩踏图写入并按时恢复、蝴蝶受惊、雨量平滑和回调、水花、萤火虫只在傍晚、页面无报错
 // 2. 堆分配采样：走路 + 下雨 3 秒，src/nature/ 的调用下面没有构造 three 对象
 // 3. 截图（WebGPU，1440×900）：n3-walk、n3-rain、n3-evening、n3-trample、n3-webgl2
@@ -292,7 +292,9 @@ try {
     await shot(page, 'n3-webgl2.png');
     check('WebGL2 页无报错', errors.length === 0, errors.slice(0, 3).join(' | '));
     await context.close();
-    if (!flag('--no-perf')) {
+    // WebGL2 的 GPU 计时默认不跑：不限帧率 + 每帧 11 遍渲染 + 计时查询的放大测量，在 WebGL2（ANGLE）上连续两次把页面跑崩了
+    // （见报告「顾虑」第 1 条）。要测时加 --webgl-perf
+    if (!flag('--no-perf') && flag('--webgl-perf')) {
       try {
         summary.perf.webgl2 = await perf('WebGL2', '&auto&webgl');
       } catch (e) {
@@ -311,5 +313,6 @@ try {
   const failed = results.filter((r) => !r.ok);
   writeFileSync(path.join(OUT, 'n3-check.json'), JSON.stringify(summary, null, 2));
   console.log(`\n${results.length - failed.length}/${results.length} 通过${failed.length ? `；失败：${failed.map((f) => f.name).join('；')}` : ''}`);
-  process.exitCode = failed.length ? 1 : 0;
+  // 页面崩过时浏览器或开发服务器的句柄可能还挂着，事件循环不退出：直接退出
+  process.exit(failed.length ? 1 : 0);
 }

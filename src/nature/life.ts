@@ -57,7 +57,7 @@ export interface LifeStats {
   instances: Record<LifeEffect, number>;
   trampleSize: number;
   tramplePasses: number; // 累计的踩踏图离屏 pass 次数
-  cpuMs: number; // 上一次 update() 的 CPU 耗时
+  cpuMs: number; // update() 的 CPU 耗时（毫秒，约 1 秒的指数平均）
   // 以下给自查脚本用
   dustAlive: number; // 正在播放的尘土粒子
   splashesAlive: number; // 正在播放的水花
@@ -1302,7 +1302,7 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
     dust.mesh.visible = enabled.dust;
     counts.dust = enabled.dust ? DUST_SLOTS : 0;
 
-    // 踩踏图：站在地上就盖章（走动时每帧；站着不动时每 0.5 秒补一次），恢复按固定间隔
+    // 踩踏图：站在地上就盖章（每走 10 厘米一次；站着不动时每 0.5 秒补一次），恢复按固定间隔
     if (enabled.trample) {
       trample.decay(dt);
       sinceStamp += dt;
@@ -1311,7 +1311,9 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
         _localA.copy(hasLastStamp ? lastStamp : _localB);
         // 一帧挪了 2 米以上是传送（换星球、重生），不把两点连起来
         if (_localA.distanceToSquared(_localB) > 4) _localA.copy(_localB);
-        const moved = _localA.distanceToSquared(_localB) > 1e-4;
+        // 每走 10 厘米盖一道（线段把两次之间连起来，不会断），站着不动时每 0.5 秒补一次：
+        // 每次盖章是一次 renderer.render()，three 每次渲染调用在 CPU 上有固定开销，不必每帧都做
+        const moved = _localA.distanceToSquared(_localB) > 0.01;
         if (moved || sinceStamp > 0.5) {
           trample.stamp(_localA, _localB, _localB.length(), 1);
           lastStamp.copy(_localB);
@@ -1344,7 +1346,8 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
       butterflies.a.needsUpdate = true;
       butterflies.b.needsUpdate = true;
     }
-    cpuMs = performance.now() - t0;
+    // performance.now() 只精确到 0.1 毫秒：取指数平均（约 1 秒），数值才有意义
+    cpuMs += (performance.now() - t0 - cpuMs) * 0.03;
   }
 
   function setWalker(pos: THREE.Vector3 | null, velocity: THREE.Vector3, grounded: boolean): void {
