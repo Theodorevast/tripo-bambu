@@ -124,7 +124,6 @@ export class PlanetView {
     }
     this.gardens = new Gardens(world.life?.influence);
     this.dust = world.scene ? new DustPuffs() : null;
-    if (this.dust) world.scene.add(this.dust.mesh);
     // 等开场预热做完（阴影贴图建好）再编：主画面和投影那一遍都编好。花园每种零件先放一个、尘土先显示（编译跳过数量 0 和不可见的）
     // 投影那一遍另外用 compileShadowExact 编（shadowWarm.ts：Stager.compileShadow 在 three r186 上编出来的阴影管线对不上，进星球时会同步重建）
     const shadowLight = () => world.stage.shadowLight?.() ?? null;
@@ -141,12 +140,14 @@ export class PlanetView {
         } finally {
           this.gardens.showOneEach(false);
         }
+        // 尘土编完才挂进场景：还没挂进去的东西，GatedStager 在 WebGL2 上会先画一次（ANGLE 第一次拿着色器来画还要停一下）
         if (this.dust) {
           this.dust.showForCompile(true);
           try {
             await world.stage.precompile(this.dust.mesh);
           } finally {
             this.dust.showForCompile(false);
+            world.scene.add(this.dust.mesh);
           }
         }
       })
