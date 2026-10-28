@@ -10,6 +10,7 @@ import { onPlanetRadius, PLANET_RADIUS } from '../planet/presets';
 import { CameraRig, type Framing } from './camera';
 import { Dressing } from './dressing';
 import { galaxyPositions } from './layout';
+import { MainPost } from './post';
 import { galaxyFraming, planetFraming } from './shots';
 import { compileShadow, compileUnculled, Stager } from './stager';
 
@@ -73,6 +74,7 @@ export class World {
   readonly atmosphere: Atmosphere; // 天空、云海、太阳和天光（nature/atmosphere.ts）；色调映射和曝光也归它
   readonly life: Life; // 生机层：脚步扬尘、踩踏图、蝴蝶、飘落物、萤火虫、雨（nature/life.ts），只在聚焦的星球上
   readonly dressing: Dressing; // 聚焦星球上的草、花、石头
+  readonly post: MainPost; // 后处理：调色、接触阴影、日落光束（post.ts）
   focused: PlanetEntry | null = null;
   hovered: PlanetEntry | null = null;
   paused = false; // Museum 打开时主画面被盖住，停止渲染
@@ -103,6 +105,7 @@ export class World {
     this.renderer = renderer;
     this.warm = new Promise((resolve) => { this.warmed = resolve; });
     this.rig = new CameraRig(renderer.domElement);
+    this.post = new MainPost(renderer, this.scene, this.rig.camera);
     this.stage = new Stager(renderer, this.scene, this.rig.camera);
     this.stage.shadowLight = () => (SHADOW.enabled ? this.atmosphere.sun : null);
     // 天空、云海、光：色调映射（AgX）和曝光由它设，World 不再调 useLook（Museum、查看器的渲染器照旧用 look.ts）。
@@ -198,6 +201,7 @@ export class World {
       // 先画一帧（阴影贴图这时才建出来），再在后台编石头和展台投影那一遍的管线
       this.primeShadows();
       await compileShadow(this.renderer, rocks.group, SHADOW.enabled ? this.atmosphere.sun : null, this.scene);
+      await this.post.compile();
     } finally {
       this.scene.remove(rocks.group, grass);
       this.life.prewarm(false);
@@ -504,7 +508,7 @@ export class World {
     }
     this.dressing.update(camera, light);
     if (this.paused || this.warming) return;
-    this.renderer.render(this.scene, this.rig.camera);
+    this.post.render(this);
     for (const hook of this.renderHooks) hook();
   }
 
