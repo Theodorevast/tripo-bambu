@@ -27,7 +27,7 @@ const onSurface = (obj: THREE.Object3D, dir: THREE.Vector3, lift = 0) => {
   obj.quaternion.setFromUnitVectors(up, d);
   return obj;
 };
-const planet = new THREE.Mesh(new THREE.SphereGeometry(R, 192, 128), new THREE.MeshStandardNodeMaterial({ color: '#6e9a3e', roughness: 0.95, metalness: 0 }));
+const planet = new THREE.Mesh(new THREE.SphereGeometry(R, 192, 128), new THREE.MeshStandardNodeMaterial({ color: '#4f7d2c', roughness: 0.95, metalness: 0 }));
 planet.name = 'planet';
 scene.add(planet);
 
@@ -101,12 +101,12 @@ function setView(mode: View): void {
   view.mode = mode;
   if (mode === 'orbit') {
     // 斜上方俯瞰：星球在画面中下部，上方露出地平线和天空（参考 F2）
-    controls.target.set(0, 6, 0);
+    controls.target.set(0, 12, 0);
     controls.minDistance = R * 1.45;
     controls.maxDistance = R * 18;
     controls.minPolarAngle = 0;
     controls.maxPolarAngle = Math.PI;
-    camera.position.set(-62, 40, 108);
+    camera.position.set(-66, 36, 112);
     camera.fov = 40;
   } else {
     // 站在人身后，朝太阳那边的云海看（太阳在画面右上方，参考 F4）
@@ -136,6 +136,7 @@ addEventListener('keydown', (e) => {
 
 // ---- 计时：每帧读回 GPU 时间（需要 ?timing），记最近 240 帧
 const gpuTimes: number[] = [];
+const bench = { burst: 1 };
 const cpuFrames: number[] = [];
 const ui = { preset: preset0 as AtmospherePreset, gpu: 0, fps: 0, backend };
 let last = performance.now();
@@ -146,7 +147,8 @@ renderer.setAnimationLoop((t) => {
   const dt = Math.min(timer.getDelta(), 0.1);
   controls.update(dt);
   atmosphere.update(dt, camera);
-  renderer.render(scene, camera);
+  // 量开销时一帧画 burst 次（同一帧的时间戳会加在一起，读回来再除以 burst）：把每个渲染通道固定的空转摊薄
+  for (let i = 0; i < bench.burst; i++) renderer.render(scene, camera);
   frames++;
   const now = performance.now();
   cpuFrames.push(now - last);
@@ -237,14 +239,19 @@ window.__sky = {
   },
   waitFrames,
   // 等 n 帧，返回这段时间每帧的 GPU 时间（ms）和帧间隔
-  async measure(n = 120) {
+  async measure(n = 120, burst = 1) {
+    bench.burst = burst;
+    await waitFrames(3);
     gpuTimes.length = 0;
     await waitFrames(n);
     const g = [...gpuTimes];
-    return { gpu: g, median: median(g), frames: n, cpu: median(cpuFrames) };
+    bench.burst = 1;
+    const per = g.map((v) => v / burst);
+    return { gpu: per, median: median(per), frames: n, burst, cpu: median(cpuFrames) };
   },
   camera,
   controls,
+  renderer,
 };
 await waitFrames(4);
 window.__ready = true;
