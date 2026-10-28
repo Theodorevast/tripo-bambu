@@ -33,6 +33,8 @@ import {
   transformNormalToView,
   uniform,
   uniformArray,
+  varying,
+  vec2,
   vec3,
   vec4,
 } from 'three/tsl';
@@ -325,8 +327,9 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // ---- 小波纹（配方「波光粼粼」：两层噪声把法线推歪，频率换算成每米）。风大水面碎一点
   const rs = U.rippleScale;
   const windK = windUniforms.strength.mul(0.9).add(0.55);
-  // 再加一层大的（约 3 米一起伏，慢慢漂）：海面远看时天光的倒影有一条条明暗，不是一整片平的
-  const o0 = noise3v(p.mul(rs.mul(0.33)).add(vec3(t.mul(0.05), t.mul(0.03), t.mul(-0.04))).add(41.3)).sub(0.5);
+  // 再加一层大的（约 3 米一起伏，慢慢漂）：海面远看时天光的倒影有一条条明暗，不是一整片平的。
+  // 频率低，在顶点上算（聚焦时顶点间距约 1 米），片元里只插值：海占满画面时省下一次噪声
+  const o0 = varying(noise3v(p.mul(rs.mul(0.33)).add(vec3(t.mul(0.05), t.mul(0.03), t.mul(-0.04))).add(41.3)).sub(0.5));
   const o1 = noise3v(p.mul(rs.mul(1.1)).add(vec3(t.mul(0.23), t.mul(-0.17), t.mul(0.11)))).sub(0.5);
   const o2 = noise3v(p.mul(rs.mul(2.6)).add(vec3(t.mul(-0.31), t.mul(0.21), t.mul(-0.26))).add(19.7)).sub(0.5);
   const shimmer = o0.mul(0.6).add(o1.mul(keep(rs.mul(1.1)))).add(o2.mul(0.55).mul(keep(rs.mul(2.6)))).mul(U.ripple).mul(windK);
@@ -338,14 +341,24 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // ---- 离水边多远（米）：水深 / 岸坡（岸坡最缓按 3.5% 算，平底的大水塘中间不会算出几十米）。
   // 先减去二次插值可能多出来的那点深度（wd.w）：画出来的水边一定落在地表折线里面（水面和地表真正相交的那条折线
   // 藏在完全透明的那一窄条里），再往里收 3–12 厘米、随噪声弯来弯去。e 是到画出来的水边的距离（米），负数在水外
-  const dist = dq.sub(wd.w.mul(1.2)).div(max(wd.z, 0.035));
-  const edgeN = valueNoise3(p.mul(1.4).add(2.1));
+  const dist = dq.sub(wd.w.mul(1.2)).div(max(wd.z, 0.035)).toVar();
+  // 只在岸边（离水边 lap + 0.8 米以内）和角色脚边才要的两层噪声：水边的弯曲、白沫的碎边。离岸远的像素不算
+  const toWalker = length(positionWorld.sub(U.walker.xyz)).toVar();
+  const shoreNoise = Fn(() => {
+    const r = vec2(0.5, 0.5).toVar();
+    If(dist.lessThan(U.lap.add(0.8)).or(toWalker.lessThan(0.8)), () => {
+      r.assign(vec2(valueNoise3(p.mul(1.4).add(2.1)), valueNoise3(p.mul(7.5).add(vec3(t.mul(0.09), 0, t.mul(-0.06))).add(3.3))));
+    });
+    return r;
+  })().toVar();
+  const edgeN = shoreNoise.x;
+  const fN2 = shoreNoise.y;
   const e = dist.sub(mix(float(0.03), float(0.12), edgeN)).toVar();
   const exists = smoothstep(0.0, max(fwidth(e).mul(1.5), 0.004), e).toVar();
 
-  // ---- 深浅（配方「浅海透明」）：浅处青绿、看得见底，往深处变成蓝绿；大块的不匀，像手涂的
-  const patch = valueNoise3(p.mul(0.33).add(5.3)).sub(0.5);
-  const bigPatch = valueNoise3(p.mul(0.07).add(13.1)).sub(0.5); // 海上十几米一块的深浅（远看像水彩一笔一笔涂的）
+  // ---- 深浅（配方「浅海透明」）：浅处青绿、看得见底，往深处变成蓝绿；大块的不匀，像手涂的（低频，在顶点上算）
+  const patch = varying(valueNoise3(p.mul(0.33).add(5.3)).sub(0.5));
+  const bigPatch = varying(valueNoise3(p.mul(0.07).add(13.1)).sub(0.5)); // 海上十几米一块的深浅（远看像水彩一笔一笔涂的）
   const tone = saturate(d.div(U.deep).add(patch.mul(0.22)).add(bigPatch.mul(0.3)));
   const body = mix(mix(pal.shallow, pal.mid, smoothstep(0.0, 0.55, tone)), pal.deep, smoothstep(0.45, 1.0, tone));
   const pathLen = d.div(max(cosV, 0.35)); // 视线在水里走过的路程：斜着看更不透（掠射时封顶，近岸那一条斜着看也透底）
@@ -354,7 +367,6 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
 
   // ---- 岸边白沫（配方「海岸浪花」），按离水边的米数画：贴着水边一条（宽度随时间轻轻涨落，像水一下一下拍岸），
   // 再往里一圈被噪声撕碎的花边；还有一道从外面推向岸边、越来越淡的浪线，断成一截一截（手画的感觉）
-  const fN2 = valueNoise3(p.mul(7.5).add(vec3(t.mul(0.09), 0, t.mul(-0.06))).add(3.3));
   const breathe = sin(t.mul(0.85).add(patch.mul(9))).mul(0.5).add(0.5);
   const rimW = U.foamWidth.mul(breathe.mul(0.7).add(0.65));
   const ee = e.add(fN2.sub(0.5).mul(0.035).mul(keep(7.5)));
@@ -365,8 +377,7 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   const line = float(1).sub(smoothstep(0, 0.03, abs(ee.sub(lineAt))))
     .mul(smoothstep(0.0, 0.2, phase)).mul(float(1).sub(smoothstep(0.6, 1.0, phase))).mul(smoothstep(0.5, 0.64, fN2));
   // 角色站在水里：腿边一圈碎白沫
-  const toWalker = length(positionWorld.sub(U.walker.xyz));
-  const legs = exp(toWalker.sub(0.2).div(0.05).pow(2).negate()).mul(U.walker.w).mul(smoothstep(0.35, 0.6, fN2));
+  const legs =exp(toWalker.sub(0.2).div(0.05).pow(2).negate()).mul(U.walker.w).mul(smoothstep(0.35, 0.6, fN2));
   // ---- 海冰（配方「海冰」，只有冰川预设的 ice > 0）：岸边先结一圈不规则的薄冰，离岸两三米内漂着一块块冰（慢慢漂），
   // 两极（|y| 超过 iceLat）整片冻住、边缘按噪声抖。冰上有细细的裂纹，冰的边上一道白边
   const iceAmt = iceOf(preset);

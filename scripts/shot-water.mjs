@@ -1,4 +1,4 @@
-// 水面样张：node scripts/shot-water.mjs [输出目录] [--team id] [--only a,b] [--webgl2] [--sky sunset]
+// 水面样张：node scripts/shot-water.mjs [输出目录] [--team id] [--only a,b] [--webgl2] [--sky sunset] [--rain]
 // 1440×900，WebGPU（--webgl2 走 WebGL2）。在星球上找最大的水塘（按高度函数扫一遍），从远处和贴着水边各拍几张：
 //   water-planet（星球视图）、water-orbit（轨道镜头斜看水塘，约 9 米外）、water-low（轨道镜头贴着水面看过去，太阳在对面：看反光和闪光）、
 //   water-walk（漫游：翠宝站在岸边、面朝水塘）、water-wade（翠宝走进水里）、water-galaxy（星系全景）
@@ -15,6 +15,7 @@ const only = opt('--only', null)?.split(',') ?? null;
 const webgl2 = flag('--webgl2');
 const team = opt('--team', 'moss-and-mesh');
 const sky = opt('--sky', null);
+const rain = flag('--rain'); // 下大雨（看水面上的雨点波纹）
 const dpr = Number(opt('--dpr', 1));
 mkdirSync(out, { recursive: true });
 const { server, base } = await startServer();
@@ -30,7 +31,8 @@ async function open() {
   await page.waitForFunction((t) => document.querySelector('#app')?.dataset.planetReady === t, team, { timeout: 120000 });
   await page.waitForFunction(() => window.__walk?.state().ready === true, null, { timeout: 30000 });
   if (sky) await page.evaluate((s) => window.__world.setSkyPreset(s), sky);
-  await page.waitForTimeout(sky ? 2600 : 1200);
+  if (rain) await page.evaluate(async () => Object.assign((await import('/src/scenes/world.ts')).WEATHER, { rain: 1, wind: 0.7 }));
+  await page.waitForTimeout(sky || rain ? 4000 : 1200);
   return { page, errors };
 }
 
@@ -260,6 +262,24 @@ try {
     await page.waitForTimeout(700);
     await page.keyboard.up('w');
     await page.waitForTimeout(500);
+  });
+  await shot('water-sun', async (page, pond) => {
+    // 朝着太阳、贴着最深处的水面看（日落时看太阳在水上的那条光路）：镜头高 1.4 米，看 14 米外的水面
+    const sun = await sunHeading(page, pond.deepDir);
+    await page.evaluate(([t, pd, h]) => {
+      const w = window.__world;
+      const e = w.planets.get(t);
+      const cam = w.rig.camera;
+      const V = cam.position.constructor;
+      const R = e.planet.radius;
+      const up = new V(...pd.deepDir);
+      const back = up.clone().addScaledVector(new V(...h), -3 / R).normalize();
+      const pos = back.clone().multiplyScalar(pd.sea + 1.4).add(e.home);
+      const ahead = up.clone().addScaledVector(new V(...h), 11 / R).normalize();
+      const target = ahead.clone().multiplyScalar(pd.sea).add(e.home);
+      w.rig.drive = () => { cam.position.copy(pos); cam.up.copy(back); cam.lookAt(target); };
+    }, [team, pond, sun]);
+    await page.waitForTimeout(1500);
   });
   // 小溪：从斜上方看整条（泉眼到入水口），再贴着溪边看
   const streamInfo = (page) => page.evaluate((t) => {

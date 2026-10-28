@@ -43,7 +43,8 @@ const measure = (n) => page.evaluate(async (count) => {
   return gpu.length ? gpu[Math.floor(gpu.length / 2)] : NaN;
 }, n);
 
-const setWater = (on) => page.evaluate((v) => { window.__world.scene.traverse((o) => { if (o.name === 'water') o.visible = v; }); }, on);
+// 水面和小溪一起开关（它们在同一个组 water-bodies 里）
+const setWater = (on) => page.evaluate((v) => { window.__world.scene.traverse((o) => { if (o.name === 'water-bodies') o.visible = v; }); }, on);
 
 // 水开、关交替各量两轮，取每种的中位数
 async function compare(label) {
@@ -87,9 +88,17 @@ try {
       }
     }
     const tris = e.planet.group.getObjectByName('water')?.geometry.index.count / 3;
-    return { ...best, sea: p.sea, tris };
+    const s = e.planet.group.getObjectByName('stream');
+    const streamTris = s ? s.geometry.index.count / 3 : 0;
+    let streamAt = null;
+    if (s && streamTris > 1) {
+      s.geometry.computeBoundingSphere();
+      const c = s.geometry.boundingSphere.center;
+      streamAt = [c.x, c.y, c.z];
+    }
+    return { ...best, sea: p.sea, tris, streamTris, streamAt };
   }, team);
-  console.log(`backend ${backend}，像素比 ${dpr}，团队 ${team}；聚焦星球的水面 ${pond.tris} 个三角形`);
+  console.log(`backend ${backend}，像素比 ${dpr}，团队 ${team}；聚焦星球的水面 ${pond.tris} 个三角形，小溪 ${pond.streamTris} 个三角形`);
   await compare('星球视图');
   // 贴近水塘：镜头接管（同 shot-water.mjs 的 orbitAt），离最深处 6 米、高 3 米斜看
   await page.evaluate(([t, pd]) => {
@@ -105,6 +114,23 @@ try {
   }, [team, pond]);
   await page.waitForTimeout(1500);
   await compare('贴近水塘（水面占大半个画面）');
+  if (pond.streamAt) {
+    // 贴近小溪：从溪的中心上方斜着看，小溪横穿画面
+    await page.evaluate(([t, at]) => {
+      const w = window.__world;
+      const e = w.planets.get(t);
+      const cam = w.rig.camera;
+      const V = cam.position.constructor;
+      const c = new V(...at);
+      const up = c.clone().normalize();
+      const target = c.clone().add(e.home);
+      const side = new V(0, 1, 0).addScaledVector(up, -up.y).normalize();
+      const pos = target.clone().addScaledVector(side, -4).addScaledVector(up, 2.5);
+      w.rig.drive = () => { cam.position.copy(pos); cam.up.copy(up); cam.lookAt(target); };
+    }, [team, pond.streamAt]);
+    await page.waitForTimeout(1500);
+    await compare('贴近小溪');
+  }
   await page.evaluate(() => { window.__world.rig.drive = null; });
   // 涉水：漫游，角色站在最深处
   await page.locator('.topbar button.walk').click();
