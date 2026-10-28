@@ -791,7 +791,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       const hFrag = dot(positionWorld.sub(uCenter), uUp).sub(uSeaTopNow).div(R);
       const base = vInfo.y;
       const top = vInfo.z;
-      alpha = alpha.mul(smoothstep(base.sub(0.05), base.add(0.5), hFrag));
+      alpha = alpha.mul(smoothstep(base.sub(0.05), base.add(0.22), hFrag));
       const kH = saturate(hFrag.sub(base).div(top.sub(base)));
       const wrap = saturate(dot(nrm, uSun).add(0.6).div(1.6));
       let col = cloudRamp(wrap.mul(mix(float(0.5), float(1), kH)), kH.mul(0.6).add(0.4));
@@ -810,6 +810,8 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   clouds.frustumCulled = false;
   clouds.renderOrder = -9;
   scene.add(clouds);
+  // 不参与拾取：云海圆盘铺到远平面，天空球包住一切，游戏里对整个场景做射线检测时不能被它们挡住
+  for (const o of [sky, sea, clouds]) o.raycast = () => {};
 
   // ---- 距离雾 + 云海附近的高度雾（对场景里所有开着 fog 的材质生效）
   const fogNode = Fn(() => {
