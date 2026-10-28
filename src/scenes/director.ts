@@ -4,7 +4,7 @@ import { createVeil, VEIL_U } from '../style/veil';
 import type { CameraRig, Framing } from './camera';
 import { easeInOutCubic } from './ease';
 import { TribooPeek } from './peek';
-import { plinthMaterial, slabGeometry } from './plinth';
+import { plinthMaterial, standGeometry } from './plinth';
 import { TRANSITIONS } from './shots';
 import { clearVeil, moveFor, reducedMotion, Timeline, veilFrame, writeVeil, type Move, type TransitionKind } from './transition';
 import type { PlanetEntry, World } from './world';
@@ -164,7 +164,7 @@ export class Director {
   private primePlinths(): void {
     const group = new THREE.Group();
     group.name = 'prime-plinths';
-    const geometry = slabGeometry();
+    const geometry = standGeometry(); // 舞台角色把石板展台换成了圆润底座（standGeometry），预热用同一个几何
     for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
       const mesh = new THREE.Mesh(geometry, plinthMaterial(loading, glow));
       mesh.castShadow = true;
