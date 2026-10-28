@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import { abs, acos, clamp, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, max, mix, modelPosition, normalize, normalLocal, normalView, positionLocal, positionView, positionWorld, pow, renderGroup, saturate, sign, sin, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
 import type { PresetId } from '../data/types';
 import { grassTint } from '../nature/grass';
-import { galaxyFactor, overviewFactor, planetSurfaceLook, stageFactor, sunTint } from '../nature/planetLook';
+import { galaxyFactor, overviewFactor, planetSurfaceLook, stageFactor, sunDirNode, sunTint } from '../nature/planetLook';
 import { onPlanetRadius, PLANET_RADIUS, PRESETS, type GroundPalette } from './presets';
 import { shapeSea } from './noise';
 import { SHOWCASE_POLE } from './placement';
@@ -31,6 +31,9 @@ export const GROUND = {
   teamBright: 1.1, // 花海的亮度
   fieldFlowers: 1, // 花田
   warmCool: 0.8, // 冷暖渐变
+  galaxySat: 0.45, // 星系里饱和度再提多少
+  galaxyShade: 1, // 星系里背光一侧的环境光压暗多少（0..1）
+  galaxyGloss: 0.3, // 星系里清漆一样的高光（0 = 和近处一样哑光）
 };
 
 // 外沿的石头地：赤道附近一圈（按纬度的正弦）。center 是这一圈的中心，half 是半宽。
@@ -75,6 +78,9 @@ const U = {
   teamBright: uniform(GROUND.teamBright).setGroup(renderGroup),
   fieldFlowers: uniform(GROUND.fieldFlowers).setGroup(renderGroup),
   warmCool: uniform(GROUND.warmCool).setGroup(renderGroup),
+  galaxySat: uniform(GROUND.galaxySat).setGroup(renderGroup),
+  galaxyShade: uniform(GROUND.galaxyShade).setGroup(renderGroup),
+  galaxyGloss: uniform(GROUND.galaxyGloss).setGroup(renderGroup),
   rimCenter: uniform(RIM.center).setGroup(renderGroup),
   rimHalf: uniform(RIM.half).setGroup(renderGroup),
   ringAngle: uniform(RIM_RING.angle).setGroup(renderGroup),
@@ -104,6 +110,9 @@ export function applyGround(): void {
   U.teamBright.value = GROUND.teamBright;
   U.fieldFlowers.value = GROUND.fieldFlowers;
   U.warmCool.value = GROUND.warmCool;
+  U.galaxySat.value = GROUND.galaxySat;
+  U.galaxyShade.value = GROUND.galaxyShade;
+  U.galaxyGloss.value = GROUND.galaxyGloss;
   U.rimCenter.value = RIM.center;
   U.rimHalf.value = RIM.half;
   U.ringAngle.value = RIM_RING.angle;
@@ -246,7 +255,7 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   }
   // 花田：约 13 米一片（按噪声扭过，边缘不规则），每片一种主色（白、黄、淡紫）
   const fq = p.mul(0.075).add(valueNoise3(p.mul(0.035).add(3.9)).sub(0.5).mul(3));
-  const flowerField = smoothstep(0.57, 0.67, valueNoise3(fq.add(77.7))).mul(meadowOnly).mul(overview).mul(U.fieldFlowers);
+  const flowerField = smoothstep(0.57, 0.67, valueNoise3(fq.add(77.7))).mul(meadowOnly).mul(overview).mul(float(1).sub(galaxyFactor(U.radius).mul(0.75))).mul(U.fieldFlowers);
   const fHue = valueNoise3(p.mul(0.04).add(13.3));
   // 第三种花：淡紫，有团队色时换成团队色（调淡一点，像一片那个颜色的花）
   const third = look ? mix(color('#bda6e3'), mix(look.accent, color('#ffffff'), 0.25), look.accentAmount) : color('#bda6e3');
@@ -297,7 +306,7 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   // 作品空地；建设中的星球上是工地：浅色的沙土（远远地看得出来是一块刚翻过的地）
   // 工地上一垄一垄翻过的土（平行的条纹，约 0.8 米一垄，按像素大小淡出）
   const furrow = look ? sin(dot(p, vec3(0.83, 0.12, -0.55)).mul(7.8)).mul(0.5).add(0.5).mul(keep(1.25)).mul(look.construction) : float(0);
-  const siteSand = mix(pal.sand, pal.path, 0.45).mul(float(1.05).sub(furrow.mul(0.22)));
+  const siteSand = mix(pal.sand, pal.path, 0.45).mul(float(1.05).sub(furrow.mul(0.22))).mul(mix(float(1), float(0.8), galaxyFactor(U.radius)));
   const clearCol = look ? mix(mix(pal.soil, pal.path, 0.45), siteSand, look.construction).mul(gravel) : mix(pal.soil, pal.path, 0.45).mul(gravel);
   col = mix(col, clearCol, clearAmt);
   // 低洼处暗一点（像积了阴影）
@@ -312,6 +321,11 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   col = col.add(pal.dry.mul(sheen));
   // 冷暖（俯瞰时）：朝太阳的一侧偏暖、背光一侧偏冷，整颗星球上有一层柔和的冷暖渐变
   col = col.mul(sunTint(normalize(positionWorld.sub(modelPosition)), overview.mul(U.warmCool)));
+  // 星系里（像一颗颗上了色的玻璃弹珠）：饱和度提一截，背光一侧的环境光压暗（明暗分得开，不是一层奶白的雾）
+  const gal = galaxyFactor(U.radius);
+  const lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(vec3(lum), col, float(1).add(gal.mul(U.galaxySat)));
+  m.aoNode = mix(float(1), smoothstep(-0.35, 0.45, dot(normalize(positionWorld.sub(modelPosition)), sunDirNode())).mul(0.55).add(0.45), gal.mul(U.galaxyShade));
   // 远看（planet 角色）：云影压暗地面，星球边缘一层按受光的空气（自发光，夜面没有）
   if (look) {
     const far = planetSurfaceLook(U.radius, look.cloudOffset, look.fade, color(new THREE.Color(PRESETS[preset].atmosphere)));
@@ -319,7 +333,9 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
     m.emissiveNode = far.haze;
   }
   m.colorNode = col;
-  m.roughnessNode = mix(float(0.96), float(0.88), max(pathAmt, clearAmt));
+  // 星系里像上了一层清漆的弹珠：粗糙度降一点、镜面反射强一点，朝阳一侧有一块柔和的高光
+  m.roughnessNode = mix(mix(float(0.96), float(0.88), max(pathAmt, clearAmt)), float(0.5), gal.mul(U.galaxyGloss));
+  m.specularIntensityNode = mix(float(GROUND_SPECULAR), float(0.7), gal.mul(U.galaxyGloss));
 
   // 细节凹凸（米）：一丛丛的起伏 + 一簇簇 + 颗粒 + 土里的碎屑，路面整体低一点、路上的小石头鼓起来；
   // 每一层都按像素大小淡出，按屏幕空间导数算法线（不需要切线）
