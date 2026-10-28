@@ -300,7 +300,6 @@ export class Gardens {
 
   constructor(influence?: THREE.Node<'vec4'>) {
     this.group.name = 'gardens';
-    const material = gardenMaterial(influence);
     const signs = signMaterial(this.atlas.texture);
     this.meshes = [];
     this.tints = [];
@@ -317,7 +316,7 @@ export class Gardens {
       } else {
         g.setAttribute('aTint', tint);
       }
-      const mesh = new THREE.InstancedMesh(g, piece.id === 'signface' ? signs : material, GARDEN_CAPACITY);
+      const mesh = new THREE.InstancedMesh(g, piece.id === 'signface' ? signs : gardenMaterial(influence, piece.flexible), GARDEN_CAPACITY);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.count = 0;
       mesh.name = `garden-${piece.id}`;
@@ -449,6 +448,7 @@ export class Gardens {
 
   // 每帧：推进长出来 / 缩回去的动画，重写有变化的花园的实例矩阵
   update(dt: number): void {
+    this.atlas.flush();
     const ground = this.ground;
     if (!ground) return;
     for (const [id, g] of this.gardens) {

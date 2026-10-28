@@ -11,8 +11,9 @@ import { SHOTS } from './scenes/shots';
 import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
 import { addTransitionTune, TRANSITION_TUNE } from './scenes/transitionTune';
 import { SKY, WEATHER, type World } from './scenes/world';
+import { installPlanetLookTune, planetLookParams } from './nature/planetLook';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
-import { tuneWater, WATER, WATER_COLORS } from './nature/water';
+import { tuneWater, WATER, WATER_COLORS, WATER_ICE } from './nature/water';
 import { toast } from './ui/toast';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
@@ -54,6 +55,7 @@ export function tuneJson(world?: World): string {
       grassGround: GRASS_GROUND,
       decor: DECOR,
       ground: GROUND,
+      planetLook: planetLookParams(), // planet：远看的样子（云层、大气、外沿、星系点缀）
       palette: ground,
       weather: WEATHER,
       skyGame: SKY,
@@ -63,7 +65,7 @@ export function tuneJson(world?: World): string {
       museumLook: LOOK,
       museumLights: LIGHTS,
       look: LOOK_TUNE,
-      water: { ...WATER, colors: WATER_COLORS },
+      water: { ...WATER, colors: WATER_COLORS, ice: WATER_ICE },
       stage: STAGE_TUNE,
       ...TRANSITION_TUNE,
     },
@@ -99,6 +101,7 @@ export function installTune(world: World): void {
   planetFolder.addBinding(DECOR, 'rim', { label: 'rocks at rim ×', min: 1, max: 8, step: 0.1 }).on('change', () => world.dressing.rebuild());
   planetFolder.addBinding(DECOR, 'big', { label: 'big rocks', min: 0, max: 0.6, step: 0.01 }).on('change', () => world.dressing.rebuild());
   planetFolder.addBinding(DECOR, 'moss', { label: 'moss on rocks', min: 0, max: 1, step: 0.01 }).on('change', () => applyDecor());
+  installPlanetLookTune(planetFolder, () => world.dressing.rebuild()); // planet：远看的样子（草甸层次、舞台的边、云层、大气）
   const groundShader = planetFolder.addFolder({ title: 'Ground shader', expanded: false });
   groundShader.addBinding(GROUND, 'patch', { label: 'dry patch freq', min: 0.01, max: 0.2, step: 0.001 });
   groundShader.addBinding(GROUND, 'moss', { label: 'moss threshold', min: 0.3, max: 0.9, step: 0.005 });

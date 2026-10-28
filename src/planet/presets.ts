@@ -39,6 +39,8 @@ export interface GroundPalette {
   rock: string; // 石头
   sand: string; // 沙滩、浅海底（没有水的预设：盆地边上的干湖 / 火山灰）
   deep: string; // 深海底（没有水的预设：盆地中间）
+  far: string; // 俯瞰时的底色（星球视图、星系里没有 3D 的草，地面就是远看的草色）：比草叶亮、鲜，绘本里的春绿
+  field: string; // 俯瞰时朝阳的大片（黄绿；沙漠是沙丘的赭黄、冰川是雪白、火山是锈红）
 }
 
 export interface Preset {
@@ -61,27 +63,27 @@ export interface Preset {
 export const PRESETS: Record<PresetId, Preset> = {
   verdant: {
     id: 'verdant', label: 'Verdant', amp: 0.06, freq: 1.4, sea: -0.12, continentFreq: 1.15, land: 0.02, basin: 0,
-    ground: { grass: '#293412', fresh: '#3c4816', dry: '#555327', tip: '#6f7938', root: '#11160a', moss: '#222c10', soil: '#3a2a18', path: '#745a3a', rock: '#4b463f', sand: '#8c7853', deep: '#0f3640' },
+    ground: { grass: '#293412', fresh: '#3c4816', dry: '#555327', tip: '#6f7938', root: '#11160a', moss: '#222c10', soil: '#3a2a18', path: '#745a3a', rock: '#4b463f', sand: '#8c7853', deep: '#0f3640', far: '#5c8a2e', field: '#a6bf45' },
     water: '#3c7f8c', atmosphere: '#bfe0f0', ring: '#e8dcc0',
   },
   desert: {
     id: 'desert', label: 'Desert', amp: 0.06, freq: 1.8, sea: null, continentFreq: 1.3, land: 0.06, basin: -0.2,
-    ground: { grass: '#66610a', fresh: '#7b721a', dry: '#8e7637', tip: '#998d51', root: '#322b0d', moss: '#4d4d12', soil: '#6f4723', path: '#957c53', rock: '#715946', sand: '#bba985', deep: '#a38c70' },
+    ground: { grass: '#66610a', fresh: '#7b721a', dry: '#8e7637', tip: '#998d51', root: '#322b0d', moss: '#4d4d12', soil: '#6f4723', path: '#957c53', rock: '#715946', sand: '#bba985', deep: '#a38c70', far: '#a3823f', field: '#d0ac62' },
     water: '#000000', atmosphere: '#f6cfa0', ring: '#e6c49c',
   },
   glacier: {
     id: 'glacier', label: 'Glacier', amp: 0.055, freq: 1.2, sea: -0.1, continentFreq: 1.0, land: -0.02, basin: 0,
-    ground: { grass: '#597464', fresh: '#6b8274', dry: '#8f9a97', tip: '#98a29d', root: '#26362f', moss: '#426054', soil: '#595d61', path: '#8d9496', rock: '#686e72', sand: '#a7b3b2', deep: '#173f52' },
+    ground: { grass: '#597464', fresh: '#6b8274', dry: '#8f9a97', tip: '#98a29d', root: '#26362f', moss: '#426054', soil: '#595d61', path: '#8d9496', rock: '#686e72', sand: '#a7b3b2', deep: '#173f52', far: '#6f9a88', field: '#dfe9e6' },
     water: '#5d9db3', atmosphere: '#dff2f6', ring: '#c8d6dc',
   },
   volcanic: {
     id: 'volcanic', label: 'Volcanic', amp: 0.065, freq: 1.6, sea: null, continentFreq: 1.4, land: 0.04, basin: -0.25,
-    ground: { grass: '#3a4512', fresh: '#495411', dry: '#574b27', tip: '#717138', root: '#151a0c', moss: '#242f0d', soil: '#261d18', path: '#4b3b30', rock: '#312d2a', sand: '#5b5058', deep: '#3a3243' },
+    ground: { grass: '#3a4512', fresh: '#495411', dry: '#574b27', tip: '#717138', root: '#151a0c', moss: '#242f0d', soil: '#261d18', path: '#4b3b30', rock: '#312d2a', sand: '#5b5058', deep: '#3a3243', far: '#556b2a', field: '#9a5d38' },
     water: '#000000', atmosphere: '#e7b39c', ring: '#9d8478',
   },
   coral: {
     id: 'coral', label: 'Coral', amp: 0.055, freq: 1.5, sea: -0.05, continentFreq: 1.7, land: -0.1, basin: 0,
-    ground: { grass: '#456d31', fresh: '#5a7f39', dry: '#8c7852', tip: '#90985e', root: '#1a3215', moss: '#2f5931', soil: '#6a4434', path: '#9e7d66', rock: '#7a645b', sand: '#c2a688', deep: '#164e57' },
+    ground: { grass: '#456d31', fresh: '#5a7f39', dry: '#8c7852', tip: '#90985e', root: '#1a3215', moss: '#2f5931', soil: '#6a4434', path: '#9e7d66', rock: '#7a645b', sand: '#c2a688', deep: '#164e57', far: '#4f9a42', field: '#b3cc52' },
     water: '#4fa3a0', atmosphere: '#f8d6dc', ring: '#efd6cb',
   },
 };

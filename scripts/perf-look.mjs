@@ -1,6 +1,6 @@
 // look 的 GPU 开销（成对对比）：1440×900、像素比 2，同一个场景分别量「后处理开」和「?look=0」，差值就是后处理占的 GPU 时间。
 // 场景：星球视图（白天）、漫游（白天）、日落漫游朝着太阳（光束在画）、星系全景。
-// 用法：node scripts/perf-look.mjs [--webgl2] [--local] [--frames 180]
+// 用法：node scripts/perf-look.mjs [--webgl2] [--local] [--frames 180] [--only planet,sunset] [--repeat 2]
 import { chromium } from 'playwright-core';
 import { CHROME, startServer, watchErrors } from './lib/browser.mjs';
 
@@ -9,6 +9,8 @@ const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] :
 const webgl2 = args.includes('--webgl2');
 const local = args.includes('--local');
 const frames = Number(opt('--frames', 180));
+const only = opt('--only', null)?.split(',') ?? null;
+const repeat = Number(opt('--repeat', 1));
 const team = 'lumen-guild';
 
 const { server, base } = await startServer();
@@ -113,10 +115,13 @@ try {
   const backend = webgl2 ? 'webgl2' : 'webgpu';
   console.log(`backend ${backend}，像素比 2（画布 2880×1800），${local ? '本机真实模型' : '占位作品'}，每组 ${frames} 帧`);
   for (const scene of Object.keys(scenes)) {
+    if (only && !only.includes(scene)) continue;
+    for (let k = 0; k < repeat; k++) {
     const on = await run(scene, true);
     const off = await run(scene, false);
     const d50 = on.p50 - off.p50;
     console.log(`${scene}：后处理开 p50 ${on.p50.toFixed(2)} / p95 ${on.p95.toFixed(2)} ms（${on.calls} 次绘制）；?look=0 p50 ${off.p50.toFixed(2)} / p95 ${off.p95.toFixed(2)} ms（${off.calls} 次绘制）；差 p50 ${d50 >= 0 ? '+' : ''}${d50.toFixed(2)} ms`);
+    }
   }
 } catch (e) {
   console.log(`没量完：${e.message}`);

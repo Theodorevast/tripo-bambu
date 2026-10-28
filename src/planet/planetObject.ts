@@ -4,7 +4,6 @@ import type { Placement, PlanetRecipe, PresetId } from '../data/types';
 import { buildTerrainGeometry, LOD_LOW } from './generate';
 import { groundMaterial } from './ground';
 import { maskWorks, PlanetMask } from './mask';
-import { ringMaterial } from './materials';
 import { createWater } from '../nature/water';
 import { makeHeightFn, seaRadius, type HeightFn } from './noise';
 import { MAX_PLINTH_RADIUS } from './placement';
@@ -27,12 +26,14 @@ export class PlanetObject {
   private detail = LOD_LOW;
   private terrainPreset: PresetId | null = null; // 地表材质按哪个预设建的
   private parts: THREE.Object3D[] = [];
-  private ring: THREE.Mesh | null = null;
+  private ring: THREE.Object3D | null = null;
   private readonly ringStrengthNode = uniform(1); // 每次重建光环都用同一个 uniform，强度跨重建保留
   private readonly haloStrengthNode = uniform(1); // 大气光晕的浓淡：同上（星球视图里聚焦的那颗压淡）
   private readonly maskListeners = new Set<() => void>();
 
-  constructor(recipe: PlanetRecipe) {
+  // accent：团队色（星系里各队的星球一眼分得开；不给就是预设的原色）
+  constructor(recipe: PlanetRecipe, accent: string | null = null) {
+    this.look.setAccent(accent);
     this.decor.name = 'decor';
     this.group.add(this.works, this.decor, this.look.group);
     this.setRecipe(recipe);
@@ -104,18 +105,15 @@ export class PlanetObject {
     this.rebuildMask(false);
     this.rebuildTerrain();
     if (this.sea > 0) this.addPart(createWater(this));
-    // 大气光晕、云层：远看的部件（外壳贴着最高的地形外面一点）
-    this.look.build({ radius: R, top: R * (1 + PRESETS[preset].amp * 0.75), seed: this.recipe.seed, tint: PRESETS[preset].atmosphere, atmosphere: this.recipe.atmosphere, haloStrength: this.haloStrengthNode });
-    if (this.recipe.ring) {
-      const inner = R * 1.45;
-      const outer = R * 2.15;
-      const ring = new THREE.Mesh(new THREE.RingGeometry(inner, outer, 128, 1), ringMaterial(preset, inner, outer, this.ringStrengthNode));
-      ring.name = 'ring';
-      ring.rotation.set(-Math.PI / 2 + 0.38, 0, 0.22); // 放到赤道面再稍微倾斜
-      ring.visible = this.ringStrengthNode.value > 0;
-      this.ring = ring;
-      this.addPart(ring);
-    }
+    // 远看的部件（nature/planetLook.ts）：大气光晕、云层（外壳贴着最高的地形外面一点）、旁边的小浮岛；
+    // 光环做成一圈慢慢转的石头带（名字还叫 ring，光环浓淡照旧开关它）
+    const pal = PRESETS[preset];
+    this.look.build({
+      radius: R, top: R * (1 + pal.amp * 0.75), seed: this.recipe.seed, tint: pal.atmosphere, atmosphere: this.recipe.atmosphere,
+      haloStrength: this.haloStrengthNode, ring: this.recipe.ring, grass: pal.ground.far, rock: pal.ground.rock,
+    });
+    this.ring = this.look.ring;
+    if (this.ring) this.ring.visible = this.ringStrengthNode.value > 0;
     this.notifyMask();
   }
 
@@ -142,7 +140,7 @@ export class PlanetObject {
       this.group.remove(this.terrain);
       disposeTree(this.terrain);
     }
-    this.terrain = new THREE.Mesh(geometry, groundMaterial(preset, this.mask.node, this.look.cloudOffset));
+    this.terrain = new THREE.Mesh(geometry, groundMaterial(preset, this.mask.node, this.look));
     this.terrainPreset = preset;
     this.terrain.name = 'terrain';
     this.terrain.receiveShadow = true;

@@ -25,6 +25,7 @@ export interface GardenPiece {
   id: PieceId;
   geometry: THREE.BufferGeometry;
   castShadow: boolean; // 小花小草不投影（阴影那一遍省一点）
+  flexible: boolean; // 随风摆（用 flexible 那份材质）
 }
 
 // —— 配色（sRGB）——
@@ -227,7 +228,8 @@ function bushGeometry(bloom = false): THREE.BufferGeometry {
     const b = blobs[Math.floor(rng() * blobs.length)];
     const dir = new THREE.Vector3(rng() - 0.5, 0.4 + rng() * 0.6, rng() - 0.5).normalize();
     const at = new THREE.Vector3(b[0], b[1], b[2]).addScaledVector(dir, b[3] * 0.98);
-    parts.push(part(new THREE.IcosahedronGeometry(bloom ? 0.04 : 0.032, 0), mat(at.x, at.y, at.z), bloom ? WHITE : BLOSSOM, bloom ? 1 : 0, 0.4));
+    // 小花是压扁的圆球（低面数的二十面体看着像水晶）
+    parts.push(part(new THREE.SphereGeometry(bloom ? 0.042 : 0.034, 7, 4), mat(at.x, at.y, at.z, 0, 0, 0, 1, 0.7, 1), bloom ? WHITE : BLOSSOM, bloom ? 1 : 0, 0.4));
   }
   return merge(parts);
 }
@@ -320,14 +322,15 @@ export function gardenPieces(): GardenPiece[] {
     ['tuft', tuftGeometry, false],
     ['bush', () => bushGeometry(false), true],
     ['bloom', () => bushGeometry(true), true],
-    ['pebble', () => stoneGeometry('round', 97), true],
-    ['slab', () => stoneGeometry('slab', 41), true],
+    ['pebble', () => stoneGeometry('round', 97), false], // 小石子、踏脚石贴着地：投影看不出来，省掉阴影那一遍的两次绘制
+    ['slab', () => stoneGeometry('slab', 41), false],
     ['bench', benchGeometry, true],
     ['signpost', signpostGeometry, true],
     ['signface', signfaceGeometry, false],
     ['flag', flagGeometry, true],
   ];
-  pieces = defs.map(([id, make, castShadow]) => ({ id, geometry: make(), castShadow }));
+  const flexible = new Set<PieceId>(['daisy', 'bell', 'pom', 'tuft', 'bush', 'bloom', 'flag']);
+  pieces = defs.map(([id, make, castShadow]) => ({ id, geometry: make(), castShadow, flexible: flexible.has(id) }));
   return pieces;
 }
 
@@ -342,35 +345,38 @@ const SWAY = uniform(GARDEN_LOOK.sway).setGroup(renderGroup).onRenderUpdate(() =
 const PUSH = uniform(GARDEN_LOOK.push).setGroup(renderGroup).onRenderUpdate(() => GARDEN_LOOK.push);
 
 type V4U = THREE.Node<'vec4'>;
-let material: THREE.MeshStandardNodeMaterial | null = null;
+const materials = new Map<boolean, THREE.MeshStandardNodeMaterial>();
 
-// 所有零件（除了路牌的字）共用。influence：生机层的「影响球」（翠宝脚底 xyz、半径 w），没有就不推开
-export function gardenMaterial(influence?: V4U): THREE.MeshStandardNodeMaterial {
-  if (material) return material;
+// 零件共用的材质，两份：flexible（花、叶丛、灌木、小旗：随风摆、被翠宝推开）和 rigid（栅栏、长椅、石头、路牌：不动，
+// 顶点着色器里不算风，WebGL2 上省一截）。influence：生机层的「影响球」（翠宝脚底 xyz、半径 w），没有就不推开
+export function gardenMaterial(influence?: V4U, flexible = true): THREE.MeshStandardNodeMaterial {
+  const have = materials.get(flexible);
+  if (have) return have;
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.74, metalness: 0 });
-  m.name = 'garden-painted';
+  m.name = flexible ? 'garden-painted-flex' : 'garden-painted';
   const C = attribute<'vec3'>('color', 'vec3');
   const P = attribute<'vec2'>('paint', 'vec2');
   const T = attribute<'vec4'>('aTint', 'vec4');
-  // 手绘感：两层很淡的斑（亮度 ±8%、往暖色偏一点），按世界坐标取：同一种零件摆在不同地方，斑也不一样
+  // 手绘感：一层很淡的斑（亮度 ±6%、往暖色偏一点），按世界坐标取：同一种零件摆在不同地方，斑也不一样
   const n1 = valueNoise3(positionWorld.mul(3.3));
-  const n2 = valueNoise3(positionWorld.mul(9.7).add(5.1));
   const base = C.mul(mix(vec3(1, 1, 1), T.xyz, P.x));
-  m.colorNode = base.mul(float(0.92).add(n1.mul(0.12)).add(n2.mul(0.05))).mul(mix(vec3(1, 1, 1), vec3(1.05, 1.0, 0.93), n1.mul(0.6)));
-  // 风和碰撞：越靠上（柔软度 P.y）弯得越多，按实例的 aTint.w 定幅度。这里的 positionLocal 已经乘过实例矩阵（花园网格挂在星球下面，只有平移）
-  const flex = P.y.mul(P.y).mul(T.w);
-  const wp = modelWorldMatrix.mul(vec4(positionLocal, 1)).xyz;
-  let offset = windNode(wp).mul(flex.mul(SWAY));
-  if (influence) {
-    const up = normalize(wp.sub(DECOR_CENTER));
-    const d = wp.sub(influence.xyz);
-    const flat = d.sub(up.mul(dot(d, up)));
-    const len = max(length(flat), 0.001);
-    const amt = max(influence.w.sub(len), 0);
-    offset = offset.add(flat.div(len).mul(amt.mul(flex).mul(PUSH).mul(6)));
+  m.colorNode = base.mul(float(0.94).add(n1.mul(0.12))).mul(mix(vec3(1, 1, 1), vec3(1.05, 1.0, 0.93), n1.mul(0.6)));
+  if (flexible) {
+    // 风和碰撞：越靠上（柔软度 P.y）弯得越多，按实例的 aTint.w 定幅度。这里的 positionLocal 已经乘过实例矩阵（花园网格挂在星球下面，只有平移）
+    const flex = P.y.mul(P.y).mul(T.w);
+    const wp = modelWorldMatrix.mul(vec4(positionLocal, 1)).xyz;
+    let offset = windNode(wp).mul(flex.mul(SWAY));
+    if (influence) {
+      const up = normalize(wp.sub(DECOR_CENTER));
+      const d = wp.sub(influence.xyz);
+      const flat = d.sub(up.mul(dot(d, up)));
+      const len = max(length(flat), 0.001);
+      const amt = max(influence.w.sub(len), 0);
+      offset = offset.add(flat.div(len).mul(amt.mul(flex).mul(PUSH).mul(6)));
+    }
+    m.positionNode = positionLocal.add(offset);
   }
-  m.positionNode = positionLocal.add(offset);
-  material = m;
+  materials.set(flexible, m);
   return m;
 }
 
@@ -384,16 +390,22 @@ export function signMaterial(atlas: THREE.Texture): THREE.MeshStandardNodeMateri
 }
 
 // —— 路牌图集：一张 1024² 的画布，2 列 × 8 行，每格 512 × 128 画一块写着作者名的木牌 ——
+// 贴图用 DataTexture（画布画好后 getImageData 拷进去）：CanvasTexture 每次更新走 copyExternalImageToTexture，
+// 实测进星球时第一次更新那一帧卡 50–100 毫秒（WebGPU）；DataTexture 走 writeTexture，4 MB 一次传完，不卡
 
 export const SIGN_SLOTS = 16;
 const SLOT_W = 512;
 const SLOT_H = 128;
 
 export class SignAtlas {
-  readonly texture: THREE.Texture;
+  readonly texture: THREE.DataTexture;
   private readonly canvas: HTMLCanvasElement | null;
+  private readonly ctx: CanvasRenderingContext2D | null;
+  private readonly data: Uint8Array;
   private readonly labels: Array<string | null> = new Array(SIGN_SLOTS).fill(null);
+  private readonly toDraw = new Set<number>(); // 占了格子、还没画的（flush 时每帧画一格）
   private fontReady = false;
+  private changed = false;
 
   constructor() {
     const doc = typeof document === 'undefined' ? null : document;
@@ -401,13 +413,19 @@ export class SignAtlas {
     if (this.canvas) {
       this.canvas.width = SLOT_W * 2;
       this.canvas.height = SLOT_H * 8;
-      this.texture = new THREE.CanvasTexture(this.canvas);
-    } else {
-      this.texture = new THREE.DataTexture(new Uint8Array([200, 150, 90, 255]), 1, 1); // 单元测试（node）里没有画布
     }
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.texture.anisotropy = 8;
-    this.texture.name = 'garden-signs';
+    // 单元测试的假 DOM 里画布没有 getContext：不画，贴图留空
+    this.ctx = typeof this.canvas?.getContext === 'function' ? (this.canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | null) : null;
+    this.data = new Uint8Array(SLOT_W * 2 * SLOT_H * 8 * 4);
+    const t = new THREE.DataTexture(this.data, SLOT_W * 2, SLOT_H * 8, THREE.RGBAFormat, THREE.UnsignedByteType);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.generateMipmaps = true;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.anisotropy = 8;
+    t.name = 'garden-signs';
+    t.needsUpdate = true;
+    this.texture = t;
     // 字体（Nunito，顶栏用的那套）加载好再画；没加载好之前先画一遍（系统圆体顶上）
     void (doc?.fonts?.load('800 60px Nunito').then(() => {
       this.fontReady = true;
@@ -415,11 +433,11 @@ export class SignAtlas {
     }, () => {}) ?? Promise.resolve());
   }
 
-  // 第 k 格在贴图里的范围（u0, v0, du, dv；贴图上下翻转过：v = 1 是画布顶端）
+  // 第 k 格在贴图里的范围（u0, v0, du, dv）。DataTexture 不翻转：画布第一行是 v = 0，所以 v 从格子的下沿往上倒着取（dv 是负的）
   rect(k: number): [number, number, number, number] {
     const col = k % 2;
     const row = Math.floor(k / 2);
-    return [col * 0.5, 1 - (row + 1) / 8, 0.5, 1 / 8];
+    return [col * 0.5, (row + 1) / 8, 0.5, -1 / 8];
   }
 
   // 拿一格写 text（已经有同样的字就复用那一格）；满了返回 -1
@@ -429,22 +447,36 @@ export class SignAtlas {
     const free = this.labels.indexOf(null);
     if (free < 0) return -1;
     this.labels[free] = text;
-    this.draw(free);
+    this.toDraw.add(free);
     return free;
+  }
+
+  // 每帧调一次（Gardens.update）：最多画一格、最多传一次贴图。进星球时几件作品陆续上场，写字和上传分摊到几帧里，不挤在同一帧
+  flush(): void {
+    const next = this.toDraw.values().next();
+    if (!next.done) {
+      this.toDraw.delete(next.value);
+      this.draw(next.value);
+    }
+    // 还有没画完的就先不传：一批画完一起传一次（4 MB）
+    if (this.changed && this.toDraw.size === 0) {
+      this.changed = false;
+      this.texture.needsUpdate = true;
+    }
   }
 
   // 换星球：全部清空
   reset(): void {
     this.labels.fill(null);
+    this.toDraw.clear();
   }
 
   private redrawAll(): void {
-    this.labels.forEach((t, k) => { if (t !== null) this.draw(k); });
+    this.labels.forEach((t, k) => { if (t !== null) this.toDraw.add(k); });
   }
 
   private draw(k: number): void {
-    // 单元测试的假 DOM 里画布没有 getContext：不画
-    const ctx = typeof this.canvas?.getContext === 'function' ? this.canvas.getContext('2d') : null;
+    const ctx = this.ctx;
     const text = this.labels[k];
     if (!ctx || text === null) return;
     const x0 = (k % 2) * SLOT_W;
@@ -478,24 +510,25 @@ export class SignAtlas {
     const size = Math.min(64, Math.floor(((SLOT_W - 70) / Math.max(4, text.length)) * 1.7));
     ctx.font = `800 ${size}px ${this.fontReady ? 'Nunito' : 'ui-rounded, system-ui'}, sans-serif`;
     ctx.textBaseline = 'middle';
-    const widths = [...text].map((ch) => ctx.measureText(ch).width);
-    const total = widths.reduce((a, b) => a + b, 0);
-    let x = (SLOT_W - total) / 2;
+    // 整串一次写（逐字变换在 CPU 画布上慢）：整体随手歪一点、微微斜着，像用刷子写的
+    const total = ctx.measureText(text).width;
     ctx.fillStyle = '#4a2e18';
-    [...text].forEach((ch, i) => {
-      ctx.save();
-      ctx.translate(x + widths[i] / 2, SLOT_H / 2 + 4 + (rng() - 0.5) * 5);
-      ctx.rotate((rng() - 0.5) * 0.09);
-      ctx.fillText(ch, -widths[i] / 2, 0);
-      ctx.restore();
-      x += widths[i];
-    });
+    ctx.save();
+    ctx.translate(SLOT_W / 2, SLOT_H / 2 + 4);
+    ctx.rotate((rng() - 0.5) * 0.05);
+    ctx.transform(1, 0, -0.06, 1, 0, 0);
+    ctx.fillText(text, -total / 2, 0);
+    ctx.restore();
     // 翠宝黄的小圆点：名字左边一颗
     ctx.fillStyle = '#F2B705';
     ctx.beginPath();
     ctx.arc((SLOT_W - total) / 2 - 22, SLOT_H / 2 + 3, 8, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    this.texture.needsUpdate = true;
+    // 拷进贴图的数据（只拷这一格）
+    const img = ctx.getImageData(x0, y0, SLOT_W, SLOT_H).data;
+    const W = SLOT_W * 2;
+    for (let y = 0; y < SLOT_H; y++) this.data.set(img.subarray(y * SLOT_W * 4, (y + 1) * SLOT_W * 4), ((y0 + y) * W + x0) * 4);
+    this.changed = true;
   }
 }
