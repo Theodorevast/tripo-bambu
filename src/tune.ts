@@ -8,7 +8,10 @@ import { applyLights, LIGHTS } from './scenes/lights';
 import { applyLook, LOOK, TONE_MAPPINGS } from './scenes/look';
 import { addLookTune, LOOK_TUNE } from './scenes/postTune';
 import { SHOTS } from './scenes/shots';
+import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
+import { addTransitionTune, TRANSITION_TUNE } from './scenes/transitionTune';
 import { SKY, WEATHER, type World } from './scenes/world';
+import { installPlanetLookTune, planetLookParams } from './nature/planetLook';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
 import { tuneWater, WATER, WATER_COLORS, WATER_ICE } from './nature/water';
 import { toast } from './ui/toast';
@@ -52,6 +55,7 @@ export function tuneJson(world?: World): string {
       grassGround: GRASS_GROUND,
       decor: DECOR,
       ground: GROUND,
+      planetLook: planetLookParams(), // planet：远看的样子（云层、大气、外沿、星系点缀）
       palette: ground,
       weather: WEATHER,
       skyGame: SKY,
@@ -62,6 +66,8 @@ export function tuneJson(world?: World): string {
       museumLights: LIGHTS,
       look: LOOK_TUNE,
       water: { ...WATER, colors: WATER_COLORS, ice: WATER_ICE },
+      stage: STAGE_TUNE,
+      ...TRANSITION_TUNE,
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
     2,
@@ -95,6 +101,7 @@ export function installTune(world: World): void {
   planetFolder.addBinding(DECOR, 'rim', { label: 'rocks at rim ×', min: 1, max: 8, step: 0.1 }).on('change', () => world.dressing.rebuild());
   planetFolder.addBinding(DECOR, 'big', { label: 'big rocks', min: 0, max: 0.6, step: 0.01 }).on('change', () => world.dressing.rebuild());
   planetFolder.addBinding(DECOR, 'moss', { label: 'moss on rocks', min: 0, max: 1, step: 0.01 }).on('change', () => applyDecor());
+  installPlanetLookTune(planetFolder, () => world.dressing.rebuild()); // planet：远看的样子（草甸层次、舞台的边、云层、大气）
   const groundShader = planetFolder.addFolder({ title: 'Ground shader', expanded: false });
   groundShader.addBinding(GROUND, 'patch', { label: 'dry patch freq', min: 0.01, max: 0.2, step: 0.001 });
   groundShader.addBinding(GROUND, 'moss', { label: 'moss threshold', min: 0.3, max: 0.9, step: 0.005 });
@@ -113,6 +120,7 @@ export function installTune(world: World): void {
   }
 
   tuneWater(pane); // —— Water ——（nature/water.ts）
+  addStageTune(pane); // —— Works & gardens ——（scenes/stageTune.ts：地标放大、间距、花园、摆放反馈）
 
   // —— Grass ——
   const grass = pane.addFolder({ title: 'Grass', expanded: false });
@@ -162,6 +170,8 @@ export function installTune(world: World): void {
   lf.addBinding(life, 'quality', { options: { High: 'high', Low: 'low' } }).on('change', () => world.life.setQuality(life.quality));
   const fx = lf.addFolder({ title: 'Effects', expanded: false });
   for (const k of LIFE_EFFECTS) fx.addBinding(effects, k).on('change', () => world.life.setEnabled(k, effects[k]));
+
+  addTransitionTune(pane, world); // —— Transitions ——（scenes/transitionTune.ts：转场的分镜表、开场探头、演示按钮）
 
   // —— Camera ——
   const cam = pane.addFolder({ title: 'Camera', expanded: false });

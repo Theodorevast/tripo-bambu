@@ -73,7 +73,7 @@ export class DustPuffs {
     const puff = pow(float(1).sub(smoothstep(0.25, 1, r.mul(sin(ang.mul(3).add(B.w.mul(40))).mul(0.13).add(1)))), 1.4);
     const fade = smoothstep(0, 0.06, k).mul(pow(float(1).sub(k), 1.5));
     // 暖色的土：中心亮一点，像被阳光照着的尘
-    m.colorNode = mix(vec3(0.66, 0.56, 0.44), vec3(0.86, 0.78, 0.66), max(float(0), float(1).sub(r)).mul(0.8).add(B.w.mul(0.2)));
+    m.colorNode = mix(vec3(0.5, 0.38, 0.25), vec3(0.8, 0.66, 0.47), max(float(0), float(1).sub(r)).mul(0.8).add(B.w.mul(0.2)));
     m.opacityNode = puff.mul(fade).mul(D.z);
     this.material = m;
     const mesh = new THREE.Mesh(g, m);
@@ -103,7 +103,7 @@ export class DustPuffs {
       longest = Math.max(longest, life);
       const s0 = (0.08 + rng() * 0.06) * scale;
       const s1 = (0.26 + rng() * 0.2) * scale * (0.8 + 0.2 * strength);
-      this.emit(pos, out.multiplyScalar(speed), up, life, s0, s1, 0.5 + rng() * 0.2, 4.5 + rng() * 2);
+      this.emit(pos, out.multiplyScalar(speed), up, life, s0, s1, 0.4 + rng() * 0.18, 4.5 + rng() * 2);
     }
     // 中间往上冒的两三团
     for (let i = 0; i < 3; i++) {

@@ -14,19 +14,22 @@ const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] :
 const out = args[0] && !args[0].startsWith('--') ? args[0] : '.superpowers/sdd/2026-10-27-community-planets/team/stage-shots';
 const only = opt('--only', null)?.split(',') ?? null;
 const webgl2 = flag('--webgl2');
+const nolocal = flag('--nolocal'); // 用仓库里的占位作品（主目录没有私有模型时看到的样子）
+const suffix = (webgl2 ? '-webgl2' : '') + (nolocal ? '-placeholder' : '');
 mkdirSync(out, { recursive: true });
 const team = 'lumen-guild';
 const { server, base } = await startServer();
 const browser = await chromium.launch({ executablePath: CHROME, headless: process.env.HEADED !== '1', args: ['--ignore-gpu-blocklist'] });
 const problems = [];
 
-async function open({ dpr = 1, query = '' } = {}) {
+async function open({ dpr = 1, query = nolocal ? '?nolocal' : '', at = team, sky = null } = {}) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr });
   const errors = watchErrors(page);
   if (webgl2) await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
-  await page.goto(`${base}/${query}#/t/${team}`);
+  await page.goto(`${base}/${query}#/t/${at}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
-  await page.waitForFunction((t) => document.querySelector('#app')?.dataset.planetReady === t, team, { timeout: 120000 });
+  await page.waitForFunction((t) => document.querySelector('#app')?.dataset.planetReady === t, at, { timeout: 120000 });
+  if (sky) await page.evaluate((s) => window.__world.setSkyPreset(s), sky);
   await page.waitForFunction(() => window.__walk?.state().ready === true, null, { timeout: 30000 });
   await page.waitForTimeout(2200);
   return { page, errors };
@@ -52,6 +55,8 @@ async function lookAt(page, workId, dist, front = 0, elev = 20, aimY = 0.75) {
     const horiz = fwd.clone().multiplyScalar(Math.cos(a)).addScaledVector(side, Math.sin(a));
     const e2 = (el * Math.PI) / 180;
     const pos = target.clone().addScaledVector(horiz, d * Math.cos(e2)).addScaledVector(dir, d * Math.sin(e2));
+    // 地平线放平：镜头的「上」取作品脚下的法线（只在样张里这么做，拍完就关页面）
+    w.rig.camera.up.copy(dir);
     w.rig.jump({ target, position: pos, minDistance: 0.5, maxDistance: 400, autoRotate: false });
   }, [workId, dist, front, elev, aimY]);
   await page.waitForTimeout(1200);
@@ -82,7 +87,7 @@ async function shot(name, setup, opts = {}) {
   const { page, errors } = await open(opts);
   try {
     await setup(page);
-    if (name.endsWith('.png')) await page.screenshot({ path: path.join(out, name) });
+    if (name.endsWith('.png')) await page.screenshot({ path: path.join(out, name.replace(/.png$/, `${suffix}.png`)) });
     console.log(`✓ ${name}`);
   } catch (e) {
     problems.push(`${name}: ${e.message}`);
@@ -166,6 +171,8 @@ try {
   await shot('stage-close.png', (p) => lookAt(p, 'ph-03', 3.2, 12, 14, 0.8), { dpr: 2 });
   await shot('stage-garden.png', (p) => lookAt(p, 'ph-02', 5.5, 150, 28, 0.6), { dpr: 2 });
   await shot('stage-walk.png', (p) => walkNear(p, 'ph-02', 5, 1.6));
+  await shot('stage-sunset.png', (p) => lookAt(p, 'ph-02', 5.5, 160, 20, 0.7), { dpr: 2, sky: 'sunset' });
+  await shot('stage-other.png', async () => {}, { at: 'kiln-collective' });
 } finally {
   if (problems.length) console.log(`问题：\n${problems.join('\n')}`);
   process.exitCode = problems.length ? 1 : 0;

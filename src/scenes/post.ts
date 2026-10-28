@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import {
+  Break,
   Fn,
   If,
   Loop,
@@ -28,11 +29,12 @@ import type { PlanetObject } from '../planet/planetObject';
 import type { World } from './world';
 
 // 主画面的后处理（绘本感的统一画面）：场景先画进一张离屏缓冲（半浮点、和画布一样的多采样、带深度），再用一个全屏三角形一次做完：
-// 1. 接触阴影：作品和翠宝脚下一圈柔和的暗（按深度还原世界坐标，离「脚下那块地」近的像素压暗、偏冷紫）。草、地面、石头一起暗，
-//    东西不再像浮在草上。只压作品底部贴地的一小截，作品本身的贴图不动
-// 2. 日落光束：太阳低、在画面里或附近时，天空亮处（深度是远平面的像素）沿着朝太阳的方向径向累积，在四分之一分辨率下做两遍，
+// 1. 阳光的冷暖（WASH）：按每颗星球的球面法线和太阳方向，迎光一面亮一点、带一点暖，背光一面偏青紫、暗一点，远看知道太阳在哪边
+// 2. 接触阴影（CONTACT）：作品和翠宝周围一圈柔和的暗（按深度还原世界坐标），草、地面、石头一起暗，东西不再像浮在草上；
+//    中间留空：作品本身、翠宝的鞋不压
+// 3. 日落光束（RAYS）：太阳低、在画面里或附近时，从太阳放射出来的一条条柔和的光，被挡住的地方切出影子；四分之一分辨率两遍，
 //    叠回去时是柔和的光（不影响清晰度）。白天、太阳在背后时整段跳过
-// 3. 调色（style/grade.ts）：线性空间的白平衡和饱和度 → 色调映射（AgX，曝光归 atmosphere）→ 显示空间的 S 曲线、分离色调、黑位、暗角、抖动
+// 4. 调色（style/grade.ts）：线性空间的白平衡和饱和度 → 色调映射（AgX，曝光归 atmosphere）→ 显示空间的 S 曲线、中间调、分离色调、黑位、暗角、抖动
 // 不缩小、不模糊画面：场景缓冲和画布一样大，按像素中心原样取（最近邻），没有 FXAA、没有全屏泛光，作品的贴图保持清楚。
 //
 // 预编译：three 自己画画布时也是先画进一张中间缓冲（半浮点、同样的多采样、24 位深度）再做色调映射。场景缓冲用一模一样的格式，
@@ -44,7 +46,7 @@ import type { World } from './world';
 // 地址带 ?look=0：整个后处理关掉，回到 renderer.render 直接画（对比、低画质档）
 
 const query = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
-export const DEBUG_VIEWS = ['off', 'contact', 'rays', 'mask', 'sky'] as const;
+export const DEBUG_VIEWS = ['off', 'contact', 'rays', 'mask', 'sky', 'world'] as const;
 export type DebugView = (typeof DEBUG_VIEWS)[number];
 
 export const POST = {
@@ -55,9 +57,10 @@ export const POST = {
 
 // 接触阴影（?tune → Look）
 export const CONTACT = {
-  strength: 0.6, // 正中间压暗多少（0..1）
+  strength: 0.7, // 最暗处压暗多少（0..1）
+  hole: 0.45, // 中间这么大一块（× 半径）不压：那里是作品、翠宝的脚和鞋，只暗它们周围的地面和草
   spread: 1.3, // 半径 = 作品占地半径 × spread
-  height: 0.3, // 作品往上压多高：× 半径（至少 0.12 米）
+  height: 0.18, // 作品往上压多高：× 半径（至少 0.12 米）。低一点：展台顶面基本不压
   walker: 0.5, // 翠宝脚下那一圈的半径（米）
   walkerHeight: 0.45, // 翠宝那一圈往上压多高（米）：整根草从根到尖都暗一点，不只是贴地的一截
   color: '#5b5470', // 压暗时乘的颜色（偏冷紫，不是黑）
@@ -78,7 +81,22 @@ export const RAYS = {
   airFloor: 0.35, // 再近也留这么多
 };
 
+// 阳光的冷暖（?tune → Look）：按星球的大形状（球面法线）和太阳方向，迎光的一面偏暖、略亮，背光的一面偏冷、略暗，
+// 远看一眼就知道太阳在哪边（绘本里的「冷暖对比」）。贴地漫游时看到的只是一小块地，按镜头离地高度淡掉
+export const WASH = {
+  strength: 0.55, // 远看时的强度（0 关）。地表着色器俯瞰时自己也有一层冷暖（planet 的 GROUND.warmCool），这里主要让作品、树、石头跟着同一个方向
+  warm: '#fff0d4', // 迎光那一面偏的颜色（很淡的暖色：乘得太暖草会发黄发褐）
+  lit: 1.15, // 迎光那一面的亮度
+  cool: '#9fb4ff', // 背光那一面：颜色往这个色相偏（先去掉一半饱和度再染，草的暗面偏青紫而不是发脏）
+  shade: 0.8, // 背光那一面的亮度
+  from: 0.05, // 法线和太阳方向的夹角余弦：从这里开始变暖（比真实的明暗交界线往太阳那边挪：正对太阳的星球远看也分得出两边）
+  to: 0.95, // 到这里全暖
+  near: 0.3, // 镜头离地面低于 near × 半径：没有
+  far: 1.0, // 高于 far × 半径：满强度
+};
+
 const MAX_CONTACTS = 16;
+const MAX_PLANETS = 24;
 const RAY_STEPS = 32;
 const SKY_DEPTH = 0.99999; // 深度 ≥ 这个是没画东西的地方：天空、云海（云海和远处积云不写深度）
 const LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -125,7 +143,7 @@ export class MainPost {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
   private on = POST.enabled;
-  // 日落光束：四分之一分辨率的两张缓冲（发光的天空 → 径向累积）
+  // 日落光束：四分之一分辨率的两张缓冲（透光图 → 光束）
   private readonly maskTarget: THREE.RenderTarget;
   private readonly raysTarget: THREE.RenderTarget;
   private readonly maskQuad: THREE.QuadMesh;
@@ -144,6 +162,18 @@ export class MainPost {
   private readonly contactCount = uniform(0, 'int');
   private readonly contactStrength = uniform(CONTACT.strength);
   private readonly contactColor = uniform(new THREE.Vector3());
+  private readonly contactHole = uniform(CONTACT.hole);
+  private readonly planetList = Array.from({ length: MAX_PLANETS }, () => new THREE.Vector4()); // 星球中心（世界坐标）、半径
+  private readonly planetArray = uniformArray(this.planetList, 'vec4');
+  private readonly planetCount = uniform(0, 'int');
+  private readonly sunDir = uniform(new THREE.Vector3(0, 1, 0));
+  private readonly washStrength = uniform(0);
+  private readonly washWarm = uniform(new THREE.Vector3(1, 1, 1));
+  private readonly washCool = uniform(new THREE.Vector3(1, 1, 1));
+  private readonly washShade = uniform(WASH.shade);
+  private readonly washLit = uniform(WASH.lit);
+  private readonly washFrom = uniform(WASH.from);
+  private readonly washTo = uniform(WASH.to);
   private readonly sunUv = uniform(new THREE.Vector2(0.5, 0.5));
   private readonly rayStrength = uniform(0);
   private readonly rayReach = uniform(RAYS.reach);
@@ -161,6 +191,10 @@ export class MainPost {
   private readonly footprints = new WeakMap<THREE.Object3D, { r: number; t: number }>();
   private clock = 0;
   private raysOn = false;
+  // 转场的云层（director 的 veil，挂在场景里的全屏网格）盖着画面时：接触阴影、光束、冷暖都淡掉（它们按云层后面的深度算，
+  // 会透过云印出来）。0.15 秒内淡出淡入，云层边缘露出来的那一圈画面不会一下子跳
+  private unveiled = 1;
+  private last = 0;
   private readonly ndc = new THREE.Vector3();
 
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
@@ -216,6 +250,13 @@ export class MainPost {
   apply(): void {
     this.contactStrength.value = CONTACT.strength;
     linear(CONTACT.color, this.contactColor.value);
+    this.contactHole.value = CONTACT.hole;
+    linear(WASH.warm, this.washWarm.value);
+    linear(WASH.cool, this.washCool.value);
+    this.washShade.value = WASH.shade;
+    this.washLit.value = WASH.lit;
+    this.washFrom.value = WASH.from;
+    this.washTo.value = WASH.to;
     this.rayReach.value = RAYS.reach;
     this.rayBeams.value = RAYS.beams;
     this.rayContrast.value = RAYS.contrast;
@@ -253,7 +294,13 @@ export class MainPost {
       r.render(this.scene, this.camera);
       this.projectionInverse.value.copy(this.camera.projectionMatrixInverse);
       this.cameraWorld.value.copy(this.camera.matrixWorld);
+      const now = performance.now();
+      const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
+      this.last = now;
+      const veil = world.director.veil.visible ? 0 : 1;
+      this.unveiled = veil > this.unveiled ? Math.min(1, this.unveiled + dt / 0.15) : Math.max(veil, this.unveiled - dt / 0.15);
       this.gatherContacts(world);
+      this.gatherPlanets(world);
       // 2. 日落光束（只在要画的时候）
       this.aimRays(world);
       if (this.raysOn) {
@@ -353,7 +400,7 @@ export class MainPost {
   private gatherContacts(world: World): void {
     const planet: PlanetObject | null = world.focused?.planet ?? null;
     let n = 0;
-    const s = CONTACT.strength > 0 ? 1 : 0;
+    const s = CONTACT.strength > 0 && this.unveiled > 0 ? 1 : 0;
     if (planet && s > 0) {
       this.clock += 1;
       const group = planet.group;
@@ -381,6 +428,29 @@ export class MainPost {
       }
     }
     this.contactCount.value = n;
+    this.contactStrength.value = CONTACT.strength * this.unveiled;
+  }
+
+  // 阳光的冷暖：所有星球的中心和半径（星球只平移、缩放；聚焦的那颗排第一个），太阳方向；强度按镜头离聚焦星球地面的高度（星系视图里满强度）
+  private gatherPlanets(world: World): void {
+    let n = 0;
+    const put = (e: { planet: PlanetObject }) => {
+      if (n >= MAX_PLANETS) return;
+      const g = e.planet.group;
+      this.planetList[n++].set(g.position.x, g.position.y, g.position.z, e.planet.radius * g.scale.x);
+    };
+    if (world.focused) put(world.focused);
+    for (const e of world.planets.values()) if (e !== world.focused) put(e);
+    this.planetCount.value = n;
+    this.sunDir.value.copy(world.light.sunDir);
+    let k = 1;
+    const f = world.focused;
+    if (f) {
+      const R = f.planet.radius * f.planet.group.scale.x;
+      const above = this.camera.position.distanceTo(f.planet.group.position) - R;
+      k = THREE.MathUtils.smoothstep(above, WASH.near * R, WASH.far * R);
+    }
+    this.washStrength.value = WASH.strength * k * this.unveiled;
   }
 
   // 日落光束：太阳在画面上的位置和强度。强度 = 预设（白天 / 日落按傍晚系数插值）× 太阳离画面多近
@@ -399,8 +469,8 @@ export class MainPost {
         k = (1 - THREE.MathUtils.smoothstep(out, 0, 1.2)) * THREE.MathUtils.smoothstep(facing, 0.05, 0.3);
       }
     }
-    this.rayStrength.value = base * k;
-    this.raysOn = base * k > 0.001;
+    this.rayStrength.value = base * k * this.unveiled;
+    this.raysOn = this.rayStrength.value > 0.001;
   }
 
   // 透光的地方（四分之一分辨率）：取 4 个全分辨率的点（最近邻），深度是远平面（天空、云海）而且够亮的算透光，
@@ -470,8 +540,31 @@ export class MainPost {
       const occ = float(0).toVar();
       const sky = d.greaterThanEqual(SKY_DEPTH);
       const view = getViewPosition(st, d, this.projectionInverse).toVar();
+      const world = this.cameraWorld.mul(vec4(view, 1)).xyz.toVar();
+      // 阳光的冷暖：这个像素在哪颗星球的地面上（离中心不到 1.1 个半径：地形、作品；外面一圈大气光晕、光环不算），
+      // 按那颗星球的球面法线和太阳方向：迎光一面乘暖色，背光一面先去掉一半饱和度、染成偏青紫的颜色、压暗一点
+      If(this.washStrength.greaterThan(0.001).and(sky.not()), () => {
+        const lit = float(0).toVar();
+        const on = float(0).toVar();
+        Loop({ start: 0, end: this.planetCount, type: 'int', condition: '<' }, ({ i }) => {
+          const p = this.planetArray.element(i) as unknown as THREE.Node<'vec4'>;
+          const rel = world.sub(p.xyz);
+          const r = length(rel);
+          If(r.lessThan(p.w.mul(1.1)), () => {
+            lit.assign(smoothstep(this.washFrom, this.washTo, dot(rel.div(r), this.sunDir)));
+            on.assign(float(1).sub(smoothstep(p.w.mul(1.075), p.w.mul(1.1), r)));
+            Break(); // 星球之间不重叠：找到就停（聚焦的那颗排在第一个，星球视图里几乎每个像素一次就找到）
+          });
+        });
+        If(on.greaterThan(0), () => {
+          const l = dot(c, LUMA);
+          const shade = mix(c, this.washCool.mul(l).div(dot(this.washCool, LUMA)), 0.5).mul(this.washShade);
+          const sunny = c.mul(this.washWarm).mul(this.washLit.div(dot(this.washWarm, LUMA)));
+          const washed = mix(shade, sunny, lit);
+          c.assign(mix(c, washed, on.mul(this.washStrength)));
+        });
+      });
       If(this.contactCount.greaterThan(0).and(sky.not()), () => {
-        const world = this.cameraWorld.mul(vec4(view, 1)).xyz;
         Loop({ start: 0, end: this.contactCount, type: 'int', condition: '<' }, ({ i }) => {
           const a = this.contactA.element(i) as unknown as THREE.Node<'vec4'>;
           const b = this.contactB.element(i) as unknown as THREE.Node<'vec4'>;
@@ -479,9 +572,12 @@ export class MainPost {
           const h = dot(rel, b.xyz);
           const rho = length(rel.sub(b.xyz.mul(h)));
           const top = b.w;
-          const ring = float(1).sub(smoothstep(a.w.mul(0.15), a.w, rho));
-          // 贴地最暗，往上线性变淡（草根暗、草尖亮，像环境光遮蔽）；地面以下一点也算（坡地、草根）
-          const k = ring.mul(ring).mul(float(1).sub(h.div(top)).clamp(0, 1)).mul(smoothstep(top.mul(-0.5), 0, h));
+          // 一圈：中间 hole 以内不压，往外很快到最暗，再慢慢淡到半径处
+          const inner = a.w.mul(this.contactHole);
+          const ring = smoothstep(inner, inner.add(a.w.mul(0.2)), rho).mul(float(1).sub(smoothstep(inner.add(a.w.mul(0.2)), a.w, rho)));
+          // 贴地最暗，往上按平方变淡（草根暗、草尖亮，像环境光遮蔽）；地面以下一点也算（坡地、草根）
+          const up = float(1).sub(h.div(top)).clamp(0, 1);
+          const k = ring.mul(up.mul(up)).mul(smoothstep(top.mul(-0.5), 0, h));
           occ.assign(max(occ, k));
         });
         c.assign(mix(c, c.mul(this.contactColor), occ.mul(this.contactStrength)));
@@ -503,6 +599,9 @@ export class MainPost {
       });
       If(this.debugView.equal(3), () => {
         graded.assign(vec4(vec3(mask.sample(st).r), 1));
+      });
+      If(this.debugView.equal(5), () => {
+        graded.assign(vec4(world.mul(0.5).fract(), 1));
       });
       If(this.debugView.equal(4), () => {
         graded.assign(vec4(vec3(d.greaterThanEqual(SKY_DEPTH).select(float(1), float(0))), 1));

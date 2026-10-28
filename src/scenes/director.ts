@@ -3,6 +3,7 @@ import { blendPalette, clonePalette, PRESETS, RAIN_MIX, RAIN_PALETTE, type Palet
 import { createVeil, VEIL_U } from '../style/veil';
 import type { CameraRig, Framing } from './camera';
 import { easeInOutCubic } from './ease';
+import { TribooPeek } from './peek';
 import { TRANSITIONS } from './shots';
 import { clearVeil, moveFor, reducedMotion, Timeline, veilFrame, writeVeil, type Move, type TransitionKind } from './transition';
 import type { PlanetEntry, World } from './world';
@@ -13,6 +14,7 @@ import type { PlanetEntry, World } from './world';
 // - 镜头：按分镜表的 Move 逐帧摆（预备动作、视线先转、FOV 冲击、弧线、侧倾）。镜头的「飞行」照旧交给 CameraRig.fly
 //   （它负责停掉手动转动、落地时精确对准取景、交还 OrbitControls，rig.flying 也照常是 true），这里只在它每帧摆完之后
 //   按 Move 重新摆一次。两边按同样的 dt 累加，同一帧落地；落地那一帧不再改，镜头正好停在 CameraRig 摆的位置上
+// - 开场探头：开场飞行落定后，翠宝从一颗星球后面探头、挥手、缩回去（peek.ts）
 // - 调试：时间流速（录慢动作、逐帧录屏）、现在进行到哪
 
 // 转场中途给调用方（App）的时机
@@ -98,7 +100,8 @@ class MoveFlight {
 }
 
 interface RunOptions {
-  covered: () => void;
+  // 云层全遮住时要做的事：一帧做一样（第一样就在全遮住的那一帧），重的活不挤在同一帧里。全遮住的那段约 7 帧
+  covered: Array<() => void>;
   centerIn: () => Vec2; // iris 合拢时围着哪里（画面坐标）
   centerOut: () => Vec2; // 散开时从哪里散
   toward?: THREE.Vector3; // 甩镜甩向哪里（跳星球）
@@ -107,11 +110,13 @@ interface RunOptions {
 
 export class Director {
   readonly veil: THREE.Mesh;
+  readonly peek: TribooPeek; // 开场：翠宝从星球后面探头、挥手
   timeScale = 1; // 时间流速（调试用：录慢动作、逐帧录屏。镜头、云层、作品上场、整个场景都按它走）
   private stepOnce = 0; // 调试：时间停住（timeScale = 0）时，下一帧往前走这么多秒（逐帧录屏）
   private timeline: Timeline | null = null; // 正在进行的转场
   private kind: TransitionKind | null = null;
   private flight: MoveFlight | null = null;
+  private readonly steps: Array<() => void> = []; // 全遮住以后还没做的事（每帧做一样）
   private readonly palette: Palette = clonePalette(PRESETS.day);
   private readonly world: World;
   private warmed = false; // 开场预热做完了（之前云层一直显示着，让预热把它编译好）
@@ -122,6 +127,10 @@ export class Director {
     // （VEIL_U.on 是 0，画出来是全透明的）；预热完藏起来，只在转场时显示
     this.veil = createVeil();
     world.scene.add(this.veil);
+    // 翠宝的模型现在就开始加载，加载完在后台编译好（不挡开场）；开场飞行落定时还没好就不探
+    this.peek = new TribooPeek((o) => world.stage.precompile(o));
+    // 预编译完的东西在 WebGL2 上先画一次（gatedStager.ts）：只在这一帧真的会画出来的时候做（开场预热完、Museum 没盖着）
+    world.stage.drawGate = () => this.warmed && !world.paused;
     void world.warm.then(() => {
       this.warmed = true;
       if (!this.timeline) this.veil.visible = false;
@@ -139,8 +148,10 @@ export class Director {
   tick(dt: number): void {
     this.flight?.step(dt);
     VEIL_U.clock.value += dt;
+    this.steps.shift()?.(); // 全遮住以后的事，一帧一样（先于时间线：全遮住那一帧只做第一样）
     if (this.timeline && !this.timeline.step(dt)) this.timeline = null;
     this.veil.visible = VEIL_U.on.value > 0.5 || !this.warmed;
+    this.peek.tick(dt, this.world.rig.camera);
   }
 
   // 调试：时间停住时让下一帧往前走 seconds 秒（逐帧录屏）
@@ -160,17 +171,32 @@ export class Director {
 
   // 开场探头的翠宝正在演（peek.ts）
   get peeking(): boolean {
-    return false;
+    return this.peek.active;
   }
 
-  // 开场的翠宝探头：飞行落定后调；探了返回 true
+  // 开场的翠宝探头（App.start 在开场飞行落定后调）：挑一颗离镜头近、整个在画面里（不贴边、不在顶栏底下）的星球，
+  // 没有光环的优先（光环会横穿翠宝）。在转场、在星球上、减弱动效时不探；探了返回 true
   peekIntro(): boolean {
-    return false;
+    const world = this.world;
+    if (world.focused || this.timeline || world.rig.flying || reducedMotion()) return false;
+    const camera = world.rig.camera;
+    let best: PlanetEntry | null = null;
+    let bestScore = Infinity;
+    for (const e of world.planets.values()) {
+      _p.copy(e.home).project(camera);
+      if (_p.z > 1 || Math.abs(_p.x) > 0.68 || _p.y > 0.35 || _p.y < -0.7) continue;
+      const score = camera.position.distanceTo(e.home) * (e.team.planet.ring ? 1.3 : 1);
+      if (score < bestScore) {
+        bestScore = score;
+        best = e;
+      }
+    }
+    return best ? this.peek.play(best, camera, world.scene) : false;
   }
 
   // 星系 → 星球：「穿云」；星球 → 另一颗星球：甩镜 + 云带横扫 + 沿弧线跳过去（分镜表 TRANSITIONS）。
   // 转场一开始就把新星球的作品先排着（GatedStager）：模型照常在后台加载、准备，云散开时才依次弹出来
-  focus(entry: PlanetEntry, hop: boolean, to: Framing, covered: () => void): Promise<void> {
+  focus(entry: PlanetEntry, hop: boolean, to: Framing, covered: Array<() => void>): Promise<void> {
     return this.run(hop ? 'hop' : 'enter', to, {
       covered,
       centerIn: () => this.screenPoint(entry.home), // 云围着要去的星球合拢
@@ -181,7 +207,7 @@ export class Director {
   }
 
   // 星球 → 星系：反向，更短、更轻快。云先「噗」地合拢（这时撤作品），镜头往后拉，云围着刚离开的星球散开
-  unfocus(prev: PlanetEntry | null, to: Framing, covered: () => void): Promise<void> {
+  unfocus(prev: PlanetEntry | null, to: Framing, covered: Array<() => void>): Promise<void> {
     return this.run('leave', to, {
       covered,
       centerIn: () => [0, 0.05],
@@ -194,6 +220,7 @@ export class Director {
   // 云层和镜头都走完才 resolve；covered 里抛出的错误不打断转场，走完再抛给调用方（路由那边提示出错）
   private async run(kindIn: TransitionKind, to: Framing, opts: RunOptions): Promise<void> {
     const world = this.world;
+    this.peek.cancel();
     const kind: TransitionKind = reducedMotion() ? 'fade' : kindIn;
     const shot = TRANSITIONS[kind];
     const camera = world.rig.camera;
@@ -212,14 +239,22 @@ export class Director {
     const distance = camera.position.distanceTo(to.position);
     let error: unknown = null;
     let swapped = false;
-    const swap = () => {
-      if (swapped) return;
-      swapped = true;
+    const guard = (fn: () => void) => () => {
       try {
-        opts.covered();
+        fn();
       } catch (err) {
         error ??= err;
       }
+    };
+    const [first, ...rest] = opts.covered.map(guard);
+    const swap = () => {
+      if (swapped) return;
+      swapped = true;
+      first?.();
+      this.steps.push(...rest);
+    };
+    const finishSteps = () => {
+      while (this.steps.length) this.steps.shift()!();
     };
     let flight: Promise<void> = Promise.resolve();
     const fly = () => {
@@ -251,12 +286,14 @@ export class Director {
       tl.at(shot.popAt, () => world.stage.release(shot.stagger));
     }
     this.timeline?.flush();
+    finishSteps(); // 上一次转场还没做完的事先做完
     this.timeline = tl;
     this.kind = kind;
     try {
       await tl.done;
       await flight;
     } finally {
+      finishSteps();
       // 时间线走完时主循环已经把它清掉了；被新的转场顶掉时那边已经换上自己的
       if (this.timeline === tl) this.timeline = null;
       if (this.timeline === null) {

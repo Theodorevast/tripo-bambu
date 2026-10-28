@@ -202,19 +202,42 @@ function bandLayer(a: Acc, p: V2, prm: V4, seed: number, feather: F, tilt: V2, b
   });
 }
 
+// 每个像素的一份噪声（两层共用，省一半的噪声计算）：边缘的抖动、笔触（法线的起伏）、云墙大块的明暗、斑驳
+interface Grain {
+  wobble: F;
+  tilt: V2;
+  body: F;
+  mottle: F;
+}
+
+function grainAt(p: V2): Grain {
+  const n1 = vnoise(p.mul(7)).toVar();
+  const n2 = vnoise(p.mul(7).add(17.3)).toVar();
+  const n3 = vnoise(p.mul(1.6).add(5.1)).toVar();
+  const n4 = vnoise(p.mul(3.7).add(9.7)).toVar();
+  return {
+    // 边缘的抖动：水彩的边（两个中频噪声拼一下，省一次）
+    wobble: n1.add(n4).sub(1).mul(0.0065).toVar(),
+    // 笔触：法线上加一点低频起伏（大块的、柔和的，像刷子刷出来的明暗）
+    tilt: vec2(n1, n2).sub(0.5).mul(0.42).toVar(),
+    // 云墙大块的明暗：两层低频噪声（在云里面、整屏都是墙的时候也有大团的亮和暗）
+    body: n3.sub(0.5).mul(0.36).add(n4.sub(0.5).mul(0.14)).toVar(),
+    mottle: n3.add(n2).sub(1).mul(0.11).toVar(),
+  };
+}
+
+// 远的那层用同一份噪声，分量换个位置（看不出是同一份）
+const swapGrain = (g: Grain): Grain => ({ wobble: g.wobble.negate(), tilt: vec2(g.tilt.y, g.tilt.x.negate()), body: g.mottle.mul(1.6), mottle: g.body.mul(0.45) });
+
 // 一层云：返回线性颜色、覆盖度（0..1）和受光量（光带按它亮）。tint：往天空色靠多少（远的那层）；beat：鼓动的节奏
-function cloudLayer(p: V2, prmIn: V4, seed: number, count: number, px: F, tint: number, beat: number): { rgb: V3; alpha: F; w: F } {
+function cloudLayer(p: V2, prmIn: V4, seed: number, count: number, px: F, tint: number, beat: number, grain: Grain): { rgb: V3; alpha: F; w: F } {
   // 云团慢慢鼓动：大小随时间起伏几个百分点（两层节奏不同）。
   // 在两个分支（iris / band）外面先算好、存成变量：TSL 把第一次用到的子表达式就地生成，要是第一次出现在某个分支里，
   // 另一个分支走到时它就是没赋过值的（T2 实测 band 模式下近的那层整个画错）
   const prm = vec4(prmIn.x, prmIn.y, prmIn.z.mul(sin(VEIL_U.clock.mul(beat)).mul(0.035).add(1)), prmIn.w).toVar();
   // 边缘的柔化宽度：两个多像素 + 一点点按云团大小的晕开；边缘再按低频噪声轻轻抖一下（水彩的边）
   const feather = px.mul(2.2).add(prm.z.mul(0.003)).toVar();
-  const wobble = vnoise(p.mul(11).add(seed * 3.7)).sub(0.5).mul(0.009).toVar();
-  // 笔触：法线上加一点低频起伏（大块的、柔和的，像刷子刷出来的明暗）
-  const tilt = vec2(vnoise(p.mul(7).add(seed)), vnoise(p.mul(7).add(seed + 17.3))).sub(0.5).mul(0.42).toVar();
-  // 云墙大块的明暗：两层低频噪声（在云里面、整屏都是墙的时候也有大团的亮和暗）
-  const body = vnoise(p.mul(1.6).add(seed * 2.1)).sub(0.5).mul(0.36).add(vnoise(p.mul(3.7).add(seed)).sub(0.5).mul(0.14)).toVar();
+  const { wobble, tilt, body } = grain;
   const a = acc();
   If(VEIL_U.band.greaterThan(0.5), () => {
     bandLayer(a, p, prm, seed, feather, tilt, body);
@@ -222,7 +245,7 @@ function cloudLayer(p: V2, prmIn: V4, seed: number, count: number, px: F, tint: 
     irisLayer(a, p, prm, seed, count, feather, tilt, body);
   });
   // 大块的斑驳明暗（很淡）
-  const mottle = vnoise(p.mul(2.3).add(seed * 1.3)).sub(0.5).mul(0.16);
+  const mottle = grain.mottle;
   const w = a.sw.div(max(a.s, 1e-6)).add(mottle).clamp(0, 1).toVar();
   const deep = mix(VEIL_U.deep, VEIL_U.sky, tint * 0.9);
   const shade = mix(VEIL_U.shade, VEIL_U.sky, tint * 0.75);
@@ -246,18 +269,38 @@ const veilColor = Fn(() => {
     // 同上：分支外面先存成变量
     const p = vec2(st.x.sub(0.5).mul(aspect), float(0.5).sub(st.y)).toVar();
     const q = p.sub(VEIL_U.center.mul(float(1).sub(VEIL_U.band))).toVar();
-    const b = cloudLayer(q, VEIL_U.back, 3.1, BACK_PUFFS, px, 0.3, 4.1);
-    const f = cloudLayer(q, VEIL_U.front, 1.7, FRONT_PUFFS, px, 0, 5.3);
-    // 近的压在远的上面（over）
-    const alpha = f.alpha.add(b.alpha.mul(float(1).sub(f.alpha))).toVar();
-    const rgb = f.rgb.mul(f.alpha).add(b.rgb.mul(b.alpha).mul(float(1).sub(f.alpha))).div(max(alpha, 1e-4)).toVar();
-    const lit = mix(b.w, f.w, f.alpha);
-    // 翠宝黄的光：一宽一窄两道，斜着扫过云层，边是软的；照亮云团鼓起来的受光面（暗面只亮一点），像一道阳光掠过云顶
-    const s = dot(p, FLASH_NORMAL).sub(VEIL_U.flash.x);
-    const wide = float(1).sub(smoothstep(0.02, 0.075, s.abs()));
-    const thin = float(1).sub(smoothstep(0.004, 0.02, s.add(0.1).abs())).mul(0.75);
-    const glow = max(wide, thin).mul(VEIL_U.flash.y).mul(alpha).mul(lit.mul(0.75).add(0.25)).toVar();
-    rgb.assign(mix(rgb, VEIL_U.gold, glow.mul(0.6)).add(VEIL_U.gold.mul(glow.mul(0.15))));
+    const rgb = vec3(0).toVar();
+    const alpha = float(0).toVar();
+    // 粗判：iris 时离中心比两层的洞都近得多的像素（洞的中间）肯定没有云，整段跳过（云刚涌进来时画面大半是这样）。
+    // 洞边上的云团最多往里鼓 1.32 个弦长（transition.ts 的 irisClearRadius），再留一点鼓动的余量
+    const r = length(q);
+    const reach = (prm: V4, count: number) => prm.x.sub(irisSpacing(prm.x, count).mul(prm.z).mul(1.45));
+    const maybe = VEIL_U.band.greaterThan(0.5).or(r.greaterThan(min(reach(VEIL_U.front, FRONT_PUFFS), reach(VEIL_U.back, BACK_PUFFS))));
+    If(maybe, () => {
+      const grain = grainAt(q);
+      const f = cloudLayer(q, VEIL_U.front, 1.7, FRONT_PUFFS, px, 0, 5.3, grain);
+      const fAlpha = f.alpha.toVar();
+      const fRgb = f.rgb.toVar();
+      const fW = f.w.toVar();
+      // 远的那层：近的那层已经完全盖住的地方（全遮住时画面四周那一圈）不用算
+      const b = { rgb: vec3(0).toVar(), alpha: float(0).toVar(), w: float(0).toVar() };
+      If(fAlpha.lessThan(0.999), () => {
+        const back = cloudLayer(q, VEIL_U.back, 3.1, BACK_PUFFS, px, 0.3, 4.1, swapGrain(grain));
+        b.rgb.assign(back.rgb);
+        b.alpha.assign(back.alpha);
+        b.w.assign(back.w);
+      });
+      // 近的压在远的上面（over）
+      alpha.assign(fAlpha.add(b.alpha.mul(float(1).sub(fAlpha))));
+      rgb.assign(fRgb.mul(fAlpha).add(b.rgb.mul(b.alpha).mul(float(1).sub(fAlpha))).div(max(alpha, 1e-4)));
+      const lit = mix(b.w, fW, fAlpha);
+      // 翠宝黄的光：一宽一窄两道，斜着扫过云层，边是软的；照亮云团鼓起来的受光面（暗面只亮一点），像一道阳光掠过云顶
+      const s = dot(p, FLASH_NORMAL).sub(VEIL_U.flash.x);
+      const wide = float(1).sub(smoothstep(0.02, 0.075, s.abs()));
+      const thin = float(1).sub(smoothstep(0.004, 0.02, s.add(0.1).abs())).mul(0.75);
+      const glow = max(wide, thin).mul(VEIL_U.flash.y).mul(alpha).mul(lit.mul(0.75).add(0.25)).toVar();
+      rgb.assign(mix(rgb, VEIL_U.gold, glow.mul(0.6)).add(VEIL_U.gold.mul(glow.mul(0.15))));
+    });
     // 减弱动效：整屏淡到云的亮面和中间调之间的颜色
     rgb.assign(mix(rgb, mix(VEIL_U.mid, VEIL_U.lit, 0.7), VEIL_U.fade));
     alpha.assign(max(alpha, VEIL_U.fade));

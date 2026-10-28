@@ -30,8 +30,8 @@
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.3 0 0 0 0 0.25 0 0 0 0 0.35 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"),
     radial-gradient(farthest-corner at 100% 0%, rgba(255, 228, 182, 0.62), rgba(255, 228, 182, 0) 46%),
-    radial-gradient(120% 60% at 50% 100%, rgba(150, 146, 178, 0.3), rgba(150, 146, 178, 0) 70%),
-    linear-gradient(180deg, #9ab8d7 0%, #b9c9dc 16%, #e2d9d3 34%, #ddd2d0 46%, #cdc4cd 64%, #bfb9c9 82%, #b3afc3 100%);
+    radial-gradient(120% 60% at 50% 100%, rgba(156, 146, 172, 0.26), rgba(156, 146, 172, 0) 70%),
+    linear-gradient(180deg, #a3bdd8 0%, #c0cddc 16%, #e6dbd3 34%, #e0d4cf 46%, #d1c6c6 64%, #c6bcbf 82%, #bbb2bb 100%);
 }
 
 /* 云：位置、宽度、飘的快慢写在 index.html 每朵云的 style 里（--x、--y、--w、--d）。

@@ -27,7 +27,7 @@ export const STAGE = {
   far: 1.4, // 镜头离地面高于 far × R：放大到 overview 倍
   pathIntrude: 0.35, // 放大后展台最多压进土路的边多少米
   drop: 0.9, // 摆放时从多高落下（米，原大时）
-  gardens: true, // 花园开关（性能对比用）
+  gardens: typeof location === 'undefined' || new URLSearchParams(location.search).get('gardens') !== '0', // 花园开关：?gardens=0 关掉（低画质档、性能对比）
   slowmo: 1, // 落地、长花园、扬尘的时间倍数（样张脚本放慢了拍；?tune 也能看慢动作）
 };
 
@@ -57,6 +57,8 @@ interface Motion {
   landed: boolean;
 }
 
+type LayoutOpts = { sprout?: boolean; tucked?: boolean; delay?: number };
+
 const GRAVITY = 14; // 落下的加速度（米 / 秒²，原大时）：比真实的小一点，玩具落下来「软」一些
 const LIFT = 0.22; // 拖动时作品悬在地面上多高（米）
 const EXIT_SECONDS = 0.2; // 删掉时缩没的时长
@@ -80,11 +82,13 @@ function occluderDistance(ray: THREE.Ray, entry: PlanetEntry): number {
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
+const _d = new THREE.Vector3();
 const _t1 = new THREE.Vector3();
 const _t2 = new THREE.Vector3();
 
 // 聚焦星球上的作品：放展台和拾取盒，模型加载完再挂上；地形变了重新贴地
 export class PlanetView {
+  static active: PlanetView | null = null; // 页面里正在用的那一个（?tune 的 Works & gardens 组找它）
   readonly library = new ModelLibrary();
   readonly placed = new Map<string, PlacedWork>();
   readonly extraWorks = new Map<string, Work>(); // 拖进来的临时作品
@@ -103,9 +107,13 @@ export class PlanetView {
   private exits: Array<{ pw: PlacedWork; t: number }> = []; // 删掉的作品：缩没以后再拿走
   private unlisten: (() => void) | null = null;
   private present = 1; // 不考虑间距时，这一帧的放大倍数（编辑器的摆放预览用）
+  private queue: Array<{ pw: PlacedWork; opts: LayoutOpts }> = []; // 排着等布置的花园（每帧一座）
+  private pathVersion = 0; // 土路的版本：改道一次加一，离路多远的缓存跟着作废
+  private readonly pathNear = new Map<string, { key: string; d: number }>(); // 每件作品离最近的土路多远（米）
 
   constructor(world: World) {
     this.world = world;
+    PlanetView.active = this;
     for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
       // 和真的展台一样投影、接受阴影：接受阴影的着色器不一样，不设的话预热的是另一份
       const warm = new THREE.Mesh(plinthGeometry(), plinthMaterial(loading, glow));
@@ -120,6 +128,8 @@ export class PlanetView {
     (world.warm ?? Promise.resolve())
       .then(async () => {
         await world.stage.precompile(this.warmPlinths);
+        // 路牌图集只被着色器节点引用（不是材质的 map），Stager 找不到它：开场先传一次（连 mipmap 的管线一起建好），进星球时不在那一帧做
+        world.renderer?.initTexture(this.gardens.atlas.texture);
         this.gardens.showOneEach(true);
         try {
           await world.stage.precompile(this.gardens.group);
@@ -162,6 +172,12 @@ export class PlanetView {
     this.team = team;
     this.entry = this.world.planets.get(team.id) ?? null;
     this.bindPlanet();
+    // 路牌上的作者名先占好格子、排队写字：转场的云还遮着的那十几帧里一帧写一块，作品上场时字已经传好了
+    for (const p of team.planet.placements) {
+      const work = this.findWork(p.workId);
+      const label = work ? this.labelOf(work) : null;
+      if (label) this.gardens.atlas.claim(label);
+    }
     this.loading = Promise.all(team.planet.placements.map((p) => this.place(p))).then(() => {});
   }
 
@@ -172,6 +188,8 @@ export class PlanetView {
     this.motions.clear();
     this.caps.clear();
     this.layoutKeys.clear();
+    this.queue = [];
+    this.pathNear.clear();
     this.unlisten?.();
     this.unlisten = null;
     this.gardens.clear();
@@ -226,11 +244,11 @@ export class PlanetView {
       entrance.cancel();
       return null;
     }
-    pw.model = model;
     model.object.position.y = STAND_TOP;
     scaler.add(model.object);
     this.sizeParts(pw, model.height, model.footprint);
-    this.updateTransform(pw); // 展台半径要等模型加载完才知道，重新贴地
+    this.updateTransform(pw); // 展台半径要等模型加载完才知道，重新贴地（这时还没记 model：花园不在这里布置，arrive 排队布置）
+    pw.model = model;
     const solid = plinth.material as THREE.MeshStandardNodeMaterial;
     solid.opacity = 1;
     solid.transparent = false;
@@ -270,7 +288,7 @@ export class PlanetView {
     pw.scaler.scale.setScalar(pw.placement.scale);
     // 摆放变了（旋转、缩放滑块）：花园跟着重新布置。拖动中花园收着，放下时再长
     if (pw.model && this.motions.get(pw)?.kind !== 'lift' && this.layoutKey(pw) !== this.layoutKeys.get(pw.work.id)) {
-      this.computeCaps();
+      this.updateCap(pw);
       this.layoutGarden(pw, {});
     }
   }
@@ -374,21 +392,43 @@ export class PlanetView {
   }
 
   // 模型挂上了：知道展台多大了，布置花园。drop：从半空落下，落地时花园才长；否则（进星球）跟着作品上场一起长
+  // 布置花园排队做，每帧最多一座：进星球时几件作品陆续上场（转场放行时一件接一件），写字、布置不挤在同一帧
   private arrive(pw: PlacedWork, drop: boolean): void {
-    this.computeCaps();
     if (drop) {
       this.motions.set(pw, { kind: 'drop', t: 0, from: STAGE.drop, dust: true, landed: false });
-      this.layoutGarden(pw, { tucked: true });
+      this.enqueue(pw, { tucked: true });
     } else {
-      this.layoutGarden(pw, { sprout: true, delay: 0.08 });
+      this.enqueue(pw, { sprout: true, delay: 0.08 });
     }
   }
 
+  // 土路改道、参数变了：所有花园重新过滤（已经长好的零件留着），也是排队一帧一座
   private relayoutAll(): void {
-    this.computeCaps();
+    this.pathVersion++;
     for (const pw of this.placed.values()) {
       if (!pw.model || this.motions.get(pw)?.kind === 'lift') continue;
-      this.layoutGarden(pw, {});
+      this.enqueue(pw, {});
+    }
+  }
+
+  private enqueue(pw: PlacedWork, opts: LayoutOpts): void {
+    const have = this.queue.find((q) => q.pw === pw);
+    if (!have) {
+      this.queue.push({ pw, opts });
+      return;
+    }
+    // 同一件排了两次：长出来、收着这些要求都留着（比如刚摆上去收着，又赶上土路改道）
+    have.opts = { sprout: have.opts.sprout || opts.sprout, tucked: have.opts.tucked || opts.tucked, delay: have.opts.delay ?? opts.delay };
+  }
+
+  // 每帧做排着的第一座
+  private drainQueue(): void {
+    while (this.queue.length) {
+      const { pw, opts } = this.queue.shift()!;
+      if (this.placed.get(pw.work.id) !== pw || !pw.model || this.motions.get(pw)?.kind === 'lift') continue;
+      this.updateCap(pw);
+      this.layoutGarden(pw, opts);
+      return;
     }
   }
 
@@ -397,7 +437,7 @@ export class PlanetView {
     return `${p.dir.join(',')}|${p.yaw}|${p.scale}|${pw.plinth.scale.x}|${STAGE.gardens}`;
   }
 
-  private layoutGarden(pw: PlacedWork, opts: { sprout?: boolean; tucked?: boolean; delay?: number }): void {
+  private layoutGarden(pw: PlacedWork, opts: LayoutOpts): void {
     if (!pw.model || !this.entry) return;
     this.layoutKeys.set(pw.work.id, this.layoutKey(pw));
     if (!STAGE.gardens) {
@@ -414,53 +454,63 @@ export class PlanetView {
     const q = new THREE.Quaternion().setFromUnitVectors(UP, dir);
     q.premultiply(new THREE.Quaternion().setFromAxisAngle(dir, p.yaw));
     const front = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-    const team = this.team;
-    const handle = team?.members.find((m) => m.id === pw.work.authorId)?.handle;
     return {
       id: pw.work.id,
       dir,
       front,
       plinth: pw.plinth.scale.x * p.scale,
       scale: p.scale,
-      label: handle ? `@${handle}` : null,
-      accent: new THREE.Color(team?.color ?? '#d9b77e'),
+      label: this.labelOf(pw.work),
+      accent: new THREE.Color(this.team?.color ?? '#d9b77e'),
     };
   }
 
-  // 间距规则：每件作品最多放大到多少。1）展台放大后最多压进土路的边 pathIntrude 米：沿 16 个方向找最近的路；
+  // 路牌上写什么：作者的 @handle（团队成员里找不到就不立路牌）
+  private labelOf(work: Work): string | null {
+    const handle = this.team?.members.find((m) => m.id === work.authorId)?.handle;
+    return handle ? `@${handle}` : null;
+  }
+
+  // 间距规则：这件作品最多放大到多少。1）展台放大后最多压进土路的边 pathIntrude 米：沿 16 个方向找最近的路（按土路的版本缓存）；
   // 2）和每个邻居：两座花园放大后不互相压上
-  private computeCaps(): void {
+  private updateCap(pw: PlacedWork): void {
     const entry = this.entry;
     if (!entry) return;
     const R = entry.planet.radius;
-    const mask = entry.planet.mask;
-    const list = [...this.placed.values()];
-    const dirs = list.map((pw) => new THREE.Vector3(...pw.placement.dir).normalize());
-    const reach = list.map((pw) => this.gardens.reachOf(pw.work.id) || pw.plinth.scale.x * pw.placement.scale + 1.4);
-    list.forEach((pw, i) => {
-      const dir = dirs[i];
-      const outer = Math.max(pw.plinth.scale.x * 1.065, pw.model?.footprint ?? 0) * pw.placement.scale;
-      _t1.set(Math.abs(dir.y) < 0.9 ? 0 : 1, Math.abs(dir.y) < 0.9 ? 1 : 0, 0).cross(dir).normalize();
-      _t2.crossVectors(dir, _t1);
-      let near = Infinity;
-      for (let k = 0; k < 16; k++) {
-        const a = (k / 16) * Math.PI * 2;
-        for (let r = 0.2; r < Math.min(near, 8); r += 0.1) {
-          const ang = r / R;
-          _v.copy(_t1).multiplyScalar(Math.cos(a)).addScaledVector(_t2, Math.sin(a));
-          _v.multiplyScalar(Math.sin(ang)).addScaledVector(dir, Math.cos(ang)).normalize();
-          if (mask.sample(_v, 0) > 0.5) {
-            near = r;
-            break;
-          }
+    const dir = _d.set(...pw.placement.dir).normalize();
+    const key = `${pw.placement.dir.join(',')}|${this.pathVersion}`;
+    let near = this.pathNear.get(pw.work.id);
+    if (!near || near.key !== key) {
+      near = { key, d: this.pathDistance(dir, R, entry.planet.mask) };
+      this.pathNear.set(pw.work.id, near);
+    }
+    const outer = Math.max(pw.plinth.scale.x * 1.065, pw.model?.footprint ?? 0) * pw.placement.scale;
+    const reach = (o: PlacedWork) => this.gardens.reachOf(o.work.id) || o.plinth.scale.x * o.placement.scale + 1.4;
+    let cap = (near.d + STAGE.pathIntrude) / Math.max(outer, 0.1);
+    for (const o of this.placed.values()) {
+      if (o === pw) continue;
+      cap = Math.min(cap, (dir.angleTo(_v.set(...o.placement.dir).normalize()) * R) / (reach(pw) + reach(o)));
+    }
+    this.caps.set(pw.work.id, Math.max(1, Math.min(STAGE.max, cap)));
+  }
+
+  private pathDistance(dir: THREE.Vector3, R: number, mask: { sample(d: THREE.Vector3, ch: 0 | 1): number }): number {
+    _t1.set(Math.abs(dir.y) < 0.9 ? 0 : 1, Math.abs(dir.y) < 0.9 ? 1 : 0, 0).cross(dir).normalize();
+    _t2.crossVectors(dir, _t1);
+    let near = 8;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      for (let r = 0.2; r < near; r += 0.1) {
+        const ang = r / R;
+        _v.copy(_t1).multiplyScalar(Math.cos(a)).addScaledVector(_t2, Math.sin(a));
+        _v.multiplyScalar(Math.sin(ang)).addScaledVector(dir, Math.cos(ang)).normalize();
+        if (mask.sample(_v, 0) > 0.5) {
+          near = r;
+          break;
         }
       }
-      let cap = (near + STAGE.pathIntrude) / Math.max(outer, 0.1);
-      for (let j = 0; j < list.length; j++) {
-        if (j !== i) cap = Math.min(cap, (dir.angleTo(dirs[j]) * R) / (reach[i] + reach[j]));
-      }
-      this.caps.set(pw.work.id, Math.max(1, Math.min(STAGE.max, cap)));
-    });
+    }
+    return near;
   }
 
   // —— 每帧：地标放大、落下 / 提起、删掉时缩没、花园和尘土 ——
@@ -496,6 +546,7 @@ export class PlanetView {
         return false;
       });
     }
+    this.drainQueue();
     this.gardens.group.visible = STAGE.gardens;
     this.gardens.update(dt);
     if (camera) this.dust?.update(dt, camera);
@@ -553,7 +604,8 @@ export class PlanetView {
   private land(pw: PlacedWork, m: Motion): void {
     if (m.dust) this.puffAt(pw, Math.min(1.4, 0.7 + m.from));
     // 花园在落点重新布置，从零长出来（拖动时摆放变了；新摆上的本来就收着）
-    this.computeCaps();
+    this.queue = this.queue.filter((q) => q.pw !== pw);
+    this.updateCap(pw);
     this.layoutGarden(pw, { sprout: true, delay: 0.04 });
   }
 
