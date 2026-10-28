@@ -154,9 +154,9 @@ skyMat.colorNode = Fn(() => {
   const v = normalize(positionWorld.sub(cameraPosition));
   const up = normalize(cameraPosition.sub(uCenter));
   const e = dot(v, up);
-  const horizon = color('#f1e7d2');
-  const zenith = color('#5a92d4');
-  const c = mix(horizon, zenith, smoothstep(-0.02, 0.55, e)).toVar();
+  const horizon = color('#e6dcc6');
+  const zenith = color('#4581cc');
+  const c = mix(horizon, zenith, smoothstep(-0.04, 0.38, e)).toVar();
   c.assign(mix(c, color('#d8dde0'), smoothstep(0.0, -0.35, e)));
   const s = saturate(dot(v, uSunDir));
   c.addAssign(uSunCol.mul(pow(s, 6).mul(0.35).add(pow(s, 90).mul(0.8)).add(pow(s, 2400).mul(8))));

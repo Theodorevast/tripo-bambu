@@ -2,7 +2,7 @@
 // 1440×900、DPR 2，WebGPU 和 WebGL2 各跑一遍：
 // - 每个视角（贴地、整屏近草、逆光、斜上方）：草关着、开着交替量 4 轮，每轮各 ~22 帧取中位数相减，再取 4 轮的中位数 = 草本身的 GPU 时间（时间戳查询）；
 // - 实例数、三角形数、绘制调用；
-// - 不闪：镜头不动、关风时连拍 5 张逐像素相同（另拍一组藏起草的作对照）；开风时两帧不同；
+// - 不闪：镜头不动、关风时连拍 5 张逐像素比（不同的像素数、最大差几级；另拍一组藏起草的作对照）；开风时两帧不同；
 // - 贴地走 3 秒的帧间隔；用 CDP 采样堆分配，看 update() 有没有新建 three 对象；
 // - 截图：n1-ground / n1-orbit / n1-backlit（WebGPU）、n1-webgl2；给了 REFS_DIR（参考图目录，含 F/4.jpg、G/5.jpg）时再拼一张 n1-compare.png。
 // 环境变量：HEADED=1 用有界面的 Chrome；ONLY=webgpu|webgl2 只跑一个后端；VIEWS=ground,fill 只量这几个视角
@@ -38,30 +38,65 @@ async function run(backend) {
     const shot = backend === 'webgpu' ? { ground: 'n1-ground.png', backlit: 'n1-backlit.png', orbit: 'n1-orbit.png' }[view] : view === 'ground' ? 'n1-webgl2.png' : null;
     if (shot) await page.screenshot({ path: path.join(outDir, shot) });
   }
-  // 不闪：镜头不动、关掉风，连拍 5 张（隔 0.3 秒）都逐像素一样；打开风，两帧不一样（草在动）。
-  // 对照组：把草藏起来再连拍 5 张。对照组也不一样时，说明是这个后端截图本身不稳定，和草无关
+  // 不闪：镜头不动、关掉风，连拍 5 张（隔 0.3 秒），和第一张逐像素比：报告最多有几个像素不同、最大差几级（0–255）。
+  // 草跳格、闪烁会是成片的像素、几十级的差；只有末位的舍入差（1 级）看不出来。
+  // 对照组：把草藏起来再连拍一组。最后打开风，两帧应该不同（草在动）
   const burst = async () => {
     const shots = [];
     for (let i = 0; i < 5; i++) {
-      shots.push(await page.screenshot());
+      shots.push((await page.screenshot()).toString('base64'));
       await page.waitForTimeout(300);
     }
-    return shots.slice(1).filter((s) => Buffer.compare(s, shots[0]) !== 0).length;
+    const cmp = await browser.newPage();
+    const res = await cmp.evaluate(async (list) => {
+      const load = (b64) => new Promise((ok) => {
+        const im = new Image();
+        im.onload = () => ok(im);
+        im.src = `data:image/png;base64,${b64}`;
+      });
+      const px = (im) => {
+        const c = document.createElement('canvas');
+        c.width = im.width;
+        c.height = im.height;
+        const x = c.getContext('2d');
+        x.drawImage(im, 0, 0);
+        return x.getImageData(0, 0, im.width, im.height).data;
+      };
+      const imgs = await Promise.all(list.map(load));
+      const a = px(imgs[0]);
+      let pixels = 0;
+      let maxDiff = 0;
+      for (let k = 1; k < imgs.length; k++) {
+        const b = px(imgs[k]);
+        let n = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]));
+          if (d > 0) {
+            n++;
+            maxDiff = Math.max(maxDiff, d);
+          }
+        }
+        pixels = Math.max(pixels, n);
+      }
+      return { maxPixels: pixels, of: a.length / 4, maxDiff };
+    }, shots);
+    await cmp.close();
+    return res;
   };
   await page.evaluate(() => window.__grass.view('ground'));
   await page.evaluate(() => Object.assign(window.__grass.field.settings, { windStrength: 0, windSpeed: 0 }));
   await page.waitForTimeout(1200);
-  const grassDiffers = await burst();
+  const withGrass = await burst();
   await page.evaluate(() => window.__grass.setVisible(false));
   await page.waitForTimeout(300);
-  const controlDiffers = await burst();
+  const grassHidden = await burst();
   await page.evaluate(() => window.__grass.setVisible(true));
   await page.evaluate(() => Object.assign(window.__grass.field.settings, { windStrength: 0.55, windSpeed: 1 }));
   await page.waitForTimeout(600);
   const w1 = await page.screenshot();
   await page.waitForTimeout(500);
   const w2 = await page.screenshot();
-  r.still = { differingFramesOf4WithGrass: grassDiffers, differingFramesOf4GrassHidden: controlDiffers, movesWithWind: Buffer.compare(w1, w2) !== 0 };
+  r.still = { withGrass, grassHidden, movesWithWind: Buffer.compare(w1, w2) !== 0 };
   console.log(backend, 'still', JSON.stringify(r.still));
   // 贴地走 3 秒：帧间隔（不开堆采样，采样本身会让帧变慢）
   await page.evaluate(() => window.__grass.view('ground'));

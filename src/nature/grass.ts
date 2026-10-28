@@ -752,7 +752,7 @@ export function createGrassField(opts: GrassOptions): GrassField {
       const toCam = normalize(cameraPosition.sub(vPos));
       const back = pow(saturate(dot(toCam.negate(), l)), 4);
       const thin = pow(smoothstep(0.3, 1.0, vT), 1.5);
-      const glow = mix(vAlbedo, U.tip, 0.6).mul(U.sunColor).mul(back.mul(1.5).add(saturate(ndl.negate()).mul(0.2)));
+      const glow = mix(vAlbedo, U.tip, 0.6).mul(U.sunColor).mul(back.mul(1.9).add(saturate(ndl.negate()).mul(0.2)));
       col.addAssign(glow.mul(thin).mul(U.translucency));
       // 叶面的蜡质反光：迎着太阳的叶子上有一道亮光（不在阴影里时才有）
       const refl = l.negate().sub(n.mul(dot(l.negate(), n).mul(2)));
