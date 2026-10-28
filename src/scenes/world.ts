@@ -23,6 +23,7 @@ export interface PlanetEntry {
 // 光环浓淡：星球视图里聚焦星球的光环压到很淡（近景里它会横穿画面），别的星球的光环也压一些；回星系全部恢复
 export const RING_FOCUSED = 0.2;
 export const RING_OTHERS = 0.4;
+export const NEIGHBOR_SCALE = 0.45; // 星球视图里别的星球缩到多大
 const RING_FADE = 4; // 每秒逼近目标的速率：约 1 秒淡完，和 1.2 秒的镜头飞行同时进行
 
 // 像素预算：主画面按「总像素封顶」定像素比，以后加后处理时靠它控制开销。
@@ -65,6 +66,7 @@ export class World {
   private warming = true;
   private readonly halo: THREE.Mesh;
   private readonly ringGoals = new Map<PlanetObject, number>(); // 各星球光环要淡到多少，frame() 里逐帧逼近
+  private readonly scaleGoals = new Map<PlanetObject, number>(); // 各星球要缩放到多大（星球视图里邻居缩小）
   private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
@@ -120,6 +122,7 @@ export class World {
     for (const e of this.planets.values()) this.scene.remove(e.planet.group, e.hit);
     this.planets.clear();
     this.ringGoals.clear();
+    this.scaleGoals.clear();
     const homes = galaxyPositions(teams.length);
     teams.forEach((team, i) => {
       const home = new THREE.Vector3(...homes[i]);
@@ -286,10 +289,13 @@ export class World {
     if (!this.rig.drive) this.applyShots();
   }
 
-  // 定下各星球光环的目标浓淡；实际的 setRingStrength 在 frame() 里逐帧做，镜头飞行的同时慢慢淡入淡出
+  // 定下各星球光环的目标浓淡和大小；实际的变化在 frame() 里逐帧做，镜头飞行的同时慢慢淡入淡出。
+  // 星球视图里别的星球缩成 NEIGHBOR_SCALE：星球大了以后邻居在画面角上又大又近，缩小以后像远处的小星球（参考图 F2 的角上），
+  // 不抢聚焦星球的戏；回星系恢复原样
   private fadeRings(focused: PlanetEntry | null): void {
     for (const e of this.planets.values()) {
       this.ringGoals.set(e.planet, focused === null ? 1 : e === focused ? RING_FOCUSED : RING_OTHERS);
+      this.scaleGoals.set(e.planet, focused === null || e === focused ? 1 : NEIGHBOR_SCALE);
     }
   }
 
@@ -300,6 +306,14 @@ export class World {
       const next = Math.abs(goal - now) < 0.01 ? goal : now + (goal - now) * k;
       planet.setRingStrength(next);
       if (next === goal) this.ringGoals.delete(planet);
+    }
+    // 大小变得比光环快（每秒 8）：0.7 秒内到位，比 1.2 秒的镜头飞行先完成，飞到时聚焦的星球已经是原大小（漫游、编辑都按原大小算）
+    const ks = 1 - Math.exp(-8 * dt);
+    for (const [planet, goal] of this.scaleGoals) {
+      const now = planet.group.scale.x;
+      const next = Math.abs(goal - now) < 0.002 ? goal : now + (goal - now) * ks;
+      planet.group.scale.setScalar(next);
+      if (next === goal) this.scaleGoals.delete(planet);
     }
   }
 
