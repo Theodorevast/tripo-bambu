@@ -58,7 +58,10 @@ export function makeHeightFn(seed: number, preset: PresetId): HeightFn {
   const [sx, sy, sz] = STAGE_DIR;
   const cosIn = Math.cos((TERRAIN.stageInner * Math.PI) / 180);
   const cosOut = Math.cos((TERRAIN.stageOuter * Math.PI) / 180);
-  const cf = p.continentFreq;
+  // 每颗星球的海陆不一样（按种子）：陆地多少 ±0.16、大陆碎不碎 ±25%（同一个预设的几颗星球远看分得开：有的大洋小岛，有的大陆小湖）
+  const jr = mulberry32((seed * 2246822519) >>> 0);
+  const landJitter = (jr() * 2 - 1) * 0.16;
+  const cf = p.continentFreq * (0.75 + jr() * 0.5);
   const wd = TERRAIN.warpDetail;
   const warp = TERRAIN.warp / (1 + wd);
   const k = TERRAIN.coast;
@@ -81,7 +84,7 @@ export function makeHeightFn(seed: number, preset: PresetId): HeightFn {
       + n3(ax * 4.11 + 7.1, ay * 4.11 + 13.4, az * 4.11 + 5.3) * 0.22) / 1.72;
     // 舞台托成陆地
     const stage = smooth(cosOut, cosIn, x * sx + y * sy + z * sz);
-    const land = c + p.land + TERRAIN.stageLift * stage;
+    const land = c + p.land + landJitter + TERRAIN.stageLift * stage;
     // 草甸起伏：三层，陆地上（含舞台）全幅，海底收一半
     const h = (n3(x * hf + 31.7, y * hf + 3.1, z * hf + 17.3) + n3(x * hf * 2.07 + 2.2, y * hf * 2.07 + 23.9, z * hf * 2.07 + 8.4) * 0.5
       + n3(x * hf * 4.3 + 19.5, y * hf * 4.3 + 12.6, z * hf * 4.3 + 27.1) * 0.25) / 1.75;

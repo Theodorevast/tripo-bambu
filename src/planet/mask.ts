@@ -33,6 +33,7 @@ export interface MaskWork {
 }
 
 const toByte = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+const _pix = new THREE.Vector3();
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
@@ -87,11 +88,28 @@ export class PlanetMask {
     return this.data;
   }
 
-  // 按作品重画遮罩。radius：星球半径（米）；seed：路怎么弯（同一颗星球每次一样）
-  rebuild(works: MaskWork[], radius: number, seed: number): void {
+  // 按作品重画遮罩。radius：星球半径（米）；seed：路怎么弯（同一颗星球每次一样）。
+  // site：建设中的星球（planet 角色）：舞台中间一大块翻过的空地（写进作品空地那个通道：地表画成露土碎石，草和石头都避开）
+  rebuild(works: MaskWork[], radius: number, seed: number, site: { dir: THREE.Vector3; radius: number } | null = null): void {
     this.path = buildPath(works, radius, seed);
-    if (works.length === 0 && !this.data) return;
+    if (works.length === 0 && !site && !this.data) return;
     this.allocate().fill(0);
+    if (site) {
+      // 边缘按方位角起伏一点（不是一个正圆），像一块刚翻过的地
+      const r0 = site.radius;
+      const r1 = r0 + 2.2;
+      const t1 = new THREE.Vector3(Math.abs(site.dir.y) < 0.9 ? 0 : 1, Math.abs(site.dir.y) < 0.9 ? 1 : 0, 0).cross(site.dir).normalize();
+      const t2 = new THREE.Vector3().crossVectors(site.dir, t1);
+      const rng = mulberry32(hashString(`site-${seed}`));
+      const ph = [rng() * 6.28, rng() * 6.28];
+      const tmp = new THREE.Vector3();
+      this.splat(site.dir, (r1 * 1.25) / radius, 1, (a, d) => {
+        tmp.copy(d!).addScaledVector(site.dir, -d!.dot(site.dir));
+        const phi = Math.atan2(tmp.dot(t2), tmp.dot(t1));
+        const wob = 1 + 0.14 * Math.sin(3 * phi + ph[0]) + 0.08 * Math.sin(7 * phi + ph[1]);
+        return 1 - smooth(r0 * wob - 0.8, r1 * wob, a * radius);
+      });
+    }
     // 土路：沿中线每隔约 1/4 像素撒一个圆，取最大值。像素到中线的距离用到最近采样点的距离近似（误差不超过采样间隔的一半）
     const half = PATH.width / 2;
     const reach = half + PATH.soft;
@@ -104,8 +122,8 @@ export class PlanetMask {
     this.texture.needsUpdate = true;
   }
 
-  // 在方向 c 周围球心角 maxAngle 以内的像素上，通道 ch 取 max(原值, value(到 c 的球心角))
-  private splat(c: THREE.Vector3, maxAngle: number, ch: 0 | 1, value: (angle: number) => number): void {
+  // 在方向 c 周围球心角 maxAngle 以内的像素上，通道 ch 取 max(原值, value(到 c 的球心角, 像素的方向))
+  private splat(c: THREE.Vector3, maxAngle: number, ch: 0 | 1, value: (angle: number, dir?: THREE.Vector3) => number): void {
     const [pi, pj] = toPixel(c);
     const dj = Math.ceil((maxAngle / Math.PI) * MASK_H) + 1;
     const j0 = Math.max(0, Math.floor(pj) - dj);
@@ -124,7 +142,7 @@ export class PlanetMask {
         const z = cl * sinLon[i];
         const dot = x * c.x + sinLat[j] * c.y + z * c.z;
         if (dot < cosMax) continue;
-        const v = toByte(value(Math.acos(Math.min(1, dot))));
+        const v = toByte(value(Math.acos(Math.min(1, dot)), _pix.set(x, sinLat[j], z)));
         const k = (j * MASK_W + i) * 2 + ch;
         if (v > data[k]) data[k] = v;
       }

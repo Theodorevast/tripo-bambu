@@ -5,10 +5,10 @@ import { buildTerrainGeometry, LOD_LOW } from './generate';
 import { groundMaterial } from './ground';
 import { maskWorks, PlanetMask } from './mask';
 import { createWater } from '../nature/water';
-import { makeHeightFn, seaRadius, type HeightFn } from './noise';
+import { makeHeightFn, seaRadius, STAGE_DIR, type HeightFn } from './noise';
 import { MAX_PLINTH_RADIUS } from './placement';
 import { PLANET_RADIUS, PRESETS } from './presets';
-import { PlanetLookParts } from '../nature/planetLook';
+import { constructionSite, PlanetLookParts, registerSite } from '../nature/planetLook';
 
 // 一颗星球的 3D 对象：地表（两档细分）、小水塘、大气、光环；works 组挂作品，decor 组挂石头等点缀（聚焦时才有），重建时都保留。
 // mask 是星球遮罩（土路、作品空地）：地表着色器画路，草和石头按它避开
@@ -31,9 +31,17 @@ export class PlanetObject {
   private readonly haloStrengthNode = uniform(1); // 大气光晕的浓淡：同上（星球视图里聚焦的那颗压淡）
   private readonly maskListeners = new Set<() => void>();
 
-  // accent：团队色（星系里各队的星球一眼分得开；不给就是预设的原色）
-  constructor(recipe: PlanetRecipe, accent: string | null = null) {
+  // 建设中（团队的 status 是 under-construction）：舞台中间一块翻过的空地 + 小脚手架和团队色的旗
+  private construction = false;
+  private accentHex: string | null = null;
+  private unregisterSite: (() => void) | null = null;
+
+  // accent：团队色（星系里各队的星球一眼分得开；不给就是预设的原色）；construction：建设中
+  constructor(recipe: PlanetRecipe, accent: string | null = null, construction = false) {
     this.look.setAccent(accent);
+    this.look.construction.value = construction ? 1 : 0;
+    this.accentHex = accent;
+    this.construction = construction;
     this.decor.name = 'decor';
     this.group.add(this.works, this.decor, this.look.group);
     this.setRecipe(recipe);
@@ -114,11 +122,27 @@ export class PlanetObject {
     });
     this.ring = this.look.ring;
     if (this.ring) this.ring.visible = this.ringStrengthNode.value > 0;
+    this.unregisterSite?.();
+    this.unregisterSite = null;
+    if (this.construction) {
+      // 工地：舞台中心的地面上，脚手架立在空地正中
+      const site = constructionSite(this.accentHex ?? '#f2b705');
+      const dir = new THREE.Vector3(...STAGE_DIR);
+      site.position.copy(dir).multiplyScalar(this.height(dir.x, dir.y, dir.z) - 0.05);
+      site.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      site.rotateY(0.6);
+      this.addPart(site);
+      this.unregisterSite = registerSite(site);
+    }
     this.notifyMask();
   }
 
+  // 工地空地的大小（米）：建设中才有
+  static readonly SITE_RADIUS = 7;
+
   private rebuildMask(notify = true): void {
-    this.mask.rebuild(maskWorks(this.recipe.placements, () => MAX_PLINTH_RADIUS), PLANET_RADIUS, this.recipe.seed);
+    const site = this.construction ? { dir: new THREE.Vector3(...STAGE_DIR), radius: PlanetObject.SITE_RADIUS } : null;
+    this.mask.rebuild(maskWorks(this.recipe.placements, () => MAX_PLINTH_RADIUS), PLANET_RADIUS, this.recipe.seed, site);
     if (notify) this.notifyMask();
   }
 

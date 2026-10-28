@@ -170,7 +170,7 @@ export class World {
     const homes = galaxyPositions(teams.length);
     teams.forEach((team, i) => {
       const home = new THREE.Vector3(...homes[i]);
-      const planet = new PlanetObject(team.planet, team.color); // planet：团队色给星球染一点（星系里各队分得开）
+      const planet = new PlanetObject(team.planet, team.color, team.status === 'under-construction'); // planet：团队色给星球染一点；建设中的有工地
       planet.group.position.copy(home);
       // 拾取球：单位球，按星球半径缩放（半径滑块拖动后只改缩放）
       const hit = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicNodeMaterial());
@@ -513,7 +513,7 @@ export class World {
     light.sunColor.copy(sun.color);
     light.sunIntensity = sun.intensity;
     light.evening = WEATHER.evening ?? eveningFor(this.atmosphere.params.sunElevation);
-    updatePlanetLook(dt, light.sunDir, camera, this.focused?.planet.look ?? null); // planet：远看的大气、云层跟着太阳转，镜头近了、看别的星球时藏起来
+    updatePlanetLook(dt, light.sunDir, camera, this.focused?.planet.look ?? null, this.atmosphere); // planet：远看的大气、云层跟着太阳转，镜头近了、看别的星球时藏起来
     if (this.life.object.visible) {
       this.life.setWalker(this.walkerOn ? this.walkerPos : null, this.walkerVel, this.walkerGrounded);
       const w = this.weatherArgs;

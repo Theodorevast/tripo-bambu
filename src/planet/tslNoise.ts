@@ -1,4 +1,4 @@
-import { dot, floor, fract, Fn, length, mix, smoothstep, step, vec3 } from 'three/tsl';
+import { dot, float, floor, fract, Fn, length, mix, smoothstep, step, vec3 } from 'three/tsl';
 import type * as THREE from 'three/webgpu';
 
 // 着色器里用的便宜 3D 值噪声：8 个格点各取一个哈希（不用 sin 的哈希，float32 下稳定），按 smoothstep 曲线三线性插值，输出 0..1。
@@ -38,6 +38,17 @@ export const cellDots = Fn(([p, chance]: [V3, THREE.Node<'float'>]) => {
   const on = step(hash13(i.add(63.9)), chance);
   return smoothstep(r, r.mul(0.5), length(f.sub(c))).mul(on);
 }).setLayout({ name: 'cellDots', type: 'float', inputs: [{ name: 'p', type: 'vec3' }, { name: 'chance', type: 'float' }] }) as unknown as (p: V3, chance: THREE.Node<'float'> | number) => THREE.Node<'float'>;
+
+// 大一点的圆团（云）：同 cellDots，但半径 0.2–0.33 个格子，圆心离格子边至少 0.02（圆不会被格子边切掉一块），边缘柔和
+export const cellPuffs = Fn(([p, chance]: [V3, THREE.Node<'float'>]) => {
+  const i = floor(p);
+  const f = fract(p);
+  const r = hash13(i.add(47.3)).mul(0.13).add(0.2);
+  const room = float(0.48).sub(r);
+  const c = vec3(hash13(i), hash13(i.add(17.1)), hash13(i.add(31.7))).sub(0.5).mul(room.mul(2)).add(0.5);
+  const on = step(hash13(i.add(63.9)), chance);
+  return smoothstep(r, r.mul(0.7), length(f.sub(c))).mul(on);
+}).setLayout({ name: 'cellPuffs', type: 'float', inputs: [{ name: 'p', type: 'vec3' }, { name: 'chance', type: 'float' }] }) as unknown as (p: V3, chance: THREE.Node<'float'> | number) => THREE.Node<'float'>;
 
 // 两层叠加（第二层频率 2.03 倍、权重一半），0..1
 export function fbm2(p: V3): THREE.Node<'float'> {

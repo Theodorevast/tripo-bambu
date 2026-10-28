@@ -1,12 +1,14 @@
 import * as THREE from 'three/webgpu';
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { attribute, cameraPosition, color, dot, float, Fn, If, instanceColor, length, max, mix, modelPosition, modelScale, normalize, normalWorld, positionLocal, positionWorld, pow, renderGroup, saturate, smoothstep, uniform, vec3 } from 'three/tsl';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { attribute, cameraPosition, color, dot, float, Fn, If, instanceColor, length, max, mix, modelPosition, modelScale, normalize, normalWorld, positionLocal, positionWorld, pow, renderGroup, saturate, sin, smoothstep, time, uniform, vec3 } from 'three/tsl';
 import { DECOR, decorInstances, rockGeometry } from '../planet/decor';
 import { applyGround, GROUND, RIM, RIM_RING } from '../planet/ground';
 import { STAGE_DIR } from '../planet/noise';
 import { mulberry32 } from '../planet/rng';
-import { valueNoise3 } from '../planet/tslNoise';
+import { cellPuffs, valueNoise3 } from '../planet/tslNoise';
+import { PLANET_RADIUS } from '../planet/presets';
+import type { Atmosphere } from './atmosphere';
 
 // 星球远看的样子（planet 角色）：大气光晕、慢慢转的云层、云在地面上的影子、星球表面边缘的一层空气。
 // 都是「远看才有」的东西：镜头离星球近（星球视图、漫游）时整个藏起来，不占填充率。
@@ -18,11 +20,13 @@ export const PLANET_LOOK = {
   atmosphere: 1, // 大气光晕的浓度倍数
   atmosphereWarm: '#ffb28a', // 晨昏线附近的暖色
   limbHaze: 0.5, // 星球表面靠边缘的那层空气（远看才有）
-  clouds: 0.3, // 云量 0..1
+  clouds: 0.18, // 云量 0..1（有云团的格子占多少）
   cloudOpacity: 0.82,
   cloudBrightness: 0.72, // 云的反照率：压暗，不然在亮天空下是一片死白
   cloudSpeed: 1, // 云层转动的速度倍数
   cloudShadow: 0.3, // 云影的深度
+  seaShadow: 1, // 星系里星球在云海上的影子（浓度）
+  rimLight: 1, // 星系里星球朝阳一侧边缘的暖光（让星球从云海里跳出来）
 };
 
 const U = {
@@ -35,6 +39,8 @@ const U = {
   cloudOpacity: uniform(PLANET_LOOK.cloudOpacity).setGroup(renderGroup),
   cloudBrightness: uniform(PLANET_LOOK.cloudBrightness).setGroup(renderGroup),
   cloudShadow: uniform(PLANET_LOOK.cloudShadow).setGroup(renderGroup),
+  seaShadow: uniform(PLANET_LOOK.seaShadow).setGroup(renderGroup),
+  rimLight: uniform(PLANET_LOOK.rimLight).setGroup(renderGroup),
 };
 
 export function applyPlanetLook(): void {
@@ -45,6 +51,8 @@ export function applyPlanetLook(): void {
   U.cloudOpacity.value = PLANET_LOOK.cloudOpacity;
   U.cloudBrightness.value = PLANET_LOOK.cloudBrightness;
   U.cloudShadow.value = PLANET_LOOK.cloudShadow;
+  U.seaShadow.value = PLANET_LOOK.seaShadow;
+  U.rimLight.value = PLANET_LOOK.rimLight;
 }
 
 // 镜头离星球中心多远（× 星球半径）以内，云层、大气光晕、表面的空气都不画：
@@ -58,7 +66,8 @@ type F = THREE.Node<'float'>;
 // 镜头离这颗星球中心多远，按星球半径算（星球组可能被缩放：星球视图里的邻居缩到 0.45）
 const camDistanceInRadii = (radius: number | F): F => length(cameraPosition.sub(modelPosition)).div(modelScale.x.mul(radius));
 
-// 云的覆盖率（0..1）：星球本地方向 dir 先绕竖轴转过 drift，再做一次扭曲坐标的四层值噪声。
+// 云的覆盖率（0..1）：星球本地方向 dir 先绕竖轴转过 drift。绘本里小星球上的云是一团一团圆滚滚的（不是一片片碎絮：
+// 碎絮远看像发霉），所以是几团圆的：一格一个（3D 格子，被球面切开就是大小不一的圆），每团再叠两三个小圆鼓出来，边缘清楚。
 // offset 让每颗星球的云不一样（按种子）。
 // 写成带 layout 的函数（着色器里只生成一份）；uniform 不能在函数体里直接引用（函数体各材质共用，uniform 的名字对不上），
 // 转动角度和云量当参数传进去
@@ -66,13 +75,14 @@ const cloudCoverFn = Fn(([dir, offset, drift, amount]: [V3, V3, F, F]) => {
   const c = drift.cos();
   const s = drift.sin();
   const d = vec3(dir.x.mul(c).sub(dir.z.mul(s)), dir.y, dir.x.mul(s).add(dir.z.mul(c)));
-  const q = d.mul(3.1).add(offset);
-  const w = vec3(valueNoise3(q.mul(0.7).add(1.3)), valueNoise3(q.mul(0.7).add(7.9)), valueNoise3(q.mul(0.7).add(4.2))).sub(0.5);
-  const p = q.add(w.mul(0.55));
-  const n = valueNoise3(p).mul(0.52).add(valueNoise3(p.mul(2.3).add(3.3)).mul(0.26)).add(valueNoise3(p.mul(5.1).add(9.1)).mul(0.14)).add(valueNoise3(p.mul(10.7).add(5.5)).mul(0.08));
-  // 纬度越高云越少一点（赤道附近成带），云量 0..1 把阈值往下推
-  const th = float(0.64).sub(amount.mul(0.2)).add(d.y.abs().mul(0.05));
-  return smoothstep(th, th.add(0.12), n);
+  const q = d.mul(1.7).add(offset);
+  // 一团 = 一个大圆团 + 旁边两层错开的小圆团（格子更小、和大团交叠时才鼓出来），像绘本里一朵朵的云
+  const big = cellPuffs(q, amount);
+  const bump1 = cellPuffs(q.mul(2.1).add(vec3(0.31, 0.17, 0.43)), amount.mul(1.6));
+  const bump2 = cellPuffs(q.mul(2.6).add(vec3(0.62, 0.49, 0.11)), amount.mul(1.6));
+  const blob = max(big, max(bump1, bump2).mul(smoothstep(0.0, 0.3, cellPuffs(q.mul(0.999), amount.mul(1.0)).add(big))));
+  // 边上一点点起伏，不是死圆
+  return smoothstep(0.25, 0.55, blob.mul(valueNoise3(q.mul(7.3).add(2.2)).mul(0.35).add(0.8)));
 }).setLayout({
   name: 'planetCloudCover',
   type: 'float',
@@ -137,8 +147,14 @@ export function planetSurfaceLook(radius: number | F, offset: THREE.UniformNode<
   const mu = dot(n, U.sun);
   const edge = pow(float(1).sub(saturate(dot(n, view))), 3);
   const lit = smoothstep(-0.2, 0.35, mu);
-  const haze = mix(tint, U.warm, smoothstep(0.45, 0.0, mu).mul(lit).mul(0.6)).mul(edge.mul(lit).mul(U.limbHaze).mul(far).mul(0.35));
-  return { shade, haze };
+  const hazeCol = mix(tint, U.warm, smoothstep(0.45, 0.0, mu).mul(lit).mul(0.6)).mul(edge.mul(lit).mul(U.limbHaze).mul(far).mul(0.35));
+  // 轮廓光（星系里）：朝阳一侧贴着轮廓一道窄窄的暖白光，星球从下面亮白的云海里跳出来；背光一侧的轮廓压暗一点（下面 shade 里）
+  const rimEdge = pow(float(1).sub(saturate(dot(n, view))), 5);
+  const rimSide = smoothstep(-0.1, 0.6, mu);
+  const rim = vec3(1, 0.86, 0.66).mul(rimEdge.mul(rimSide).mul(far).mul(U.rimLight).mul(0.22));
+  const haze = hazeCol.add(rim);
+  const darkLimb = float(1).sub(rimEdge.mul(float(1).sub(rimSide)).mul(far).mul(U.rimLight).mul(0.35));
+  return { shade: shade.mul(darkLimb), haze };
 }
 
 // 「俯瞰」系数 0..1：镜头离星球中心 1.4 个半径以内（漫游、贴地）是 0，2 个半径以外（星球视图、星系）是 1。
@@ -148,6 +164,9 @@ export const overviewFactor = (radius: number | F): F => smoothstep(1.4, 2.0, ca
 // 「舞台」系数 0..1：星球视图（2.6 个半径）和漫游时是 1，星系里（几十个半径以外）是 0。
 // 外沿那一圈石头地只在聚焦时画：星系里一圈石头带在每颗星球上都像一条腰带，不好看
 export const stageFactor = (radius: number | F): F => smoothstep(7, 4.5, camDistanceInRadii(radius));
+
+// 「星系」系数 0..1：星球视图（2.6 个半径）是 0，星系里（十几个半径以外）是 1。星系里每颗星球的团队色更多，一眼分得开
+export const galaxyFactor = (radius: number | F): F => smoothstep(5, 10, camDistanceInRadii(radius));
 
 // 冷暖：朝太阳的一侧偏暖（黄一点），背光、晨昏线以外偏冷（蓝紫一点）。n 是球面法线（世界坐标）；返回乘在颜色上的系数
 export function sunTint(n: V3, amount: F | number): V3 {
@@ -195,6 +214,31 @@ function beltRockGeometry(): THREE.BufferGeometry {
   g.computeBoundingSphere();
   beltGeometry = g;
   return g;
+}
+
+// 云海上的影子：一块水平的圆片（半径 1，所有星球共用），材质按到中心的距离做柔和的径向衰减，冷一点的紫灰
+let shadowGeo: THREE.BufferGeometry | null = null;
+function shadowGeometry(): THREE.BufferGeometry {
+  if (shadowGeo) return shadowGeo;
+  shadowGeo = new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2);
+  return shadowGeo;
+}
+
+// 乘法混合（结果 = 云的颜色 × 这里的颜色）：云的纹理留着，只是压暗、偏冷。普通的半透明叠一层暗色在 AgX 下几乎看不出来
+// （亮云在色调映射的高光段被压缩，线性亮度减半屏幕上只暗一成），叠得浓又会把云的纹理抹平成一块色片
+function shadowMaterial(fade: F): THREE.MeshBasicNodeMaterial {
+  const m = new THREE.MeshBasicNodeMaterial({
+    transparent: true, depthWrite: false, fog: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.ZeroFactor,
+    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+  });
+  m.name = 'planet-sea-shadow';
+  const r = length(positionLocal.xz);
+  // 一块平平的影子（中间一大片差不多一样深，边缘柔和），中心再深一点点：读起来是「投在云上的影子」，不是一个暗点
+  const soft = smoothstep(1.0, 0.3, r).mul(0.78).add(smoothstep(0.55, 0.0, r).mul(0.22));
+  m.colorNode = mix(vec3(1, 1, 1), vec3(0.42, 0.45, 0.68), soft.mul(U.seaShadow).mul(fade).clamp(0, 1));
+  m.opacityNode = float(1);
+  return m;
 }
 
 // 舞台中心（星球本地方向）：小浮岛不放在这一面
@@ -257,6 +301,82 @@ function floatingIslandMaterial(grass: THREE.ColorRepresentation, rock: THREE.Co
   return m;
 }
 
+// —— 建设中的星球：舞台中间翻过的空地上立一个小脚手架，顶上插一面团队色的三角旗（会飘）——
+// 星系里按镜头距离放大（最多 3 倍），远远地也看得出「这里在盖东西」；近了是原大小（脚手架约 2 米，旗杆顶约 4.6 米）
+const sites = new Set<THREE.Object3D>();
+let woodMat: THREE.MeshStandardNodeMaterial | null = null;
+
+function scaffoldMaterial(): THREE.MeshStandardNodeMaterial {
+  if (woodMat) return woodMat;
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.85, metalness: 0 });
+  m.name = 'site-wood';
+  const grain = valueNoise3(positionLocal.mul(vec3(2, 14, 2)));
+  m.colorNode = color('#9a6b42').mul(grain.mul(0.25).add(0.85));
+  woodMat = m;
+  return m;
+}
+
+export function constructionSite(accent: THREE.ColorRepresentation): THREE.Group {
+  const g = new THREE.Group();
+  g.name = 'construction-site';
+  const wood = scaffoldMaterial();
+  const parts: THREE.BufferGeometry[] = [];
+  const post = (x: number, z: number, h: number) => parts.push(new THREE.CylinderGeometry(0.06, 0.07, h, 6).translate(x, h / 2, z));
+  const bar = (len: number, y: number, rotY: number, x: number, z: number) => {
+    const b = new THREE.BoxGeometry(len, 0.08, 0.08);
+    b.rotateY(rotY);
+    b.translate(x, y, z);
+    parts.push(b);
+  };
+  // 脚手架：四根立柱 + 两层横梁 + 一块小平台
+  const s = 0.55;
+  for (const [x, z] of [[-s, -s], [s, -s], [s, s], [-s, s]]) post(x, z, 2);
+  for (const y of [0.9, 1.9]) {
+    bar(s * 2, y, 0, 0, -s);
+    bar(s * 2, y, 0, 0, s);
+    bar(s * 2, y, Math.PI / 2, -s, 0);
+    bar(s * 2, y, Math.PI / 2, s, 0);
+  }
+  parts.push(new THREE.BoxGeometry(s * 2.2, 0.08, s * 2.2).translate(0, 1.95, 0));
+  // 旗杆
+  parts.push(new THREE.CylinderGeometry(0.045, 0.05, 2.7, 6).translate(0, 1.95 + 1.35, 0));
+  const woodMesh = new THREE.Mesh(mergeGeometries(parts), wood);
+  woodMesh.castShadow = true;
+  g.add(woodMesh);
+  // 三角旗（双面，按时间飘）
+  const flagGeo = new THREE.BufferGeometry();
+  const segs = 8;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const half = 0.55 * (1 - t);
+    pos.push(t * 1.6, -half, 0, t * 1.6, half, 0);
+    if (i < segs) {
+      const k = i * 2;
+      idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3);
+    }
+  }
+  flagGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  flagGeo.setIndex(idx);
+  flagGeo.computeVertexNormals();
+  const flagMat = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, roughness: 0.8, metalness: 0 });
+  flagMat.name = 'site-flag';
+  const x = positionLocal.x;
+  flagMat.positionNode = positionLocal.add(vec3(0, 0, sin(time.mul(4.2).sub(x.mul(5))).mul(x).mul(0.14)));
+  flagMat.colorNode = color(new THREE.Color(accent)).mul(0.85);
+  const flag = new THREE.Mesh(flagGeo, flagMat);
+  flag.position.set(0.05, 4.1, 0);
+  g.add(flag);
+  return g;
+}
+
+// 建设中的工地按镜头距离放大：PlanetObject 建好以后登记，拆掉时取消
+export function registerSite(site: THREE.Object3D): () => void {
+  sites.add(site);
+  return () => sites.delete(site);
+}
+
 // —— 每颗星球的远看部件（PlanetObject 建、World 每帧按镜头距离开关）——
 const parts = new Set<PlanetLookParts>();
 
@@ -286,6 +406,8 @@ export class PlanetLookParts {
   // 团队色（星系里各队的星球一眼分得开）：俯瞰时朝阳的大片、一种花田的颜色往它靠，大气、石头带也染一点
   readonly accent = uniform(new THREE.Color('#ffffff'));
   readonly accentAmount = uniform(0);
+  // 建设中：团队色的花海只铺一半（还没装饰完），工地的空地是浅色的沙土
+  readonly construction = uniform(0);
   private accentHex: string | null = null;
   radius = 1;
   ring: THREE.Object3D | null = null; // 石头带（名字叫 ring：PlanetObject 的光环浓淡照旧开关它）
@@ -295,6 +417,7 @@ export class PlanetLookParts {
   private islands: Island[] = [];
   private islandMaterial: THREE.MeshStandardNodeMaterial | null = null;
   private time = Math.random() * 100;
+  private shadow: THREE.Mesh | null = null;
 
   constructor() {
     this.group.name = 'planet-look';
@@ -414,6 +537,36 @@ export class PlanetLookParts {
     }
   }
 
+  // 云海上的影子（星系里）：星球正下方偏离太阳一点的云面上，一块柔和的冷色暗斑，星球像浮在云海上，不是贴在一张图上。
+  // seaY：云面的高度（世界坐标）；null 时藏起来
+  placeShadow(seaY: number | null, sunDir: THREE.Vector3): void {
+    if (!this.shadow) {
+      this.shadow = new THREE.Mesh(shadowGeometry(), shadowMaterial(this.fade));
+      this.shadow.name = 'planet-sea-shadow';
+      this.shadow.renderOrder = -8; // 云海（-10）、远处积云（-9）之后
+      this.shadow.frustumCulled = false;
+      this.group.add(this.shadow);
+    }
+    const parent = this.group.parent;
+    if (seaY === null || !parent) {
+      this.shadow.visible = false;
+      return;
+    }
+    parent.getWorldPosition(_p);
+    const scale = parent.getWorldScale(_s).x || 1;
+    const gap = Math.max(0, _p.y - this.radius * scale - seaY);
+    // 离太阳的方向（水平）：影子往背着太阳的那边挪一点（太阳低，挪得多，但封顶，不然影子跑远了认不出是谁的）
+    _h.set(-sunDir.x, 0, -sunDir.z);
+    if (_h.lengthSq() < 1e-6) _h.set(0, 0, 1);
+    _h.normalize().multiplyScalar(Math.min(gap * 0.3, this.radius * scale * 0.5));
+    this.shadow.position.set(_h.x / scale, (seaY - _p.y) / scale, _h.z / scale);
+    // 越高越大越淡
+    const spread = 1.35 + Math.min(0.8, gap / (this.radius * scale * 3));
+    this.shadow.scale.set(this.radius * spread, 1, this.radius * spread * 1.15);
+    this.shadow.rotation.y = Math.atan2(_h.x, _h.z);
+    this.shadow.visible = true;
+  }
+
   // 每帧：石头带慢慢转，小浮岛上下浮动
   animate(dt: number): void {
     this.time += dt;
@@ -451,6 +604,7 @@ export class PlanetLookParts {
 
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
+const _h = new THREE.Vector3();
 
 // ?tune 的「Copy parameters」里带上这几张表
 export function planetLookParams(): Record<string, unknown> {
@@ -496,6 +650,13 @@ export function installPlanetLookTune(folder: TuneFolder, rebuildRocks: () => vo
   sky.addBinding(PLANET_LOOK, 'atmosphereWarm', { label: 'dusk tint' });
   sky.addBinding(PLANET_LOOK, 'limbHaze', { label: 'edge haze', min: 0, max: 2, step: 0.01 });
   sky.addBinding(GALAXY_DECOR, 'beltSpeed', { label: 'rock belt spin', min: 0, max: 5, step: 0.05 });
+  sky.addBinding(PLANET_LOOK, 'seaShadow', { label: 'shadow on cloud sea', min: 0, max: 1.5, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'rimLight', { label: 'rim light (galaxy)', min: 0, max: 3, step: 0.01 });
+  const team = f.addFolder({ title: 'Team colours', expanded: false });
+  team.addBinding(GROUND, 'teamCover', { label: 'cover (planet view)', min: 0, max: 1, step: 0.01 });
+  team.addBinding(GROUND, 'teamCoverGalaxy', { label: 'cover (galaxy)', min: 0, max: 1, step: 0.01 });
+  team.addBinding(GROUND, 'teamBright', { label: 'brightness', min: 0.2, max: 3, step: 0.01 });
+  team.on('change', () => applyGround());
   sky.on('change', () => applyPlanetLook());
 }
 
@@ -503,17 +664,32 @@ export function installPlanetLookTune(folder: TuneFolder, rebuildRocks: () => vo
 // 镜头离星球近（星球视图、漫游）：这颗的远看部件藏起来（大气外壳会盖满整个屏幕）。
 // 有星球被聚焦时，别的星球的云层、大气、云影约 0.5 秒淡出：星球视图里邻居缩小后沉在云海的雾里，
 // 星球本身被雾吃掉了，不受雾影响的大气外壳会剩下一个个透明的泡泡
-export function updatePlanetLook(dt: number, sunDir: THREE.Vector3, camera: THREE.Camera, focused: PlanetLookParts | null = null): void {
+// atmo：天空（星系视图里云海压在所有星球下面），按它算云面的高度，给星球在云海上的影子用；null = 不画影子
+export function updatePlanetLook(dt: number, sunDir: THREE.Vector3, camera: THREE.Camera, focused: PlanetLookParts | null = null, atmo: Atmosphere | null = null): void {
+  // 云面：云海圆盘放在「云底 + 厚度 + 堆云 + 0.5」（atmosphere.ts 的 discTop），云顶的平均高度在云底以上 0.6 个厚度
+  let seaY: number | null = null;
+  if (atmo && atmo.objects.sea.visible) seaY = atmo.objects.sea.position.y - PLANET_RADIUS * (0.45 + 0.4 * atmo.params.seaThickness) - 0.5;
   U.sun.value.copy(sunDir);
   U.drift.value = (U.drift.value + dt * 0.012 * PLANET_LOOK.cloudSpeed) % (Math.PI * 2);
   const k = 1 - Math.exp(-6 * dt);
+  // 工地：镜头越远放得越大（离星球中心 6 个半径以内原大小，星系里最多 3 倍）
+  for (const s of sites) {
+    const host = s.parent;
+    if (!host) continue;
+    host.getWorldPosition(_p);
+    const kd = _p.distanceTo(camera.position) / (PLANET_RADIUS * (host.getWorldScale(_s).x || 1));
+    s.scale.setScalar(THREE.MathUtils.clamp(kd / 5, 1, 4.5));
+  }
   for (const p of parts) {
     if (!p.group.parent?.parent) continue; // 不在场景里的星球（换团队列表时摘掉的）：不管
     const goal = focused && focused !== p ? 0 : 1;
     const now = p.fade.value;
     p.fade.value = Math.abs(goal - now) < 0.01 ? goal : now + (goal - now) * k;
     p.group.visible = p.fade.value > 0 && p.distanceInRadii(camera.position) > NEAR_HIDE;
-    if (p.group.visible) p.animate(dt);
+    if (p.group.visible) {
+      p.animate(dt);
+      p.placeShadow(focused ? null : seaY, sunDir);
+    }
     // 石头带、小浮岛是不透明的，不能跟着淡：淡到一半就藏起来
     p.setSolidsVisible(p.fade.value > 0.5);
   }

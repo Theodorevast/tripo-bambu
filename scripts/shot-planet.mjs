@@ -118,6 +118,8 @@ try {
   await shot('planet-coral', '#/t/moss-and-mesh', (p) => planetView(p, 'moss-and-mesh'));
   await shot('planet-glacier', '#/t/quiet-vertex', (p) => planetView(p, 'quiet-vertex'));
   await shot('planet-desert', '#/t/kiln-collective', (p) => planetView(p, 'kiln-collective'));
+  // 建设中的星球（工地：翻过的空地、脚手架和旗）
+  await shot('planet-site', '#/t/coral-cartographers', (p) => planetView(p, 'coral-cartographers'));
   await shot('ground', `#/t/${you}`, async (p) => { await planetView(p, you); await walkNear(p, 9, 2.2); });
   // 外沿：站在展示方向偏下（纬度约 12°）的地方，朝外看
   await shot('ground-rim', `#/t/${you}`, async (p) => {
