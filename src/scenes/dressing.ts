@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { createGrassField, type GrassField } from '../nature/grass';
-import { DECOR_CENTER, proceduralDecorKit, scatterDecor, type DecorKit, type DecorStats } from '../planet/decor';
+import { DECOR_CENTER, DecorField, proceduralDecorKit, type DecorKit, type DecorStats } from '../planet/decor';
 import { CLEARING, PATH } from '../planet/mask';
 import { MAX_PLINTH_RADIUS } from '../planet/placement';
 import { PRESETS } from '../planet/presets';
@@ -8,7 +8,8 @@ import type { PlanetEntry } from './world';
 
 // 聚焦星球的「地表点缀」：草和花（nature/grass.ts）、石头（planet/decor.ts）。只给聚焦的那一颗星球做：
 // 星系里十几颗星球都铺草的话，看不见也要占显存和绘制调用。
-// 星球遮罩（土路、作品空地）变了、半径变了就重新摆；草量可调（?tune）
+// 星球遮罩（土路、作品空地）变了、半径变了就重新摆；草量可调（?tune）。
+// 石头的网格一直留着（DecorField），换星球只重写实例数据：每次新建实例化网格，第一帧都要重新生成着色器节点
 
 export const DRESSING = {
   grass: 1, // 草量倍数，传给 createGrassField 的 density
@@ -22,10 +23,10 @@ export interface DressingHost {
 
 export class Dressing {
   kit: DecorKit = proceduralDecorKit();
+  field: DecorField = new DecorField(this.kit);
   grass: GrassField | null = null;
   rocks: DecorStats = { instances: 0, drawCalls: 0, triangles: 0 };
   private entry: PlanetEntry | null = null;
-  private rockGroup: THREE.Group | null = null;
   private unlisten: (() => void) | null = null;
   private token = 0;
   private readonly host: DressingHost;
@@ -39,10 +40,16 @@ export class Dressing {
     return this.entry;
   }
 
-  // 换素材（以后换成 Tripo 生成的 GLB：decorKitFromGlb）
+  // 换素材（以后换成 Tripo 生成的 GLB：decorKitFromGlb）。新网格在后台编译好再摆
   setKit(kit: DecorKit): void {
     this.kit = kit;
-    this.rebuildRocks();
+    this.field.dispose();
+    this.field = new DecorField(kit);
+    this.field.showOneEach(true);
+    this.host.precompile(this.field.group).then(() => {
+      this.field.showOneEach(false);
+      this.rebuildRocks();
+    }, (err: unknown) => console.error(err));
   }
 
   enter(entry: PlanetEntry): void {
@@ -58,8 +65,7 @@ export class Dressing {
     this.unlisten?.();
     this.unlisten = null;
     this.disposeGrass();
-    this.rockGroup?.removeFromParent();
-    this.rockGroup = null;
+    this.field.group.removeFromParent();
     this.entry = null;
   }
 
@@ -80,13 +86,11 @@ export class Dressing {
 
   private rebuildRocks(): void {
     const entry = this.entry;
-    this.rockGroup?.removeFromParent();
-    this.rockGroup = null;
     if (!entry) return;
     const planet = entry.planet;
     const recipe = planet.currentRecipe;
     DECOR_CENTER.value.copy(entry.home);
-    const { group, stats } = scatterDecor(this.kit, {
+    this.rocks = this.field.fill(this.kit, {
       radius: planet.radius,
       height: (d) => planet.height(d.x, d.y, d.z),
       sea: planet.sea,
@@ -97,9 +101,7 @@ export class Dressing {
       pathWidth: PATH.width,
       clearings: recipe.placements.map((p) => ({ dir: new THREE.Vector3(...p.dir).normalize(), radius: (MAX_PLINTH_RADIUS + CLEARING.margin) * p.scale })),
     });
-    this.rocks = stats;
-    this.rockGroup = group;
-    planet.decor.add(group);
+    if (this.field.group.parent !== planet.decor) planet.decor.add(this.field.group);
   }
 
   private rebuildGrass(): void {

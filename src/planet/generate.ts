@@ -36,29 +36,53 @@ export function terrainNormal(height: HeightFn, dir: THREE.Vector3, out: THREE.V
   return out.crossVectors(_p1, _p2).normalize();
 }
 
-// 配方 → 地表网格（纯函数，不碰 GPU）。先把二十面体细分球的重复顶点合并成带索引的网格，每个顶点只算一次高度，
-// 法线按高度函数算（平滑的缓坡，不是低多边形的面法线）。颜色、土路、苔藓都在地表着色器里按噪声和遮罩算
+// 带索引的单位二十面体细分球（合并了重复顶点），每个细分等级只算一次：所有星球共用这份模板，
+// 建地形时只按高度把顶点推出去（mergeVertices 要按位置哈希，聚焦时每次都做一遍要十几毫秒）
+const unitSpheres = new Map<number, { positions: Float32Array; index: Uint32Array | Uint16Array }>();
+
+function unitSphere(detail: number): { positions: Float32Array; index: Uint32Array | Uint16Array } {
+  let s = unitSpheres.get(detail);
+  if (!s) {
+    const ico = new THREE.IcosahedronGeometry(1, detail);
+    ico.deleteAttribute('normal');
+    ico.deleteAttribute('uv');
+    const geo = mergeVertices(ico, 1e-6);
+    ico.dispose();
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const positions = new Float32Array(pos.array.length);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      const l = Math.hypot(x, y, z) || 1;
+      positions.set([x / l, y / l, z / l], i * 3);
+    }
+    s = { positions, index: geo.index!.array as Uint32Array | Uint16Array };
+    geo.dispose();
+    unitSpheres.set(detail, s);
+  }
+  return s;
+}
+
+// 配方 → 地表网格（纯函数，不碰 GPU）。顶点沿单位球的方向推到地面高度（每个顶点只算一次高度），
+// 法线按共用顶点的网格算（平滑的缓坡，不是低多边形的面法线）。颜色、土路、苔藓都在地表着色器里按噪声和遮罩算
 export function buildTerrainGeometry(recipe: PlanetRecipe, detail: number): THREE.BufferGeometry {
   const height = makeHeightFn(recipe.seed, recipe.preset);
-  const ico = new THREE.IcosahedronGeometry(1, detail);
-  ico.deleteAttribute('normal');
-  ico.deleteAttribute('uv');
-  const geo = mergeVertices(ico, 1e-6);
-  ico.dispose();
-  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-  const normals = new Float32Array(pos.count * 3);
-  const dir = new THREE.Vector3();
-  const n = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    dir.fromBufferAttribute(pos, i).normalize();
-    const r = height(dir.x, dir.y, dir.z);
-    pos.setXYZ(i, dir.x * r, dir.y * r, dir.z * r);
-    terrainNormal(height, dir, n);
-    normals[i * 3] = n.x;
-    normals[i * 3 + 1] = n.y;
-    normals[i * 3 + 2] = n.z;
+  const { positions: unit, index } = unitSphere(detail);
+  const positions = new Float32Array(unit.length);
+  for (let i = 0; i < unit.length; i += 3) {
+    const x = unit[i];
+    const y = unit[i + 1];
+    const z = unit[i + 2];
+    const r = height(x, y, z);
+    positions[i] = x * r;
+    positions[i + 1] = y * r;
+    positions[i + 2] = z * r;
   }
-  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setIndex(new THREE.BufferAttribute(index, 1));
+  geo.computeVertexNormals();
   geo.computeBoundingSphere();
   return geo;
 }
@@ -66,4 +90,10 @@ export function buildTerrainGeometry(recipe: PlanetRecipe, detail: number): THRE
 // 三角面数（带索引的网格）
 export function triangleCount(geo: THREE.BufferGeometry): number {
   return geo.index ? geo.index.count / 3 : geo.getAttribute('position').count / 3;
+}
+
+// 开场预热时调：先把聚焦用的细分球模板建好（合并顶点要几十毫秒），第一次进星球时不再算
+export function prewarmTerrain(): void {
+  unitSphere(LOD_LOW);
+  unitSphere(focusDetail());
 }

@@ -43,6 +43,17 @@ export function applyDecor(): void {
 
 let rockMaterial: THREE.MeshStandardNodeMaterial | null = null;
 
+// 实例化网格的容量：three 的 InstanceNode 在「数量 × 64 字节」放得进一个 uniform 块时（WebGPU 1024 个以内）把矩阵做成
+// 定长的 uniform 数组，数组长度写进着色器：每种数量各编一份着色器（进星球时 9 组石头各编一次，卡 0.1–0.4 秒）。
+// 容量统一取 1100：超过上限，一律走实例属性，所有石头共用一份着色器；实际画的个数用 mesh.count
+export const DECOR_CAPACITY = 1100;
+
+export function decorInstances(geometry: THREE.BufferGeometry, material: THREE.Material, count: number): THREE.InstancedMesh {
+  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(count, DECOR_CAPACITY));
+  mesh.count = count;
+  return mesh;
+}
+
 export function sharedRockMaterial(): THREE.MeshStandardNodeMaterial {
   if (rockMaterial) return rockMaterial;
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
@@ -167,9 +178,9 @@ function around(rng: Rng, c: THREE.Vector3, a: number, out: THREE.Vector3): THRE
   return out.copy(c).multiplyScalar(Math.cos(ang)).addScaledVector(t, Math.sin(ang) * Math.cos(phi)).addScaledVector(b, Math.sin(ang) * Math.sin(phi)).normalize();
 }
 
-// 在星球上撒石头：一簇一簇的（一块大的带几块小的），赤道附近一圈（星球视图里圆台的外沿）多一些；避开土路、作品空地和水。
-// 返回一个组（星球本地坐标，挂到 planet.decor 上），每种形状一个 InstancedMesh
-export function scatterDecor(kit: DecorKit, planet: DecorPlanet): { group: THREE.Group; stats: DecorStats } {
+// 在星球上撒石头：一簇一簇的（一块大的带几块小的），赤道附近一圈（星球视图里圆台的外沿）多一些；避开土路、作品空地和水；
+// 路边、作品空地四周再撒小石子。返回每一块的方向、大小、用哪种形状（星球本地坐标）
+export function decorItems(kit: DecorKit, planet: DecorPlanet): Array<{ dir: THREE.Vector3; size: number; kind: 0 | 1; piece: number }> {
   const rng = mulberry32((planet.seed * 2654435761) >>> 0);
   const R = planet.radius;
   const area = 4 * Math.PI * R * R;
@@ -250,42 +261,91 @@ export function scatterDecor(kit: DecorKit, planet: DecorPlanet): { group: THREE
       if (ok(dir, size, true)) pebble(dir, size);
     }
   }
-  const group = new THREE.Group();
-  group.name = 'decor-rocks';
-  const up = new THREE.Vector3(0, 1, 0);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const tilt = new THREE.Quaternion();
-  const s = new THREE.Vector3();
-  const p = new THREE.Vector3();
-  const col = new THREE.Color();
-  let triangles = 0;
-  let drawCalls = 0;
-  const pieces = [...kit.rocks.map((piece, pi) => ({ piece, kind: 0 as const, pi })), ...kit.pebbles.map((piece, pi) => ({ piece, kind: 1 as const, pi }))];
-  pieces.forEach(({ piece, kind, pi }) => {
-    const mine = items.filter((it) => it.kind === kind && it.piece === pi);
-    if (mine.length === 0) return;
-    const mesh = new THREE.InstancedMesh(piece.geometry, piece.material, mine.length);
-    mesh.name = piece.name;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mine.forEach((it, i) => {
-      const h = planet.height(it.dir);
-      // 埋进地里约 30%：石头像从地里长出来，坡上也不悬空
-      p.copy(it.dir).multiplyScalar(h - it.size * 0.3);
-      q.setFromUnitVectors(up, it.dir);
-      tilt.setFromEuler(new THREE.Euler((rng() - 0.5) * 0.5, rng() * Math.PI * 2, (rng() - 0.5) * 0.5));
-      q.multiply(tilt);
-      s.set(it.size, it.size * (0.8 + rng() * 0.5), it.size);
-      mesh.setMatrixAt(i, m.compose(p, q, s));
-      mesh.setColorAt(i, col.copy(planet.rockColor).multiplyScalar(0.8 + rng() * 0.35));
+  return items;
+}
+
+export type DecorItem = ReturnType<typeof decorItems>[number];
+
+// 一颗星球上的石头：每种形状一个实例化网格，一直留着、换星球时只重写实例数据。
+// three 给每个实例化网格单独生成一遍着色器节点（缓存键里有网格的 uuid）：每次进星球都新建网格的话，第一帧要卡 0.1–0.4 秒。
+// 开场时 World.warmUp 把这些网格编译好，以后进星球不再生成
+export class DecorField {
+  readonly group = new THREE.Group();
+  stats: DecorStats = { instances: 0, drawCalls: 0, triangles: 0 };
+  private readonly meshes: Array<{ mesh: THREE.InstancedMesh; kind: 0 | 1; pi: number; tris: number }>;
+
+  constructor(kit: DecorKit) {
+    this.group.name = 'decor-rocks';
+    const pieces = [...kit.rocks.map((piece, pi) => ({ piece, kind: 0 as const, pi })), ...kit.pebbles.map((piece, pi) => ({ piece, kind: 1 as const, pi }))];
+    this.meshes = pieces.map(({ piece, kind, pi }) => {
+      const mesh = decorInstances(piece.geometry, piece.material, 0);
+      mesh.name = piece.name;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.setColorAt(0, new THREE.Color(1, 1, 1)); // 先建好颜色属性：着色器里有没有实例颜色要一开始就定
+      this.group.add(mesh);
+      const g = piece.geometry;
+      return { mesh, kind, pi, tris: g.index ? g.index.count / 3 : g.getAttribute('position').count / 3 };
     });
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    group.add(mesh);
-    triangles += (piece.geometry.index ? piece.geometry.index.count / 3 : piece.geometry.getAttribute('position').count / 3) * mine.length;
-    drawCalls++;
-  });
-  return { group, stats: { instances: items.length, drawCalls, triangles } };
+  }
+
+  // 预编译用：每个网格先画 1 个（编译时 count 为 0 的网格会被跳过）
+  showOneEach(on: boolean): void {
+    for (const { mesh } of this.meshes) mesh.count = on ? 1 : 0;
+  }
+
+  // 按星球重摆
+  fill(kit: DecorKit, planet: DecorPlanet): DecorStats {
+    const items = decorItems(kit, planet);
+    const rng = mulberry32((planet.seed * 40503 + 17) >>> 0);
+    const up = new THREE.Vector3(0, 1, 0);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const tilt = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const s = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    const col = new THREE.Color();
+    let triangles = 0;
+    let drawCalls = 0;
+    let instances = 0;
+    for (const { mesh, kind, pi, tris } of this.meshes) {
+      const mine = items.filter((it) => it.kind === kind && it.piece === pi).slice(0, DECOR_CAPACITY);
+      mine.forEach((it, i) => {
+        const h = planet.height(it.dir);
+        // 埋进地里约 30%：石头像从地里长出来，坡上也不悬空
+        p.copy(it.dir).multiplyScalar(h - it.size * 0.3);
+        q.setFromUnitVectors(up, it.dir);
+        tilt.setFromEuler(e.set((rng() - 0.5) * 0.5, rng() * Math.PI * 2, (rng() - 0.5) * 0.5));
+        q.multiply(tilt);
+        s.set(it.size, it.size * (0.8 + rng() * 0.5), it.size);
+        mesh.setMatrixAt(i, m.compose(p, q, s));
+        mesh.setColorAt(i, col.copy(planet.rockColor).multiplyScalar(0.8 + rng() * 0.35));
+      });
+      mesh.count = mine.length;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.visible = mine.length > 0;
+      instances += mine.length;
+      if (mine.length > 0) {
+        triangles += tris * mine.length;
+        drawCalls++;
+      }
+    }
+    this.stats = { instances, drawCalls, triangles };
+    return this.stats;
+  }
+
+  dispose(): void {
+    for (const { mesh } of this.meshes) mesh.dispose();
+    this.group.removeFromParent();
+  }
+}
+
+// 一次性撒一组（测试和换素材时用）：新建一个 DecorField 填好返回
+export function scatterDecor(kit: DecorKit, planet: DecorPlanet): { group: THREE.Group; stats: DecorStats } {
+  const field = new DecorField(kit);
+  const stats = field.fill(kit, planet);
+  return { group: field.group, stats };
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
-import type { Placement, PlanetRecipe } from '../data/types';
+import type { Placement, PlanetRecipe, PresetId } from '../data/types';
 import { buildTerrainGeometry, LOD_LOW } from './generate';
 import { groundMaterial } from './ground';
 import { maskWorks, PlanetMask } from './mask';
@@ -22,6 +22,7 @@ export class PlanetObject {
   radius = PLANET_RADIUS; // 这颗星球按哪个半径建的（滑块拖动后 rebuildForRadius 更新）
   private recipe!: PlanetRecipe;
   private detail = LOD_LOW;
+  private terrainPreset: PresetId | null = null; // 地表材质按哪个预设建的
   private parts: THREE.Object3D[] = [];
   private ring: THREE.Mesh | null = null;
   private readonly ringStrengthNode = uniform(1); // 每次重建光环都用同一个 uniform，强度跨重建保留
@@ -116,12 +117,22 @@ export class PlanetObject {
     for (const fn of this.maskListeners) fn();
   }
 
+  // 只换细分（聚焦、离开）时留着原来的网格和材质，只换几何：材质换新的话第一次画要重新生成整个地表着色器（实测 100–200 ms）。
+  // 预设变了才换材质
   private rebuildTerrain(): void {
+    const geometry = buildTerrainGeometry(this.recipe, this.detail);
+    const preset = this.recipe.preset;
+    if (this.terrain && this.terrainPreset === preset) {
+      this.terrain.geometry.dispose();
+      this.terrain.geometry = geometry;
+      return;
+    }
     if (this.terrain) {
       this.group.remove(this.terrain);
       disposeTree(this.terrain);
     }
-    this.terrain = new THREE.Mesh(buildTerrainGeometry(this.recipe, this.detail), groundMaterial(this.recipe.preset, this.mask.node));
+    this.terrain = new THREE.Mesh(geometry, groundMaterial(preset, this.mask.node));
+    this.terrainPreset = preset;
     this.terrain.name = 'terrain';
     this.terrain.receiveShadow = true;
     this.group.add(this.terrain);

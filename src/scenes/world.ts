@@ -2,7 +2,8 @@ import * as THREE from 'three/webgpu';
 import { setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { createAtmosphere, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
-import { focusDetail, LOD_LOW } from '../planet/generate';
+import { decorInstances } from '../planet/decor';
+import { focusDetail, LOD_LOW, prewarmTerrain } from '../planet/generate';
 import { PlanetObject } from '../planet/planetObject';
 import { onPlanetRadius, PLANET_RADIUS } from '../planet/presets';
 import { CameraRig, type Framing } from './camera';
@@ -10,7 +11,7 @@ import { Dressing } from './dressing';
 import { galaxyPositions } from './layout';
 import { useLook } from './look';
 import { galaxyFraming, planetFraming } from './shots';
-import { compileUnculled, Stager } from './stager';
+import { compileShadow, compileUnculled, Stager } from './stager';
 
 export interface PlanetEntry {
   team: Team;
@@ -34,8 +35,9 @@ export function budgetPixelRatio(width: number, height: number, dpr: number): nu
 
 // 太阳的阴影：一张 2048² 的阴影贴图，正交阴影相机跟着镜头看的地方走。星球视图整个圆台都在里面；
 // 漫游时只罩住角色周围一块，阴影更清楚
+export const SHADOW_LAYER = 7; // 只有阴影相机看得见的图层（预热阴影管线用）
 export const SHADOW = {
-  enabled: true,
+  enabled: typeof location === 'undefined' || new URLSearchParams(location.search).get('shadows') !== '0', // ?shadows=0：关掉阴影（低画质档）
   mapSize: 2048,
   near: 14, // 漫游时阴影罩住角色周围多大（半边长，米）
 };
@@ -48,13 +50,19 @@ export class World {
   readonly stage: Stager; // 新模型上场：贴图逐帧上传、着色器后台编译、每帧最多挂一个、缩放加淡入
   readonly planets = new Map<string, PlanetEntry>();
   readonly frameHooks = new Set<(dt: number) => void>();
+  readonly renderHooks = new Set<() => void>(); // 画完这一帧之后调（读这一帧的绘制统计：renderer.info 在下一帧开始时清零）
   readonly atmosphere: Atmosphere; // 天空、云海、太阳和天光（nature/atmosphere.ts）
   readonly dressing: Dressing; // 聚焦星球上的草、花、石头
   focused: PlanetEntry | null = null;
   hovered: PlanetEntry | null = null;
   paused = false; // Museum 打开时主画面被盖住，停止渲染
   skyPreset: AtmospherePreset = 'day';
-  private warming = false; // warmUp() 预编译期间不画：画了就会在主线程上同步编译
+  // warmUp() 做完时 resolve：阴影贴图这时才有，要连投影那一遍一起预编译的东西（展台）等它
+  readonly warm: Promise<void>;
+  private warmed: () => void = () => {};
+  // warmUp() 完成之前不画：画了就会在主线程上同步编译。从构造时就开始等（主循环在构造函数里就启动了，
+  // main.ts 在 warmUp 之前还要等存储、装配页面，这期间画出来的帧会把星球的着色器同步编译一遍）
+  private warming = true;
   private readonly halo: THREE.Mesh;
   private readonly ringGoals = new Map<PlanetObject, number>(); // 各星球光环要淡到多少，frame() 里逐帧逼近
   private readonly timer = new THREE.Timer();
@@ -65,8 +73,10 @@ export class World {
 
   private constructor(renderer: THREE.WebGPURenderer) {
     this.renderer = renderer;
+    this.warm = new Promise((resolve) => { this.warmed = resolve; });
     this.rig = new CameraRig(renderer.domElement);
     this.stage = new Stager(renderer, this.scene, this.rig.camera);
+    this.stage.shadowLight = () => (SHADOW.enabled ? this.atmosphere.sun : null);
     this.atmosphere = createAtmosphere(this.scene, renderer, { planetRadius: PLANET_RADIUS, preset: this.skyPreset });
     this.setupShadows();
     this.dressing = new Dressing({ renderer, scene: this.scene, precompile: (o) => this.stage.precompile(o) });
@@ -95,7 +105,8 @@ export class World {
   }
 
   static async create(canvas: HTMLCanvasElement): Promise<World> {
-    const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
+    // ?gputime：打开 GPU 时间戳查询（测性能的脚本用，scripts/perf-gpu.mjs）；平时不开，省掉每帧的查询
+    const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, trackTimestamp: new URLSearchParams(location.search).has('gputime') });
     await renderer.init();
     renderer.shadowMap.enabled = SHADOW.enabled;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -132,18 +143,56 @@ export class World {
   async warmUp(): Promise<void> {
     this.warming = true;
     this.halo.visible = true; // 悬停光圈平时藏着，第一次悬停才画：一起编译
-    // 石头的材质所有星球共用：先拿一块编译好，进星球时撒的石头直接用
-    const rock = this.dressing.kit.rocks[0];
-    const sample = new THREE.InstancedMesh(rock.geometry, rock.material, 1);
-    sample.castShadow = true;
-    sample.receiveShadow = true;
-    sample.setColorAt(0, new THREE.Color(1, 1, 1));
+    // 石头的网格一直留着（Dressing.field），开场就编译好：主画面那一遍和投影那一遍。每种形状先放 1 个（数量 0 的网格编译时会跳过）
+    prewarmTerrain();
+    const rocks = this.dressing.field;
+    rocks.showOneEach(true);
+    this.scene.add(rocks.group);
     try {
-      await Promise.all([...this.scene.children.map((o) => compileUnculled(this.renderer, o, this.rig.camera, this.scene)), compileUnculled(this.renderer, sample, this.rig.camera, this.scene)]);
+      await Promise.all(this.scene.children.map((o) => compileUnculled(this.renderer, o, this.rig.camera, this.scene)));
+      // 先画一帧（阴影贴图这时才建出来），再在后台编石头和展台投影那一遍的管线
+      this.primeShadows();
+      await compileShadow(this.renderer, rocks.group, SHADOW.enabled ? this.atmosphere.sun : null, this.scene);
     } finally {
+      this.scene.remove(rocks.group);
+      rocks.showOneEach(false);
       this.halo.visible = this.hovered !== null;
       this.warming = false;
-      sample.dispose();
+      this.warmed();
+    }
+  }
+
+  // 太阳阴影那一遍的管线：compileAsync 只编主画面那一遍，阴影贴图第一次画到某种东西（实例化的石头、普通网格、双面、半透明）时
+  // 才同步建管线，进星球时一下子卡 0.3–0.6 秒。开场前把每种各拿一个，放在只有阴影相机看得见的图层（SHADOW_LAYER）上画一帧：
+  // 管线在这里建好（画布还没露出来），以后同类的东西投影就不卡
+  private primeShadows(): void {
+    if (!SHADOW.enabled) return;
+    const group = new THREE.Group();
+    const box = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    const variants: THREE.Object3D[] = [
+      new THREE.Mesh(box, new THREE.MeshStandardNodeMaterial()),
+      new THREE.Mesh(box, new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide })),
+      new THREE.Mesh(box, new THREE.MeshStandardNodeMaterial({ transparent: true, opacity: 0.5 })),
+      new THREE.Mesh(box, new THREE.MeshStandardNodeMaterial({ transparent: true, opacity: 0.5, side: THREE.DoubleSide })),
+      decorInstances(box, this.dressing.kit.rocks[0].material, 1),
+    ];
+    for (const o of variants) {
+      o.castShadow = true;
+      o.layers.set(SHADOW_LAYER);
+      group.add(o);
+    }
+    this.placeSun();
+    group.position.copy(this.atmosphere.sun.target.position);
+    this.scene.add(group);
+    try {
+      this.renderer.render(this.scene, this.rig.camera);
+    } finally {
+      this.scene.remove(group);
+      box.dispose();
+      for (const o of variants) {
+        if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose();
+        else ((o as THREE.Mesh).material as THREE.Material).dispose();
+      }
     }
   }
 
@@ -261,6 +310,9 @@ export class World {
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.03;
     sun.shadow.radius = 2;
+    // 阴影相机多看一个图层：开场预热时只给阴影那一遍画的东西放在这层（主镜头只看第 0 层）。
+    // 阴影相机的图层掩码除了第 0 层还有别的位时，three 就用它自己的，不再照抄主镜头的
+    sun.shadow.camera.layers.enable(SHADOW_LAYER);
   }
 
   // 阴影相机跟着镜头看的地方：镜头离地面远（星球视图、星系）时罩住聚焦星球朝镜头的整个半球；
@@ -319,7 +371,9 @@ export class World {
     this.atmosphere.update(dt, this.rig.camera);
     this.placeSun();
     this.dressing.update(this.rig.camera);
-    if (!this.paused && !this.warming) this.renderer.render(this.scene, this.rig.camera);
+    if (this.paused || this.warming) return;
+    this.renderer.render(this.scene, this.rig.camera);
+    for (const hook of this.renderHooks) hook();
   }
 
   // 按当前窗口的宽高比取星系全景（窗口变化后下一次回星系才生效，不在用户拖动、缩放时挪镜头）

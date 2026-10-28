@@ -134,9 +134,11 @@ export function installTune(world: World): void {
     stats.canvas = `${world.renderer.domElement.width} × ${world.renderer.domElement.height}`;
     const r = world.dressing.rocks;
     stats.rocks = `${r.instances} in ${r.drawCalls} draws`;
-    const info = world.renderer.info.render as { drawCalls?: number; calls?: number; triangles: number };
-    stats.calls = info.drawCalls ?? info.calls ?? 0;
-    stats.triangles = info.triangles;
+  });
+  // 绘制统计要在画完以后读（renderer.info 在每帧开始时清零）
+  world.renderHooks.add(() => {
+    stats.calls = world.renderer.info.render.drawCalls;
+    stats.triangles = world.renderer.info.render.triangles;
   });
   const perf = pane.addFolder({ title: 'Performance', expanded: false });
   perf.addBinding(stats, 'frame', { label: 'frame ms', readonly: true, view: 'graph', min: 0, max: 50 });

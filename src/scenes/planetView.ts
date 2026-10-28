@@ -47,9 +47,14 @@ export class PlanetView {
   constructor(world: World) {
     this.world = world;
     for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
-      this.warmPlinths.add(new THREE.Mesh(plinthGeometry(), plinthMaterial(loading, glow)));
+      // 和真的展台一样投影、接受阴影：接受阴影的着色器不一样，不设的话预热的是另一份
+      const warm = new THREE.Mesh(plinthGeometry(), plinthMaterial(loading, glow));
+      warm.castShadow = true;
+      warm.receiveShadow = true;
+      this.warmPlinths.add(warm);
     }
-    world.stage.precompile(this.warmPlinths).catch((err: unknown) => console.error(err));
+    // 等开场预热做完（阴影贴图建好）再编：主画面和投影那一遍都编好
+    (world.warm ?? Promise.resolve()).then(() => world.stage.precompile(this.warmPlinths)).catch((err: unknown) => console.error(err));
     // 星球半径变了：地形已经重建（World 先收到通知），作品按新地面重新贴地
     onPlanetRadius(() => this.refreshAll());
   }

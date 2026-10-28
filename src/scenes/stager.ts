@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { vec4 } from 'three/tsl';
 import { modelTextures } from '../assets/models';
 
 // 新模型上场。实测（30 万面的真实模型，进入星球时 4 件一起到）卡在挂上场景后的第一帧：
@@ -75,6 +76,45 @@ export async function compileUnculled(renderer: THREE.WebGPURenderer, object: TH
   }
 }
 
+// 太阳阴影那一遍用的材质：和 three 自己的阴影材质（ShadowBaseNode 里的 _getShadowMaterial）一模一样，
+// 着色器代码和渲染状态相同，编出来的管线就是阴影那一遍要用的那条
+const shadowPassMaterial = (() => {
+  const m = new THREE.NodeMaterial();
+  m.colorNode = vec4(0, 0, 0, 1);
+  (m as THREE.NodeMaterial & { isShadowPassMaterial: boolean }).isShadowPassMaterial = true;
+  m.name = 'ShadowMaterial';
+  m.blending = THREE.NoBlending;
+  m.fog = false;
+  return m;
+})();
+
+// 在后台编译 object 投影那一遍的管线（compileAsync 只编主画面那一遍；阴影贴图第一次画到它时才同步建管线，GPU 进程会停 0.1–0.6 秒）。
+// 做法：临时把渲染目标换成阴影贴图、场景的替换材质换成阴影材质，用阴影相机调 compileAsync。
+// compileAsync 在第一个 await 之前就同步读完渲染目标、建好渲染对象，所以调用之后马上换回来就行，不影响这期间画的帧。
+// light.shadow.map 要在阴影画过一次之后才有（World.warmUp 先画一帧）；还没有就跳过
+export function compileShadow(renderer: THREE.WebGPURenderer, object: THREE.Object3D, light: THREE.DirectionalLight | null, scene: THREE.Scene): Promise<void> {
+  const map = light?.castShadow ? (light.shadow.map as THREE.RenderTarget | null) : null;
+  if (!light || !map) return Promise.resolve();
+  let casts = false;
+  object.traverse((o) => { if (o.castShadow) casts = true; });
+  if (!casts) return Promise.resolve();
+  const target = renderer.getRenderTarget();
+  const mrt = renderer.getMRT();
+  const override = scene.overrideMaterial;
+  renderer.setRenderTarget(map);
+  renderer.setMRT(null);
+  scene.overrideMaterial = shadowPassMaterial;
+  let done: Promise<void>;
+  try {
+    done = compileUnculled(renderer, object, light.shadow.camera, scene);
+  } finally {
+    scene.overrideMaterial = override;
+    renderer.setMRT(mrt);
+    renderer.setRenderTarget(target);
+  }
+  return done;
+}
+
 function wear(swaps: Swap[]): void {
   for (const s of swaps) s.mesh.material = Array.isArray(s.original) ? s.fades : s.fades[0];
 }
@@ -95,6 +135,8 @@ export class Stager implements Stage {
   private readonly playing = new Set<(dt: number) => boolean>(); // 正在缩放淡入的；返回 false 表示播完了
   private queue: Promise<unknown> = Promise.resolve();
   private readonly uploaded = new WeakSet<THREE.Texture>();
+  // 投影的光（太阳）：准备新模型时连阴影那一遍的管线也在后台编好（World 设）
+  shadowLight: (() => THREE.DirectionalLight | null) | null = null;
 
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera) {
     this.renderer = renderer;
@@ -160,6 +202,7 @@ export class Stager implements Stage {
       this.uploaded.add(texture);
     }
     await compileUnculled(this.renderer, object, this.camera, this.scene);
+    await compileShadow(this.renderer, object, this.shadowLight?.() ?? null, this.scene);
     return alive();
   }
 
