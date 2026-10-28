@@ -97,7 +97,8 @@ export const RING = {
   wave: 24, // 波包里的波数（弧度/米）：约 26 厘米一道
   amp: 0.004, // 波高（米）
   step: 0.32, // 角色在水里每走这么远放一圈（米）
-  idle: 1.4, // 站着不动时每隔这么久放一圈（秒）
+  idle: 2.2, // 站着不动时每隔这么久放一圈（秒）
+  jitter: 0.09, // 每圈的圆心在脚下随机挪开多远（米）：两只脚轮流踩，圈不是同心的
 };
 
 // 所有水面材质共用的 uniform：放进 renderGroup（每次 render 刷新一次）
@@ -199,7 +200,7 @@ const ringsNode = Fn(([p, pw]: [V3, V3]) => {
       const fade = float(1).sub(age.div(RING.life));
       const env = exp(x.mul(x).mul(invW2)).mul(fade.mul(fade));
       grad.addAssign(rel.div(max(r, 1e-3)).mul(packetSlope(x, env, RING.wave, RING.width).mul(RING.amp)));
-      crest.addAssign(env.mul(smoothstep(0.6, 1, cos(x.mul(RING.wave)))).mul(fade));
+      crest.addAssign(env.mul(smoothstep(0.72, 1, cos(x.mul(RING.wave)))).mul(fade).mul(0.6));
     });
   });
   // 雨点：两层格子（三维格子和水面相交），每格一个雨点，相位随时间循环；雨小时只有一部分格子有雨点
@@ -282,7 +283,7 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   const d = max(dq, 0);
   const t = time;
   // 防闪：一个像素覆盖多少米。频率 f（每米几个周期）的图案一个周期少于 2 个像素时淡掉
-  const perPixel = length(fwidth(p)).max(1e-5);
+  const perPixel = length(fwidth(p)).max(1e-5).toVar();
   const keep = (f: number | F) => smoothstep(1.2, 3, float(1).div(perPixel.mul(f)));
   const camLocal = modelWorldMatrixInverse.mul(vec4(cameraPosition, 1)).xyz;
   const V = normalize(camLocal.sub(p));
@@ -341,26 +342,44 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   m.specularColorNode = vec3(U.sheen);
   m.specularIntensityNode = exists;
 
-  // ---- 闪光：更细的一层「小镜面」，只有正好把光反进镜头的那几个亮一下（随时间换位置，一闪一闪）；远处淡掉
-  const g1 = noise3v(p.mul(23).add(vec3(t.mul(1.3), t.mul(-0.9), t.mul(0.7)))).sub(0.5);
-  const g2 = noise3v(p.mul(37).add(vec3(t.mul(-1.5), t.mul(1.1), t.mul(1.2))).add(7.7)).sub(0.5);
-  const gTilt = g1.add(g2.mul(0.8)).mul(0.6);
-  const glintN = transformNormalToView(normalize(nWater.add(gTilt.sub(n.mul(dot(n, gTilt))))));
-  const glintAmt = U.sparkle.mul(keep(23)).mul(exists.sub(foam).max(0)).mul(5);
+  // ---- 闪光：更细的一层「小镜面」，只有正好把光反进镜头的那几个亮一下（随时间换位置，一闪一闪）；远处淡掉。
+  // 那两层细噪声只在太阳反光的大致范围里算（水面法线和半程向量夹角 37° 以内），别的像素直接跳过。
+  // 带导数的量（keep）都在分支外面先算好：WGSL 不许在非一致的分支里取导数
+  const glintAmt = U.sparkle.mul(keep(23)).mul(exists.sub(foam).max(0)).mul(5).toVar();
+  const nWaterView = transformNormalToView(nWater);
+  const glint = (L: V3): F => Fn(() => {
+    const out = float(0).toVar();
+    const H = normalize(L.add(positionViewDirection)).toVar();
+    If(glintAmt.greaterThan(0.001).and(dot(nWaterView, H).greaterThan(0.8)), () => {
+      const g1 = noise3v(p.mul(23).add(vec3(t.mul(1.3), t.mul(-0.9), t.mul(0.7)))).sub(0.5);
+      const g2 = noise3v(p.mul(37).add(vec3(t.mul(-1.5), t.mul(1.1), t.mul(1.2))).add(7.7)).sub(0.5);
+      const gTilt = g1.add(g2.mul(0.8)).mul(0.6);
+      const glintN = transformNormalToView(normalize(nWater.add(gTilt.sub(n.mul(dot(n, gTilt))))));
+      out.assign(smoothstep(0.9978, 0.9995, dot(glintN, H)).mul(glintAmt));
+    });
+    return out;
+  })() as unknown as F;
 
-  // ---- 水底光斑：沿折射后的视线落到水底的那一点上取两层「脊」噪声相乘，成一张网；浅水最亮，深了、浑了就淡
-  const refr = refract(V.negate(), n, 0.752);
-  const q = p.add(refr.mul(d.div(max(dot(refr.negate(), n), 0.25))));
-  const ridge = (v: F) => float(1).sub(abs(v.sub(0.5)).mul(2));
-  const c1 = valueNoise3(q.mul(2.3).add(vec3(t.mul(0.21), t.mul(-0.13), t.mul(0.17))));
-  const c2 = valueNoise3(q.mul(3.1).add(vec3(t.mul(-0.16), t.mul(0.19), t.mul(-0.11))).add(11.1));
-  const web = pow(ridge(c1).mul(ridge(c2)), 5);
-  const causticAmt = web.mul(U.caustics).mul(0.35).mul(smoothstep(0.01, 0.06, d)).mul(float(1).sub(smoothstep(0.12, 0.55, d)))
-    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(foam)).mul(keep(3.1));
+  // ---- 水底光斑：沿折射后的视线落到水底的那一点上取两层「脊」噪声相乘，成一张网；浅水最亮，深了、浑了就淡。
+  // 只在浅水、看得见底的地方算噪声
+  const causticK = U.caustics.mul(0.35).mul(smoothstep(0.01, 0.06, d)).mul(float(1).sub(smoothstep(0.12, 0.55, d)))
+    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(foam)).mul(keep(3.1)).toVar();
+  const causticAmt = Fn(() => {
+    const out = float(0).toVar();
+    If(causticK.greaterThan(0.001), () => {
+      const refr = refract(V.negate(), n, 0.752);
+      const q = p.add(refr.mul(d.div(max(dot(refr.negate(), n), 0.25))));
+      const ridge = (v: F) => float(1).sub(abs(v.sub(0.5)).mul(2));
+      const c1 = valueNoise3(q.mul(2.3).add(vec3(t.mul(0.21), t.mul(-0.13), t.mul(0.17))));
+      const c2 = valueNoise3(q.mul(3.1).add(vec3(t.mul(-0.16), t.mul(0.19), t.mul(-0.11))).add(11.1));
+      out.assign(pow(ridge(c1).mul(ridge(c2)), 5).mul(causticK));
+    });
+    return out;
+  })() as unknown as F;
   const nView = transformNormalToView(n);
 
   m._extras = {
-    glint: (L) => smoothstep(0.9978, 0.9995, dot(glintN, normalize(L.add(positionViewDirection)))).mul(glintAmt),
+    glint,
     caustic: (L) => pal.shallow.mul(causticAmt.mul(saturate(dot(nView, L)))),
   };
   return m;
@@ -539,12 +558,17 @@ function stepWater(world: World): void {
       inWater = true;
       _at.copy(_dir).multiplyScalar(e.planet.sea).add(e.home);
       const now = time.value;
+      U.walker.value.set(_at.x, _at.y, _at.z, 1);
       if (!wade.inWater || _at.distanceTo(wade.last) > RING.step || now - wade.lastT > RING.idle) {
-        emitRipple(_at);
         wade.last.copy(_at);
         wade.lastT = now;
+        // 圆心在脚下随机挪开一点（挪完再按回水面半径）
+        _at.x += (Math.random() - 0.5) * 2 * RING.jitter;
+        _at.y += (Math.random() - 0.5) * 2 * RING.jitter;
+        _at.z += (Math.random() - 0.5) * 2 * RING.jitter;
+        _at.sub(e.home).setLength(e.planet.sea).add(e.home);
+        emitRipple(_at);
       }
-      U.walker.value.set(_at.x, _at.y, _at.z, 1);
     }
   }
   if (!inWater) U.walker.value.w = 0;
