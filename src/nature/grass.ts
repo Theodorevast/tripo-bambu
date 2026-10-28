@@ -123,19 +123,19 @@ export interface GrassField {
 
 // —— 常量 ——
 
-export const BLADES_PER_TILE = 4096; // 满密度时每块瓦片的草
-export const BAND_SIZES = [4096, 1024, 256, 64]; // 各档每块瓦片画几根（第 j 根在哪一档都是同一根）
+export const BLADES_PER_TILE = 8192; // 满密度时每块瓦片的草
+export const BAND_SIZES = [8192, 2048, 512, 128]; // 各档每块瓦片画几根（第 j 根在哪一档都是同一根）
 const BAND_SEGMENTS = [3, 3, 2, 1]; // 各档每根草分几节（远处的草只有一个三角形）
 export const FLOWERS_PER_TILE = 128;
 const TILE_TARGET = 2.9; // 瓦片目标边长（米）
 export const GRID = 9; // 每块瓦片的地面网格：9×9 个点
-const TARGET_DENSITY = 480; // 密度 1 时近处每平方米的草
+const TARGET_DENSITY = 780; // 密度 1 时近处每平方米的草
 const SLOTS_PER_LAYER = 4; // 每层数组贴图放 2×2 块瓦片的网格（WebGPU 默认最多 256 层）
 const SINK = 0.03; // 草根往地下埋 3 cm，地面网格是折线插值，不让草根悬空
 const HEIGHT_MIN = 0.15;
 const HEIGHT_MAX = 0.45;
-const WIDTH_MIN = 0.012;
-const WIDTH_MAX = 0.026;
+const WIDTH_MIN = 0.009;
+const WIDTH_MAX = 0.021;
 const MAX_BEND = 1.45; // 草尖最多偏离竖直方向约 83°
 const BIRTH_FADE = 0.6; // 新算好的瓦片用 0.6 秒按名次长出来
 const GEN_BUDGET_MS = 3; // 每帧最多花多少毫秒算新瓦片（第一帧不限）
@@ -661,17 +661,20 @@ export function createGrassField(opts: GrassOptions): GrassField {
         const ang = s(2).mul(Math.PI * 2);
         const facing = e1.mul(cos(ang)).add(e2.mul(sin(ang))).toVar();
         const across = cross(up, facing).toVar();
-        // 色斑、草高起伏
+        // 色斑、草高起伏：大片的高矮（几十米）× 一丛一丛的高矮（不到 1 m）
         const q = base;
         const { patch, body } = patchColor(q);
-        const tall = mix(0.72, 1.28, patch.b);
-        const h = mix(HEIGHT_MIN, HEIGHT_MAX, pow(s(3), 1.3)).mul(tall).mul(U.heightScale).toVar();
+        const tuft = texture3D(noise, q.mul(1 / 3.2)).r;
+        const tall = mix(0.72, 1.28, patch.b).mul(mix(0.55, 1.3, smoothstep(0.25, 0.75, tuft)));
+        // 约 4% 是细长的草茎，高出草面一截（参考图里零星戳出来的那些）
+        const stalk = s(10).lessThan(0.04);
+        const h = mix(HEIGHT_MIN, HEIGHT_MAX, pow(s(3), 1.3)).mul(tall).mul(select(stalk, float(1.7), float(1))).mul(U.heightScale).toVar();
         const hRel = h.div(HEIGHT_MAX);
         // 远处加宽（补偿变稀），而且不细于约 0.9 个像素
         const widen = min(max(dist.div(U.fullRadius), 1), 2.2);
-        const w = max(mix(WIDTH_MIN, WIDTH_MAX, s(4)).mul(U.widthScale).mul(widen), dist.mul(U.pixelAngle).mul(0.9)).toVar();
+        const w = max(mix(WIDTH_MIN, WIDTH_MAX, s(4)).mul(select(stalk, float(0.55), float(1))).mul(U.widthScale).mul(widen), dist.mul(U.pixelAngle).mul(0.9)).toVar();
         // 弯曲：自身的倾斜 + 风（投影到切平面）+ 小抖动 + 踩草
-        const lean = mix(0.12, 0.55, s(5));
+        const lean = mix(0.1, 0.62, s(5)).mul(select(stalk, float(0.4), float(1)));
         const wind = windAt(base.add(U.center), U.time).toVar();
         const windT = wind.sub(up.mul(dot(wind, up))).toVar();
         const flutter = sin(U.windTime.mul(mix(5.0, 9.0, s(6))).add(s(7).mul(Math.PI * 2))).mul(0.07).mul(length(windT).add(0.2));
@@ -698,8 +701,10 @@ export function createGrassField(opts: GrassOptions): GrassField {
         vPos.assign(out.add(U.center));
         vT.assign(t);
         // 颜色：根暗、中段是色斑决定的草色、尖亮偏暖；每根草明暗和色相有一点随机
-        const vary = mix(0.82, 1.15, s(8));
-        const bodyC = mix(body, U.fresh, s(9).mul(0.35)).mul(vary);
+        // 每根草：明暗 0.7–1.2 倍，色相往嫩绿或深绿偏一点，少数偏黄（老叶）
+        const vary = mix(0.7, 1.2, s(8));
+        const hueShift = s(9);
+        const bodyC = mix(mix(body, U.lush, saturate(float(0.5).sub(hueShift)).mul(0.8)), mix(U.fresh, U.dry, 0.35), saturate(hueShift.sub(0.6)).mul(1.1)).mul(vary);
         const tipC = mix(bodyC, U.tip, 0.45);
         vAlbedo.assign(mix(mix(U.root, bodyC, smoothstep(0.0, 0.45, t)), tipC, smoothstep(0.45, 1.0, t)));
       });
@@ -728,6 +733,10 @@ export function createGrassField(opts: GrassOptions): GrassField {
       const thin = pow(smoothstep(0.3, 1.0, vT), 1.5);
       const glow = mix(vAlbedo, U.tip, 0.6).mul(U.sunColor).mul(back.mul(1.5).add(saturate(ndl.negate()).mul(0.2)));
       col.addAssign(glow.mul(thin).mul(U.translucency));
+      // 叶面的蜡质反光：迎着太阳的叶子上有一道亮光（不在阴影里时才有）
+      const refl = l.negate().sub(n.mul(dot(l.negate(), n).mul(2)));
+      const spec = pow(saturate(dot(refl, toCam)), 18).mul(0.35).mul(float(1).sub(shade)).mul(smoothstep(0.2, 0.7, vT));
+      col.addAssign(U.sunColor.mul(spec).mul(mix(vec3(1), vAlbedo.mul(3), 0.5)));
       // 远处去饱和一点，作空气透视
       const d = length(cameraPosition.sub(vPos));
       const fade = smoothstep(U.fullRadius.mul(1.5), U.radius, d).mul(0.3);
@@ -750,15 +759,15 @@ export function createGrassField(opts: GrassOptions): GrassField {
       const dist = length(base.sub(U.cam)).toVar();
       const q = base;
       const s = (k: number) => hash(root.seed.add(uint(k)));
-      // 成片：三种花各有一层低频噪声，哪种最强就是哪种花；片外只有零星几朵
-      const p = texture3D(noise, q.mul(1 / 34).add(vec3(0.37, 0.11, 0.73))).toVar();
-      const daisy = p.r;
-      const butter = p.g.mul(0.92);
-      const lav = p.a.mul(0.95).add(p.b.mul(0.1));
-      const kind = select(daisy.greaterThan(butter).and(daisy.greaterThan(lav)), float(0), select(butter.greaterThan(lav), float(1), float(2))).toVar();
-      const strongest = max(daisy, max(butter, lav));
-      const patchy = smoothstep(0.5, 0.66, strongest);
-      const accept = U.flowers.mul(patchy.mul(0.9).add(0.04)).mul(root.scale);
+      // 成片：一层低频噪声决定这里是不是花片，另一层决定花片以什么为主（雏菊或薰衣草），毛茛零星混在两种花片里；片外只有很少几朵
+      const p = texture3D(noise, q.mul(1 / 30).add(vec3(0.37, 0.11, 0.73))).toVar();
+      const patchy = smoothstep(0.47, 0.66, p.r);
+      const daisyLed = smoothstep(0.35, 0.65, p.g);
+      const pDaisy = mix(0.15, 0.7, daisyLed);
+      const pButter = mix(0.35, 0.2, daisyLed);
+      const pick = s(11);
+      const kind = select(pick.lessThan(pDaisy), float(0), select(pick.lessThan(pDaisy.add(pButter)), float(1), float(2))).toVar();
+      const accept = U.flowers.mul(patchy.mul(0.9).add(0.035)).mul(root.scale);
       const fade = float(1).sub(smoothstep(U.flowerRadius.mul(0.6), U.flowerRadius, dist));
       const sea = smoothstep(U.sea.add(0.04), U.sea.add(0.2), root.radius);
       const scale = rankScale(accept.mul(fade), s(1)).mul(float(1).sub(smoothstep(0.25, 0.5, root.mask))).mul(sea).toVar();

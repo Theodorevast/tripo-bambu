@@ -106,7 +106,7 @@ groundMat.colorNode = Fn(() => {
   const q = positionWorld.sub(uCenter);
   const n = mx_noise_float(q.mul(0.9)).mul(0.5).add(mx_noise_float(q.mul(3.7)).mul(0.25)).add(0.5);
   const soil = mix(color('#3f3022'), color('#6a5238'), saturate(n));
-  const under = mix(soil, color('#26331a'), 0.65);
+  const under = mix(soil, color('#1c2a10'), 0.82); // 草底下：偏暗的绿土，从草缝里看下去不是一片褐色
   const d = length(cameraPosition.sub(positionWorld));
   const far = grass.groundTint(positionWorld);
   const toFar = smoothstep(uFull.mul(1.2), uRadius.mul(0.95), d);
