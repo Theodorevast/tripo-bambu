@@ -317,12 +317,13 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   col = mix(col, floorCol, lowFloor);
   // 掠射角下草地发亮一点（远看一片草叶迎着光的那层绒感）
   const facing = saturate(dot(normalize(normalView), normalize(positionView.negate())));
-  const sheen = pow(float(1).sub(facing), 3).mul(float(1).sub(max(pathAmt, clearAmt))).mul(0.22);
+  const sheen = pow(float(1).sub(facing), 3).mul(float(1).sub(max(pathAmt, clearAmt))).mul(0.22).mul(look ? look.fade : float(1));
   col = col.add(pal.dry.mul(sheen));
   // 冷暖（俯瞰时）：朝太阳的一侧偏暖、背光一侧偏冷，整颗星球上有一层柔和的冷暖渐变
   col = col.mul(sunTint(normalize(positionWorld.sub(modelPosition)), overview.mul(U.warmCool)));
   // 星系里（像一颗颗上了色的玻璃弹珠）：饱和度提一截，背光一侧的环境光压暗（明暗分得开，不是一层奶白的雾）
-  const gal = galaxyFactor(U.radius);
+  // 乘上这颗星球的淡出系数：星球视图里缩小的邻居（淡出到 0）不要这些——它们沉在云海里，清漆的反光会在云上勾出一圈泡泡的边
+  const gal = look ? galaxyFactor(U.radius).mul(look.fade) : galaxyFactor(U.radius);
   const lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
   col = mix(vec3(lum), col, float(1).add(gal.mul(U.galaxySat)));
   m.aoNode = mix(float(1), smoothstep(-0.35, 0.45, dot(normalize(positionWorld.sub(modelPosition)), sunDirNode())).mul(0.55).add(0.45), gal.mul(U.galaxyShade));
@@ -335,7 +336,8 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   m.colorNode = col;
   // 星系里像上了一层清漆的弹珠：粗糙度降一点、镜面反射强一点，朝阳一侧有一块柔和的高光
   m.roughnessNode = mix(mix(float(0.96), float(0.88), max(pathAmt, clearAmt)), float(0.5), gal.mul(U.galaxyGloss));
-  m.specularIntensityNode = mix(float(GROUND_SPECULAR), float(0.7), gal.mul(U.galaxyGloss));
+  // 星球视图里缩小的邻居（淡出到 0）：镜面反射关掉——它们沉在云海里，轮廓上一圈菲涅尔反光会在云上勾出一个泡泡
+  m.specularIntensityNode = mix(float(GROUND_SPECULAR), float(0.7), gal.mul(U.galaxyGloss)).mul(look ? look.fade : float(1));
 
   // 细节凹凸（米）：一丛丛的起伏 + 一簇簇 + 颗粒 + 土里的碎屑，路面整体低一点、路上的小石头鼓起来；
   // 每一层都按像素大小淡出，按屏幕空间导数算法线（不需要切线）
