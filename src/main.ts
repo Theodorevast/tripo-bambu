@@ -17,12 +17,17 @@ import { installDebugHooks } from './debug';
 import { Editor } from './editor/editor';
 import { installWalkDebug } from './play/debug';
 import { WalkMode } from './play/walkMode';
+import { startBoot } from './ui/boot';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
+// 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后云散开；Nunito 的几个字重从这里开始在后台预加载
+const boot = startBoot();
 // 本机有私有的真实模型时（开发环境，.tmp/local-models/），「你的星球」上的占位作品换成它们（assets/localWorks.ts）
 const seed = await applyLocalWorks(seedJson as unknown as Seed);
 const store = new LocalStore(seed, browserStorage());
-const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!);
+await boot.phase('sky');
+// 建不起来（没有 WebGPU 也没有 WebGL2，或者别的错）：停在启动画面上提示，后面的不再执行
+const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!).catch(boot.fail);
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
@@ -73,7 +78,10 @@ app.museum = sheet(new MuseumPage(app.root, world, () => app.closeSheet(), (work
 if (new URLSearchParams(location.search).has('tune')) {
   import('./tune').then((m) => m.installTune(world), (err: unknown) => console.error(err));
 }
+await boot.phase('warm');
 // 星球都摆进场景了：开场之前在后台把着色器编译好，开场飞行的第一帧不卡
 await world.warmUp();
+await boot.phase('land');
+boot.reveal(); // 不等：云散开和开场飞行同时进行
 await app.start();
 void walk.preload(); // 角色模型在后台加载、预编译：第一次点 Walk 时不卡

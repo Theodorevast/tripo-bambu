@@ -4,6 +4,7 @@ import { isCurrentRoute } from './lib/currentRoute';
 import { LatestQueue } from './lib/latestQueue';
 import { parseRoute, toHash, type Route } from './router';
 import type { World } from './scenes/world';
+import { installBadge } from './ui/badge';
 import { GalaxyUi } from './ui/galaxyUi';
 import { toast } from './ui/toast';
 import { Topbar } from './ui/topbar';
@@ -55,6 +56,7 @@ export class App {
       edit: () => this.onEdit(),
     });
     this.galaxyUi = new GalaxyUi(world, root, (teamId) => this.navigate({ view: 'planet', teamId }));
+    installBadge(root); // 角落里的「Made with Tripo」
     world.setTeams(teams);
     // 开场飞行期间顶栏就显示星系标题；直接打开星球页时，show() 在第一次 await 之前就换成 showTeam
     this.topbar.showGalaxy(teams.length, teams.reduce((n, t) => n + t.works.length, 0));

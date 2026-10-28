@@ -1,0 +1,50 @@
+/* 「Made with Tripo」徽章：左下角一颗暖白纸面的小药丸，圆体字，压在云和草地上都看得清（颜色写在这里，不跟着界面的深色主题）。
+   翠宝黄只用在小翠宝的 T 上和悬停的描边上；悬停时轻轻抬起一点 */
+#app > .made-with {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px 4px 4px;
+  background: rgba(251, 245, 232, 0.94);
+  border: 1.5px solid rgba(74, 64, 88, 0.16);
+  border-radius: 999px;
+  box-shadow: 0 3px 10px rgba(60, 45, 30, 0.16);
+  font: 700 12px/1 var(--font-ui, 'Nunito', ui-rounded, system-ui, sans-serif);
+  letter-spacing: 0.02em;
+  color: #6a5f72;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.15s;
+  animation: mw-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.4s both;
+}
+#app > .made-with:hover { border-color: #f2b705; color: #3f3549; transform: translateY(-1px); box-shadow: 0 6px 14px rgba(60, 45, 30, 0.2); }
+#app > .made-with:active { transform: scale(0.96); }
+#app > .made-with:focus-visible { outline: 3px solid #f2b705; outline-offset: 2px; }
+.made-with b { font-weight: 800; color: #3f3549; }
+.mw-mark { width: 22px; height: 22px; flex: none; display: block; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.mw-mark svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.mw-body { fill: #14191b; }
+.mw-v, .mw-t { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mw-v { stroke: #f4f1ea; stroke-width: 0.17; }
+.mw-t { stroke: #f2b705; stroke-width: 0.14; }
+/* 悬停时小翠宝轻轻歪一下头 */
+#app > .made-with:hover .mw-mark { transform: rotate(-10deg); }
+@keyframes mw-in { from { opacity: 0; transform: translateY(6px) scale(0.92); } to { opacity: 1; transform: none; } }
+
+/* 编辑（作品栏）、漫游（底部提示条）、Members / Museum 页开着时让位 */
+#app:has(> .tray:not([hidden])) > .made-with,
+#app:has(> .walk-hint:not([hidden])) > .made-with,
+#app:has(> .sheet:not([hidden])) > .made-with { display: none; }
+
+@media (max-width: 760px) {
+  #app > .made-with { left: 10px; bottom: 10px; font-size: 11px; padding: 3px 10px 3px 3px; }
+  .mw-mark { width: 19px; height: 19px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app > .made-with { animation: none; transition: none; }
+  #app > .made-with:hover .mw-mark { transform: none; }
+}
