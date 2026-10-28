@@ -1,7 +1,8 @@
 // I1 样张（草、天空、生机接进来以后）：node scripts/shot-i1.mjs [输出目录] [--only a,b] [--webgl2]
 // 1440×900，WebGPU（--webgl2 走 WebGL2）。用本机的私有真实模型（.tmp/local-models）和翠宝（.tmp/assets），没有就是占位。
-// 出：i1-walk（漫游，白天）、i1-planet（星球视图）、i1-close（贴近作品，像素比 2）、i1-sunset（日落漫游）、i1-rain（下雨漫游）、
-//     i1-galaxy（星系全景，云海藏起来）、i1-vs-ref（和参考图 F4、F2、F9 并排：参考图只在本机，REFS 或 .tmp/refs/F）
+// 出：i1-walk（漫游，白天，朝着作品）、i1-walk-backlit（漫游，逆光）、i1-planet（星球视图）、i1-close（贴近作品，像素比 2）、
+//     i1-sunset（日落漫游，朝着太阳）、i1-rain（下雨漫游）、i1-galaxy（星系全景，云海压在星球下面）、
+//     i1-vs-ref（和参考图 F4、F2、F9 并排：参考图只在本机，REFS 或 .tmp/refs/F）
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -58,6 +59,23 @@ async function walkNear(page, workId, dist, side, wait = 1800) {
   await page.waitForTimeout(wait);
 }
 
+// 漫游中原地转身：镜头朝太阳在切平面上的方向，再往左转 offsetDeg 度（太阳落在画面右边一点）。逆光时草尖透光
+async function faceSun(page, offsetDeg, wait = 1500) {
+  await page.evaluate((off) => {
+    const s = window.__walk.state();
+    const d = s.dir;
+    const sun = window.__world.light.sunDir;
+    const dot = sun.x * d[0] + sun.y * d[1] + sun.z * d[2];
+    const t = [sun.x - d[0] * dot, sun.y - d[1] * dot, sun.z - d[2] * dot];
+    const l = Math.hypot(...t);
+    const f = t.map((v) => v / l);
+    const side = [d[1] * f[2] - d[2] * f[1], d[2] * f[0] - d[0] * f[2], d[0] * f[1] - d[1] * f[0]]; // d × f：左手边
+    const a = (off * Math.PI) / 180;
+    window.__walk.teleport(d, f.map((v, k) => v * Math.cos(a) + side[k] * Math.sin(a)));
+  }, offsetDeg);
+  await page.waitForTimeout(wait);
+}
+
 // 漫游中往前走几秒（扬尘、踩出草痕）
 async function stroll(page, ms) {
   await page.keyboard.down('w');
@@ -102,7 +120,10 @@ try {
   await shot('i1-planet.png', async () => {});
   await shot('i1-walk.png', (p) => walkNear(p, 'ph-02', 9, 2.2));
   await shot('i1-close.png', (p) => closeTo(p, 'ph-03', 2.4), { dpr: 2 });
-  await shot('i1-sunset.png', async (p) => { await walkNear(p, 'ph-11', 7, -2); await p.waitForTimeout(1500); }, { sky: 'sunset' });
+  // 逆光漫游（对照 F4：太阳在画面右上方，草尖透光）
+  await shot('i1-walk-backlit.png', async (p) => { await walkNear(p, 'ph-02', 9, 2.2, 800); await faceSun(p, 28); });
+  // 日落：朝着太阳（对照 F9：太阳挂在云海上方）
+  await shot('i1-sunset.png', async (p) => { await walkNear(p, 'ph-11', 7, -2, 800); await faceSun(p, 14, 2500); }, { sky: 'sunset' });
   await shot('i1-rain.png', async (p) => {
     await weather(p, { rain: 1, wind: 0.7 });
     await walkNear(p, 'ph-02', 9, 2.2, 600);
@@ -116,7 +137,7 @@ try {
   });
   // 和参考图并排：左边我们的，右边参考图（F4 漫游、F2 星球全景、F9 日落），各缩到 960 × 600
   const refs = process.env.REFS ?? '.tmp/refs/F';
-  const pairs = [['i1-walk.png', '4.jpg'], ['i1-planet.png', '2.jpg'], ['i1-sunset.png', '9.jpg']];
+  const pairs = [['i1-walk-backlit.png', '4.jpg'], ['i1-planet.png', '2.jpg'], ['i1-sunset.png', '9.jpg']];
   if (!only || only.includes('i1-vs-ref')) {
     if (pairs.every(([a, b]) => existsSync(path.join(out, a)) && existsSync(path.join(refs, b)))) {
       const cell = async (file, w, h) => sharp(file).resize({ width: w, height: h, fit: 'cover' }).toBuffer();

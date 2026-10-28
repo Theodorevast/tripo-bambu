@@ -32,8 +32,9 @@ export const GRASS = {
   flowerRadius: 26,
   wind: 0.2, // 风场（wind.ts 的风速，米/秒）→ 草的弯曲（弧度）的倍数
   sun: 0.35, // 太阳（atmosphere 的光颜色 × 强度）→ 草叶受光的倍数：草叶是风格化受光，和 PBR 的地面亮度对齐用
+  sunDusk: 0.65, // 日落时受光再乘这个（按 evening 插值）：日落的橙色太阳光把草照成一片橙黄，参考图 F9 的草是暗的橄榄绿
   shadowDay: '#6e7896', // 背光、草丛深处的颜色（天光）：白天偏蓝灰
-  shadowDusk: '#8a7290', // 日落偏紫
+  shadowDusk: '#8a8aac', // 日落：偏冷的蓝紫天光（暖色太阳 + 冷色天光，草保持橄榄绿，不被照成一片橙黄）
 };
 
 // 风场 → 草的弯曲：一个 uniform，?tune 拖动时不用重建草
@@ -165,7 +166,8 @@ export class Dressing {
       _shadow.set(GRASS.shadowDay).lerp(_dusk.set(GRASS.shadowDusk), THREE.MathUtils.clamp(light.evening / 0.6, 0, 1));
       s.colors.shadow = `#${_shadow.getHexString()}`;
     }
-    grass.setSun(light.sunDir, light.sunColor, light.sunIntensity * GRASS.sun);
+    const dusk = THREE.MathUtils.clamp(light.evening / 0.6, 0, 1);
+    grass.setSun(light.sunDir, light.sunColor, light.sunIntensity * GRASS.sun * (1 + (GRASS.sunDusk - 1) * dusk));
     grass.update(camera, (performance.now() - this.start) / 1000);
     setGroundGrass(shown ? 1 : 0, GRASS.fullRadius, GRASS.radius);
   }

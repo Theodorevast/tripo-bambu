@@ -130,7 +130,8 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode): THREE
   // 细的那几层按像素大小淡出：远看是均匀的草色，近看有颗粒
   const tint = grassTint(p, { lush: pal.grass, fresh: pal.fresh, dry: pal.dry, tip: pal.tip, dryness: U.dryness }).mul(U.tint).toVar();
   const mossAmt = smoothstep(U.moss, U.moss.add(0.16), mid.mul(0.7).add(float(1).sub(big).mul(0.3))).mul(smoothstep(0.4, -0.8, hn).mul(0.45).add(0.55));
-  const shade = clump.sub(0.5).mul(0.3).add(tuft.sub(0.5).mul(0.28).mul(kTuft)).add(grain.sub(0.5).mul(0.26).mul(kGrain)).add(1);
+  // 明暗起伏：中斑（约 5 米，集成时加的：星球视图里草地远看不再是平涂的一片）+ 一丛丛 + 一簇簇 + 颗粒
+  const shade = mid.sub(0.5).mul(0.32).add(clump.sub(0.5).mul(0.36)).add(tuft.sub(0.5).mul(0.28).mul(kTuft)).add(grain.sub(0.5).mul(0.26).mul(kGrain)).add(1);
   const grass = mix(tint, pal.moss.mul(U.tint), mossAmt.mul(0.6)).mul(shade);
   // 露土：零星的小块，坡陡的地方更多；土里有颗粒
   const soilAmt = max(smoothstep(U.soil, U.soil.add(0.16), clump.mul(0.55).add(mid.mul(0.45))).mul(0.75), smoothstep(0.05, 0.14, slope));

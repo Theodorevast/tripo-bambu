@@ -118,6 +118,7 @@ export function installTune(world: World): void {
   grass.addBinding(GRASS, 'fullRadius', { label: 'full density (m)', min: 2, max: 20, step: 0.5 });
   grass.addBinding(GRASS, 'wind', { label: 'wind response', min: 0, max: 0.6, step: 0.005 });
   grass.addBinding(GRASS, 'sun', { label: 'sun response', min: 0, max: 1.5, step: 0.01 });
+  grass.addBinding(GRASS, 'sunDusk', { label: 'sun at dusk ×', min: 0, max: 1.5, step: 0.01 });
   grass.addBinding(GRASS, 'translucency', { label: 'backlight', min: 0, max: 3, step: 0.05 });
   grass.addBinding(GRASS, 'shadowDay', { label: 'shadow (day)' });
   grass.addBinding(GRASS, 'shadowDusk', { label: 'shadow (dusk)' });
