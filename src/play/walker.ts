@@ -76,6 +76,7 @@ export class Walker {
   readonly turned = new THREE.Quaternion(); // 这一帧位置的转动：跟随镜头的朝向跟着转同一下
   distance = 0; // 累计走过的路程：走路动作的相位跟着它
   bumped = false; // 这一帧碰到了圆柱
+  impact = 0; // 碰到时撞上之前的速度（米/秒）：跟随镜头按它抖一下
   ground: (dir: THREE.Vector3) => number = () => 1;
   // 点地面 / 作品后自动走过去
   readonly target = new THREE.Vector3();
@@ -154,7 +155,9 @@ export class Walker {
     this.turned.setFromUnitVectors(_start, _mid);
     this.velocity.applyQuaternion(this.turned);
     this.facing.applyQuaternion(this.turned);
+    const before = this.velocity.length();
     this.bumped = collide(this.dir, this.velocity, obstacles, count, _start);
+    this.impact = this.bumped ? before : 0;
     if (this.bumped) {
       _step.setFromUnitVectors(_mid, this.dir);
       this.velocity.applyQuaternion(_step);

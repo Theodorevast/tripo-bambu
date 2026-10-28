@@ -9,7 +9,7 @@ import { authorLine } from '../ui/workCard';
 import { CharacterView, loadCharacter } from './character';
 import { FollowCamera } from './followCamera';
 import { CHAR_RADIUS, FOLLOW, NEAR_DISTANCE, WALK } from './params';
-import { blendPose, easeInOutCubic, retangent, walkGround } from './sphere';
+import { blendPose, easeInOutCubic, retangent, slerpDir, walkGround } from './sphere';
 import { setObstacle, Walker, type Obstacle } from './walker';
 import './walk.css';
 
@@ -32,6 +32,7 @@ const _v = new THREE.Vector3();
 const _pos = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 const _anchor = new THREE.Vector3();
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 interface Drag {
   id: number;
@@ -244,6 +245,7 @@ export class WalkMode {
     if (this.entry) {
       rig.camera.position.copy(this.orbitPos).add(this.entry.home);
       rig.camera.quaternion.copy(this.orbitQuat);
+      rig.camera.up.set(0, 1, 0);
       rig.camera.updateMatrixWorld();
     }
     rig.drive = null;
@@ -274,6 +276,9 @@ export class WalkMode {
     this.walker.step(dt, _wish, this.obstacles, this.obstacleCount);
     this.cam.update(dt, this.walker, this.walker.hasTarget && !this.dragging, this.floor);
     this.character.pose(this.walker, dt);
+    // 镜头的 up：漫游时是角色脚下的球面法线，轨道镜头是 +Y；过渡时两者之间走大圆插值。
+    // 天空和云海（nature/atmosphere.ts）按 camera.up 找「水平面」，云海跟着角色转、始终在脚下
+    let upK = 1;
     if (this.phase === 'walk') {
       _pos.copy(this.cam.position);
       _quat.copy(this.cam.quaternion);
@@ -282,6 +287,7 @@ export class WalkMode {
       const k = easeInOutCubic(Math.min(1, this.t / FOLLOW.seconds));
       if (this.phase === 'enter') blendPose(this.fromPos, this.fromQuat, this.cam.position, this.cam.quaternion, k, _pos, _quat);
       else blendPose(this.fromPos, this.fromQuat, this.orbitPos, this.orbitQuat, k, _pos, _quat);
+      upK = this.phase === 'enter' ? k : 1 - k;
       if (k >= 1) {
         if (this.phase === 'exit') {
           this.finish();
@@ -293,6 +299,7 @@ export class WalkMode {
     const camera = this.app.world.rig.camera;
     camera.position.copy(_pos).add(entry.home);
     camera.quaternion.copy(_quat);
+    slerpDir(WORLD_UP, this.cam.up, upK, camera.up);
     this.onStep?.();
   }
 

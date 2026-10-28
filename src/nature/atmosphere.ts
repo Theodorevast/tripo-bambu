@@ -73,10 +73,11 @@ export function createAtmosphere(scene: THREE.Scene, _renderer: THREE.WebGPURend
   const below = uniform(new THREE.Color());
   const sunColor = uniform(new THREE.Color());
   const sunDir = uniform(new THREE.Vector3(0, 1, 0));
+  const viewUp = uniform(new THREE.Vector3(0, 1, 0));
 
   // 天空球：跟着镜头走，按视线方向的高度角取色；太阳方向加一圈暖光晕
   const view = normalize(positionWorld.sub(cameraPosition));
-  const up = view.y;
+  const up = view.dot(viewUp); // 「水平面」按 camera.up 算：漫游时是角色脚下的球面法线（World 设），轨道镜头是 +Y
   const sky = mix(horizon, zenith, pow(max(up, 0), 0.55));
   const cloud = mix(horizon, below, smoothstep(0, -0.25, up));
   const base = mix(cloud, sky, smoothstep(-0.02, 0.02, up));
@@ -124,6 +125,7 @@ export function createAtmosphere(scene: THREE.Scene, _renderer: THREE.WebGPURend
       // 天空球跟着镜头，半径取镜头远平面的 0.9 倍
       const cam = camera as THREE.PerspectiveCamera;
       dome.position.copy(camera.position);
+      viewUp.value.copy(camera.up).normalize();
       dome.scale.setScalar((cam.far || 1000) * 0.9);
       // 太阳：平行光只看方向。位置放在目标后面（目标由外面摆到镜头看着的地方，阴影相机跟着它）
       sun.position.copy(sun.target.position).addScaledVector(sunDir.value, 100);
