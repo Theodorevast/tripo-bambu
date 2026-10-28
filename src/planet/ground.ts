@@ -142,7 +142,7 @@ export function applyGroundPalette(): void {
 
 // 地表材质。mask：星球遮罩的贴图节点（R 土路，G 作品空地；mask.ts 里换贴图只改它的 value）
 // look：这颗星球的远看部件（nature/planetLook.ts 的云层偏移、淡出系数）：远看时地面上有云影、边缘有一层空气；不给就没有（演示页）
-export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?: { cloudOffset: THREE.UniformNode<'vec3', THREE.Vector3>; fade: THREE.UniformNode<'float', number> }): THREE.MeshStandardNodeMaterial {
+export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?: { cloudOffset: THREE.UniformNode<'vec3', THREE.Vector3>; fade: THREE.UniformNode<'float', number>; accent: THREE.UniformNode<'color', THREE.Color>; accentAmount: THREE.UniformNode<'float', number> }): THREE.MeshStandardNodeMaterial {
   const pal = paletteOf(preset);
   const amp = PRESETS[preset].amp;
   // 草地、泥土是很「哑」的表面：镜面反射压到标准材质的 GROUND_SPECULAR 倍（集成时加的）。
@@ -215,13 +215,17 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   meadow = mix(meadow, farBase, overview.mul(U.farMix));
   const sunny = smoothstep(0.45, 0.6, field).mul(smoothstep(-0.02, 0.2, rel)).mul(meadowOnly);
   const hollow = max(smoothstep(0.42, 0.29, field), smoothstep(0.26, 0.06, rel).mul(0.7)).mul(meadowOnly);
-  meadow = mix(meadow, pal.field.mul(U.farTint).mul(shade), sunny.mul(overview).mul(U.fieldSun));
+  // 朝阳的大片往团队色靠一点（星系里同一个预设的几颗星球分得开）
+  const fieldCol = look ? mix(pal.field, look.accent, look.accentAmount.mul(0.38)) : pal.field;
+  meadow = mix(meadow, fieldCol.mul(U.farTint).mul(shade), sunny.mul(overview).mul(U.fieldSun));
   meadow = mix(meadow, pal.far.mul(U.farTint).mul(0.42).mul(color('#cfe0ee')).mul(shade), hollow.mul(overview).mul(U.fieldDeep));
   // 花田：约 13 米一片（按噪声扭过，边缘不规则），每片一种主色（白、黄、淡紫）
   const fq = p.mul(0.075).add(valueNoise3(p.mul(0.035).add(3.9)).sub(0.5).mul(3));
   const flowerField = smoothstep(0.57, 0.67, valueNoise3(fq.add(77.7))).mul(meadowOnly).mul(overview).mul(U.fieldFlowers);
   const fHue = valueNoise3(p.mul(0.04).add(13.3));
-  const fCol = mix(mix(color('#f6f1e4'), color('#f3cd48'), smoothstep(0.48, 0.54, fHue)), color('#bda6e3'), smoothstep(0.64, 0.7, fHue));
+  // 第三种花：淡紫，有团队色时换成团队色（调淡一点，像一片那个颜色的花）
+  const third = look ? mix(color('#bda6e3'), mix(look.accent, color('#ffffff'), 0.25), look.accentAmount) : color('#bda6e3');
+  const fCol = mix(mix(color('#f6f1e4'), color('#f3cd48'), smoothstep(0.48, 0.54, fHue)), third, smoothstep(0.64, 0.7, fHue));
   const speck = max(cellDots(p.mul(1.5).add(91.3), 0.7).mul(keep(1.5)), cellDots(p.mul(2.4).add(17.1), 0.55).mul(keep(2.4)));
   meadow = mix(meadow, mix(meadow, fCol.mul(U.farTint).mul(2.2), 0.5), flowerField.mul(0.4));
   meadow = mix(meadow, fCol.mul(0.8), speck.mul(flowerField).mul(0.9));

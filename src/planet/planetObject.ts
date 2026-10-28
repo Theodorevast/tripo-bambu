@@ -31,7 +31,9 @@ export class PlanetObject {
   private readonly haloStrengthNode = uniform(1); // 大气光晕的浓淡：同上（星球视图里聚焦的那颗压淡）
   private readonly maskListeners = new Set<() => void>();
 
-  constructor(recipe: PlanetRecipe) {
+  // accent：团队色（星系里各队的星球一眼分得开；不给就是预设的原色）
+  constructor(recipe: PlanetRecipe, accent: string | null = null) {
+    this.look.setAccent(accent);
     this.decor.name = 'decor';
     this.group.add(this.works, this.decor, this.look.group);
     this.setRecipe(recipe);
