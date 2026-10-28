@@ -70,6 +70,7 @@ export interface AtmosphereParams {
   fog: number; // 距离雾浓度的倍数
   exposure: number; // 曝光的倍数（乘在预设的曝光上）
   farClouds: boolean; // 远处积云
+  cloudSteps: number; // 云海每个像素的步进次数（画质 / 开销的旋钮：24 默认；弱显卡可降到 12 左右，开销大致按比例下降）
 }
 
 export interface Atmosphere {
@@ -502,6 +503,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     fog: 1,
     exposure: 1,
     farClouds: true,
+    cloudSteps: 24,
   };
 
   // ---- 状态
@@ -535,6 +537,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   const uFlow1 = uniform(new THREE.Vector2()).setGroup(renderGroup);
   const uFlow2 = uniform(new THREE.Vector2()).setGroup(renderGroup);
   const uLodK = uniform(1).setGroup(renderGroup); // 像素张角 / 贴图单个像素的世界尺寸
+  const uSteps = uniform(24, 'int').setGroup(renderGroup);
   const uHaze = uniform(1 / 2600).setGroup(renderGroup); // 云海、远处积云的空气透视（每米）
   const uFogDensity = uniform(palette.fogDensity).setGroup(renderGroup);
   const uCamRight = uniform(new THREE.Vector3(1, 0, 0)).setGroup(renderGroup);
@@ -630,7 +633,6 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
 
   // ---- 云海
   // 高度场（相对星球中心，沿「上」）：云底 + 厚度 × H（两层贴图交叉淡化）+ 星球周围堆起来的一圈
-  const STEPS = 24;
   // 星球周围堆云的权重：贴着星球最高，离星球竖轴 uCollarR 以外为 0
   const collarWeight = (rho: F) => float(1).sub(smoothstep(uRadius.mul(0.85), uCollarR, rho));
   const surface = (p: V3, lod: F) => {
@@ -666,13 +668,13 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const tS = b.negate().sub(sqrt(max(disc, 0)));
     const tSph = select(disc.greaterThan(0).and(tS.greaterThan(0)), tS, float(1e9)).toVar();
     const tEnd = min(tBot, tSph).toVar();
-    const dt = max(tEnd.sub(tStart), 0).div(STEPS).toVar();
+    const dt = max(tEnd.sub(tStart), 0).div(float(uSteps)).toVar();
     // 起点按像素错开一点（交错梯度噪声）：步长不够时云团轮廓上的台阶变成很细的抖动，DPR 2 下看不出来
     const ign = fract(fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189));
     const t = tStart.add(dt.mul(ign).mul(0.5)).sub(dt).toVar();
     const tPrev = tStart.toVar();
     const hit = float(0).toVar();
-    Loop(STEPS, () => {
+    Loop({ start: 0, end: uSteps, type: 'int', condition: '<' }, () => {
       t.addAssign(dt);
       const lod = lodAt(dist0.add(t));
       const hRay = y0.add(dy.mul(t));
@@ -978,6 +980,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uFlow2.value.x -= speed * 0.0021;
     uFlow2.value.y += speed * 0.0036;
     uFogDensity.value = palette.fogDensity * params.fog;
+    uSteps.value = Math.round(THREE.MathUtils.clamp(params.cloudSteps, 4, 64));
     uHaze.value = (1 / (260 * R)) * Math.max(0.25, params.fog);
 
     // 圆盘：放在云层最高处（含堆云），中心在镜头正下方，半径铺到远平面以内

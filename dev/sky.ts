@@ -204,6 +204,7 @@ if (!q.has('nopane')) {
   seaF.addBinding(p, 'cloudScale', { label: 'cloud size', min: 0.3, max: 3, step: 0.01 });
   seaF.addBinding(p, 'cloudSpeed', { label: 'drift speed', min: 0, max: 6, step: 0.05 });
   seaF.addBinding(p, 'farClouds', { label: 'far cumulus' });
+  seaF.addBinding(p, 'cloudSteps', { label: 'march steps', min: 6, max: 48, step: 1 });
   const lookF = pane.addFolder({ title: 'Air & exposure' });
   lookF.addBinding(p, 'fog', { min: 0, max: 4, step: 0.01 });
   lookF.addBinding(p, 'exposure', { min: 0.3, max: 2.5, step: 0.01 });
