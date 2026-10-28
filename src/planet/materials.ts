@@ -16,14 +16,15 @@ export function waterMaterial(preset: PresetId): THREE.MeshStandardNodeMaterial 
 // 这条视线离球心最近的距离就是 b = r·√(1 − d²)。t 把 b 换算到「星球半径 → 外壳边缘」的 0..1：
 // t = 0 贴着星球轮廓，光晕最亮；t = 1 是外壳边缘，(1 − t)^2.5 在这里平滑地降到 0，
 // 所以没有硬边，也没有一圈亮度不变的色带。外壳半径必须大于 planetRadius
-export function atmosphereMaterial(preset: PresetId, planetRadius: number): THREE.MeshBasicNodeMaterial {
+// strength：整体浓度的倍数（集成时加的）。星球视图里聚焦的那颗压淡：它和云海、高度雾叠在一起，星球边上会多出一圈白光（参考图 F2 没有）
+export function atmosphereMaterial(preset: PresetId, planetRadius: number, strength: THREE.UniformNode<'float', number> = uniform(1)): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   const d = dot(sphereNormal(), toCamera()).mul(-1);
   const r = length(positionLocal);
   const b = r.mul(sqrt(saturate(float(1).sub(d.mul(d)))));
   const t = saturate(b.sub(planetRadius).div(r.sub(planetRadius)));
   m.colorNode = color(PRESETS[preset].atmosphere);
-  m.opacityNode = pow(float(1).sub(t), 2.5).mul(0.35);
+  m.opacityNode = pow(float(1).sub(t), 2.5).mul(0.35).mul(strength);
   return m;
 }
 

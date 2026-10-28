@@ -3,7 +3,7 @@ import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { dot, float, mix, normalize, normalWorld, positionLocal, positionWorld, smoothstep, uniform } from 'three/tsl';
+import { dot, float, mix, normalize, normalWorld, positionLocal, positionWorld, renderGroup, smoothstep, uniform } from 'three/tsl';
 import { perturbNormal } from './ground';
 import { mulberry32, type Rng } from './rng';
 import { valueNoise3 } from './tslNoise';
@@ -33,9 +33,10 @@ export const DECOR = {
 
 // 石头材质：所有形状共用一份着色器。颜色 = 实例颜色（按星球的 rock 色加深浅）× 噪声斑；朝上的面长苔藓（按星球中心算「上」）；
 // 再叠一层细节凹凸
-export const DECOR_CENTER = uniform(new THREE.Vector3()); // 聚焦星球的中心（世界坐标）
-const MOSS = uniform(new THREE.Color('#58763a'));
-const MOSS_AMOUNT = uniform(DECOR.moss);
+// 共享的 uniform 放进 renderGroup（集成时改的）；苔藓色按 AgX 重调（原来的 × 1.6 在 AgX 下是一片亮黄绿，和草地对不上）
+export const DECOR_CENTER = uniform(new THREE.Vector3()).setGroup(renderGroup); // 聚焦星球的中心（世界坐标）
+const MOSS = uniform(new THREE.Color('#33441a')).setGroup(renderGroup);
+const MOSS_AMOUNT = uniform(DECOR.moss).setGroup(renderGroup);
 
 export function applyDecor(): void {
   MOSS_AMOUNT.value = DECOR.moss;

@@ -150,8 +150,9 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode): THREE
   const bloomN = valueNoise3(p.mul(3.4).add(83.1));
   const bloomKind = valueNoise3(p.mul(0.9).add(17.9));
   const bloomPatch = smoothstep(0.35, 0.7, valueNoise3(p.mul(0.12).add(7.7))); // 花一片一片地开，不是到处均匀
-  const bloom = smoothstep(0.84, 0.88, bloomN).mul(bloomPatch).mul(smoothstep(20, 40, camDist)).mul(keep(3.4))
-    .mul(float(1).sub(soilAmt)).mul(float(1).sub(shore)).mul(0.8);
+  // 远看的花点比原来稀、淡一些（集成时调的）：地面按 AgX 压暗以后，原来的密度在星球视图里像撒了一层彩色碎屑
+  const bloom = smoothstep(0.87, 0.91, bloomN).mul(bloomPatch).mul(smoothstep(20, 40, camDist)).mul(keep(3.4))
+    .mul(float(1).sub(soilAmt)).mul(float(1).sub(shore)).mul(0.55);
   const flower = mix(mix(color('#f5f0e1'), color('#f2cc4b'), smoothstep(0.45, 0.55, bloomKind)), color('#b59bd9'), smoothstep(0.68, 0.74, bloomKind));
   meadow = mix(meadow, flower, bloom);
   meadow = mix(meadow, pal.soil.mul(0.8), shore.mul(0.5));

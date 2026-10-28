@@ -26,6 +26,7 @@ export class PlanetObject {
   private parts: THREE.Object3D[] = [];
   private ring: THREE.Mesh | null = null;
   private readonly ringStrengthNode = uniform(1); // 每次重建光环都用同一个 uniform，强度跨重建保留
+  private readonly haloStrengthNode = uniform(1); // 大气光晕的浓淡：同上（星球视图里聚焦的那颗压淡）
   private readonly maskListeners = new Set<() => void>();
 
   constructor(recipe: PlanetRecipe) {
@@ -40,6 +41,15 @@ export class PlanetObject {
 
   get ringStrength(): number {
     return this.ringStrengthNode.value;
+  }
+
+  get haloStrength(): number {
+    return this.haloStrengthNode.value;
+  }
+
+  // 大气光晕浓淡（0..1，1 是原样）：星球视图里聚焦的那颗压淡（和云海、高度雾叠在一起会多出一圈白光），回星系恢复
+  setHaloStrength(k: number): void {
+    this.haloStrengthNode.value = THREE.MathUtils.clamp(k, 0, 1);
   }
 
   // 遮罩重画了（摆放变了、半径变了）：草、石头跟着重新摆
@@ -93,7 +103,7 @@ export class PlanetObject {
     if (this.sea > 0) this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(this.sea, 24), waterMaterial(preset)));
     if (this.recipe.atmosphere) {
       const r = R * (1 + PRESETS[preset].amp) * 1.05; // 薄外壳：比最高的地形再高 5%，光晕只占轮廓外窄窄一圈
-      this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 8), atmosphereMaterial(preset, R)));
+      this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 8), atmosphereMaterial(preset, R, this.haloStrengthNode)));
     }
     if (this.recipe.ring) {
       const inner = R * 1.45;

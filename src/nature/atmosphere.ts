@@ -76,10 +76,18 @@ export interface AtmosphereParams {
   seaAmount: number; // 0..1：云海、远处积云和高度雾一起淡出（星系视图里没有聚焦的星球，云海压到 0；集成时加的）
 }
 
+// setPlanet 的可选项（集成时加的），和星球中心、半径一起缓动：
+// seaDrop：云海再往下压多少（× 半径）。星系视图里没有聚焦的星球，云海压到所有星球下面（星球浮在云海上，不穿过云层）；
+// fog：距离雾的倍数（乘在 params.fog 上）。星系视图镜头离星球几百米，雾按星球视图的浓度会把星球糊成一片灰
+export interface AtmospherePlanetOptions {
+  seaDrop?: number;
+  fog?: number;
+}
+
 export interface Atmosphere {
   update(dtSec: number, camera: THREE.Camera): void;
   setPreset(p: AtmospherePreset): void;
-  setPlanet(center: THREE.Vector3, radius: number): void; // 云海跟着当前聚焦的星球
+  setPlanet(center: THREE.Vector3, radius: number, opts?: AtmospherePlanetOptions): void; // 云海跟着当前聚焦的星球
   sun: THREE.DirectionalLight; // 主光（低角度、暖色）
   sunDir: THREE.Vector3; // 太阳方向（从场景指向太阳，单位向量），给草做逆光用
   dispose(): void;
@@ -560,6 +568,8 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   let radius = opts.planetRadius;
   let radiusGoal = radius;
   let radiusFrom = radius;
+  // setPlanet 的可选项：云海下压（× 半径）、雾的倍数，和中心一起缓动
+  const extra = { drop: 0, dropFrom: 0, dropGoal: 0, fog: 1, fogFrom: 1, fogGoal: 1 };
   let planetJump = true; // 第一帧之前设的星球直接到位
   let planetT = 1;
   const frame = new AtmosphereFrame();
@@ -870,10 +880,11 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const dir = rel.div(max(d, 1e-4));
     const distK = float(1).sub(exp(d.mul(uFogDensity).negate()));
     const above = dot(positionWorld.sub(uCenter), uUp).sub(uSeaTopNow);
-    const heightK = smoothstep(uRadius.mul(0.35), uRadius.mul(-0.05), above).mul(0.55).mul(uSeaAmount);
-    // 高度雾的颜色按云的配色走：用星球表面的球面法线和太阳算受光量，雾里的星球底部和旁边的云一样有亮面和背光面
+    const heightK = smoothstep(uRadius.mul(0.35), uRadius.mul(-0.05), above).mul(0.7).mul(uSeaAmount);
+    // 高度雾的颜色按云的配色走：用星球表面的球面法线和太阳算受光量，雾里的星球底部和旁边的云一样有亮面和背光面。
+    // 受光量的下限抬高（集成时调的）：原来背光那一侧是偏灰的阴影色，星球底部像罩了一层灰玻璃，和旁边亮白的云海接不上
     const nrm = normalize(positionWorld.sub(uCenter));
-    const cloudish = cloudRamp(saturate(dot(nrm, uSun).add(0.22).div(1.22)).mul(0.9), float(0.75));
+    const cloudish = cloudRamp(saturate(dot(nrm, uSun).mul(0.45).add(0.55)), float(0.8));
     const col = mix(hazeColor(dir).add(glow(dir).mul(0.5)), cloudish, heightK);
     return fog(col, saturate(distK.add(heightK.mul(float(1).sub(distK)))));
   })();
@@ -970,6 +981,8 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     if (planetJump) {
       center.copy(centerGoal);
       radius = radiusGoal;
+      extra.drop = extra.dropGoal;
+      extra.fog = extra.fogGoal;
       planetJump = false;
       planetT = 1;
     } else if (planetT < 1) {
@@ -977,6 +990,8 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       const k = ease(planetT);
       center.lerpVectors(centerFrom, centerGoal, k);
       radius = radiusFrom + (radiusGoal - radiusFrom) * k;
+      extra.drop = extra.dropFrom + (extra.dropGoal - extra.dropFrom) * k;
+      extra.fog = extra.fogFrom + (extra.fogGoal - extra.fogFrom) * k;
     }
 
     // 预设过渡
@@ -1015,7 +1030,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const R = radius;
     uCenter.value.copy(center);
     uRadius.value = R;
-    const top = params.seaHeight * R;
+    const top = (params.seaHeight - extra.drop) * R;
     const thick = Math.max(0.02, params.seaThickness) * R;
     uSeaBase.value = top - thick * 0.6; // 平均顶面以下 0.6 个厚度是缝隙最深处
     uSeaThick.value = thick;
@@ -1030,7 +1045,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uFlow1.value.y += speed * 0.0017;
     uFlow2.value.x -= speed * 0.0021;
     uFlow2.value.y += speed * 0.0036;
-    uFogDensity.value = look.fogDensity * params.fog;
+    uFogDensity.value = look.fogDensity * params.fog * extra.fog;
     const seaAmount = THREE.MathUtils.clamp(params.seaAmount, 0, 1);
     uSeaAmount.value = seaAmount;
     uSteps.value = Math.round(THREE.MathUtils.clamp(params.cloudSteps, 4, 64));
@@ -1074,13 +1089,19 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       fromSun.az = params.sunAzimuth;
       transition = 0;
     },
-    setPlanet(c: THREE.Vector3, r: number) {
+    setPlanet(c: THREE.Vector3, r: number, o: AtmospherePlanetOptions = {}) {
+      const drop = o.seaDrop ?? 0;
+      const fogK = o.fog ?? 1;
       // 每帧用同样的参数调也没关系：目标没变就不重新开始
-      if (c.distanceToSquared(centerGoal) < 1e-8 && Math.abs(r - radiusGoal) < 1e-6) return;
+      if (c.distanceToSquared(centerGoal) < 1e-8 && Math.abs(r - radiusGoal) < 1e-6 && drop === extra.dropGoal && fogK === extra.fogGoal) return;
       centerFrom.copy(center);
       radiusFrom = radius;
+      extra.dropFrom = extra.drop;
+      extra.fogFrom = extra.fog;
       centerGoal.copy(c);
       radiusGoal = r;
+      extra.dropGoal = drop;
+      extra.fogGoal = fogK;
       planetT = 0;
     },
     sun,

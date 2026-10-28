@@ -23,6 +23,7 @@ export interface PlanetEntry {
 // 光环浓淡：星球视图里聚焦星球的光环压到很淡（近景里它会横穿画面），别的星球的光环也压一些；回星系全部恢复
 export const RING_FOCUSED = 0.2;
 export const RING_OTHERS = 0.4;
+export const HALO_FOCUSED = 0.15; // 星球视图里聚焦星球的大气光晕：压淡（和云海叠在一起会多出一圈白光）
 export const NEIGHBOR_SCALE = 0.45; // 星球视图里别的星球缩到多大
 const RING_FADE = 4; // 每秒逼近目标的速率：约 1 秒淡完，和 1.2 秒的镜头飞行同时进行
 
@@ -47,7 +48,13 @@ export const SHADOW = {
 // null 表示跟着天空预设走（太阳高度 22° 白天 → 0，6° 日落 → EVENING_AT_SUNSET）
 export const WEATHER: { rain: number; wind: number; evening: number | null } = { rain: 0, wind: 0.35, evening: null };
 export const EVENING_AT_SUNSET = 0.6;
-const SEA_RATE = 3; // 云海淡入淡出的速率（每秒）：约 1 秒，和 1.2 秒的镜头飞行同时进行
+
+// 天空在游戏里的取值（集成时定的，?tune → Sky & light 可调）：
+// fog：距离雾的倍数。atmosphere 演示页的默认 1 在星球视图里把草地蒙上一层灰白（镜头离地面 50 米，3% 的亮雾色叠在很暗的草色上，
+// 饱和度掉一半），云海的空气透视也跟着它，压低以后远处云海的明暗对比也更接近参考图
+// galaxySeaDrop：星系视图里云海压到所有星球下面（× 半径）；galaxyFog：星系视图里雾再乘的倍数（镜头离星球几百米）
+export const SKY = { fog: 0.4, galaxySeaDrop: 3, galaxyFog: 0.5 };
+const GALAXY_CENTER = new THREE.Vector3(0, 0, 0); // 星系布局的中心（layout.ts）
 
 // 傍晚系数：按太阳高度（度）在白天（22°）和日落（6°）之间插值；预设过渡时太阳高度是缓动的，傍晚系数跟着走
 export function eveningFor(sunElevation: number): number {
@@ -78,14 +85,13 @@ export class World {
   private warming = true;
   private readonly halo: THREE.Mesh;
   private readonly ringGoals = new Map<PlanetObject, number>(); // 各星球光环要淡到多少，frame() 里逐帧逼近
+  private readonly haloGoals = new Map<PlanetObject, number>(); // 各星球大气光晕要淡到多少，同上
   private readonly scaleGoals = new Map<PlanetObject, number>(); // 各星球要缩放到多大（星球视图里邻居缩小）
   private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private readonly shadowCenter = new THREE.Vector3();
   private readonly sunDir = new THREE.Vector3();
-  private seaNow = 0; // 云海的浓度（星系视图 0，星球上 1），frame() 里逐帧逼近 seaGoal
-  private seaGoal = 0;
   private readonly walkerPos = new THREE.Vector3();
   private readonly walkerVel = new THREE.Vector3();
   private walkerOn = false;
@@ -101,7 +107,8 @@ export class World {
     // 天空、云海、光：色调映射（AgX）和曝光由它设，World 不再调 useLook（Museum、查看器的渲染器照旧用 look.ts）。
     // 阴影相机 World 自己摆（placeSun：跟着镜头看的地方）
     this.atmosphere = createAtmosphere(this.scene, renderer, { planetRadius: PLANET_RADIUS, preset: this.skyPreset, frameShadow: false });
-    this.atmosphere.params.seaAmount = 0; // 开场是星系全景：没有聚焦的星球，云海藏起来
+    this.atmosphere.params.fog = SKY.fog;
+    this.galaxySky(); // 开场是星系全景：云海压到所有星球下面
     this.setupShadows();
     // 生机层：一份，跟着聚焦的星球换（setPlanet）。没有聚焦的星球时整个藏起来、不更新。
     // 雨量（平滑过的）交给天空：光变冷变暗
@@ -149,6 +156,7 @@ export class World {
     for (const e of this.planets.values()) this.scene.remove(e.planet.group, e.hit);
     this.planets.clear();
     this.ringGoals.clear();
+    this.haloGoals.clear();
     this.scaleGoals.clear();
     const homes = galaxyPositions(teams.length);
     teams.forEach((team, i) => {
@@ -311,9 +319,8 @@ export class World {
     e.planet.setDetail(focusDetail());
     // 草和石头在飞过去之前就摆好（草场开场就编译好了，这里只换星球数据）
     this.dressing.enter(e);
-    // 云海跟着聚焦的星球（1.2 秒缓动过去，和镜头飞行一样长），从星系视图的「没有」淡进来；生机层搬到这颗星球
+    // 云海跟着聚焦的星球，从星系视图里压在下面的位置升上来（1.2 秒缓动，和镜头飞行一样长）；生机层搬到这颗星球
     this.atmosphere.setPlanet(e.home, PLANET_RADIUS);
-    this.seaGoal = 1;
     this.life.setPlanet(this.lifePlanet(e));
     this.life.object.visible = true;
     this.fadeRings(e);
@@ -325,8 +332,8 @@ export class World {
     const prev = this.focused;
     this.focused = null;
     this.fadeRings(null);
-    // 星系视图里云海淡出（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）
-    this.seaGoal = 0;
+    // 星系视图里云海压到所有星球下面（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）
+    this.galaxySky();
     this.setWalker(null);
     await this.rig.fly(this.galaxyView());
     if (this.focused === null) {
@@ -358,8 +365,18 @@ export class World {
       this.dressing.rebuild();
       this.atmosphere.setPlanet(this.focused.home, PLANET_RADIUS);
       this.life.setPlanet(this.lifePlanet(this.focused));
-    }
+    } else this.galaxySky();
     if (!this.rig.drive) this.applyShots();
+  }
+
+  // 星系视图的天空：云海中心放在星系中心、压到所有星球下面，雾淡一些
+  private galaxySky(): void {
+    this.atmosphere.setPlanet(GALAXY_CENTER, PLANET_RADIUS, { seaDrop: SKY.galaxySeaDrop, fog: SKY.galaxyFog });
+  }
+
+  // ?tune 改了 SKY（星系视图的云海、雾）：在星系视图里就立刻按新值重摆
+  applySky(): void {
+    if (!this.focused) this.galaxySky();
   }
 
   // 定下各星球光环的目标浓淡和大小；实际的变化在 frame() 里逐帧做，镜头飞行的同时慢慢淡入淡出。
@@ -368,6 +385,7 @@ export class World {
   private fadeRings(focused: PlanetEntry | null): void {
     for (const e of this.planets.values()) {
       this.ringGoals.set(e.planet, focused === null ? 1 : e === focused ? RING_FOCUSED : RING_OTHERS);
+      this.haloGoals.set(e.planet, e === focused ? HALO_FOCUSED : 1);
       this.scaleGoals.set(e.planet, focused === null || e === focused ? 1 : NEIGHBOR_SCALE);
     }
   }
@@ -379,6 +397,12 @@ export class World {
       const next = Math.abs(goal - now) < 0.01 ? goal : now + (goal - now) * k;
       planet.setRingStrength(next);
       if (next === goal) this.ringGoals.delete(planet);
+    }
+    for (const [obj, goal] of this.haloGoals) {
+      const now = obj.haloStrength;
+      const next = Math.abs(goal - now) < 0.01 ? goal : now + (goal - now) * k;
+      obj.setHaloStrength(next);
+      if (next === goal) this.haloGoals.delete(obj);
     }
     // 大小变得比光环快（每秒 8）：0.7 秒内到位，比 1.2 秒的镜头飞行先完成，飞到时聚焦的星球已经是原大小（漫游、编辑都按原大小算）
     const ks = 1 - Math.exp(-8 * dt);
@@ -456,10 +480,6 @@ export class World {
     }
     for (const hook of this.frameHooks) hook(dt);
     const camera = this.rig.camera;
-    // 云海：星系视图里淡出，进星球淡入
-    this.seaNow += (this.seaGoal - this.seaNow) * (1 - Math.exp(-SEA_RATE * dt));
-    if (Math.abs(this.seaGoal - this.seaNow) < 0.002) this.seaNow = this.seaGoal;
-    this.atmosphere.params.seaAmount = this.seaNow;
     // 漫游时地平线的「上」是 camera.up（角色脚下的球面法线，进出漫游时和 +Y 之间插值）；轨道镜头时按镜头位置推算
     this.atmosphere.setHorizonUp(this.rig.drive ? camera.up : null);
     this.atmosphere.update(dt, camera);

@@ -56,7 +56,7 @@ export interface Preset {
 export const PRESETS: Record<PresetId, Preset> = {
   verdant: {
     id: 'verdant', label: 'Verdant', amp: 0.05, freq: 1.4, sea: -0.62,
-    ground: { grass: '#293412', fresh: '#3c4816', dry: '#555327', tip: '#6f7938', root: '#11160a', moss: '#222c10', soil: '#3a2a18', path: '#7a5a2c', rock: '#5a554e' },
+    ground: { grass: '#293412', fresh: '#3c4816', dry: '#555327', tip: '#6f7938', root: '#11160a', moss: '#222c10', soil: '#3a2a18', path: '#7a5a2c', rock: '#4b463f' },
     water: '#3c7f8c', atmosphere: '#bfe0f0', ring: '#e8dcc0',
   },
   desert: {

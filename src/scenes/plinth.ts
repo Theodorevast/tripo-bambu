@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { float, mix, positionLocal, smoothstep, uniform } from 'three/tsl';
+import { float, mix, positionLocal, renderGroup, smoothstep, uniform } from 'three/tsl';
 import { mulberry32 } from '../planet/rng';
 import { valueNoise3 } from '../planet/tslNoise';
 
@@ -43,8 +43,10 @@ export function slabGeometry(): THREE.BufferGeometry {
   return g;
 }
 
-const STONE = uniform(new THREE.Color('#8e8679'));
-const MOSS = uniform(new THREE.Color('#5d7a3a'));
+// 石板和苔藓的颜色按 AgX 重调过（集成时）：原来的浅灰在 AgX + 正式光照下发白，和地面、石头不像一个世界。
+// 所有展台共用：放进 renderGroup
+const STONE = uniform(new THREE.Color('#6e675b')).setGroup(renderGroup);
+const MOSS = uniform(new THREE.Color('#3a4a1d')).setGroup(renderGroup);
 const SPOTS = 3.2; // 噪声频率：缩放前的石板半径约 1，一块石板上约 3 块深浅斑
 
 // 石板的颜色：灰褐色的石头，按噪声有深浅；边缘往下（侧面）带一点苔绿。所有展台共用这一个节点（着色器只编一份）
