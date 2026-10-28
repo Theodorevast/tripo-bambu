@@ -56,6 +56,7 @@ export function addLookTune(pane: Folder, world: World): void {
   const contact = look.addFolder({ title: 'Contact shadows', expanded: false });
   contact.addBinding(CONTACT, 'strength', { min: 0, max: 1, step: 0.01 });
   contact.addBinding(CONTACT, 'spread', { label: 'radius × footprint', min: 0.5, max: 3, step: 0.01 });
+  contact.addBinding(CONTACT, 'hole', { label: 'clear center × radius', min: 0, max: 0.8, step: 0.01 });
   contact.addBinding(CONTACT, 'height', { label: 'height × radius', min: 0.05, max: 1.5, step: 0.01 });
   contact.addBinding(CONTACT, 'walker', { label: 'walker radius (m)', min: 0.1, max: 1.5, step: 0.01 });
   contact.addBinding(CONTACT, 'walkerHeight', { label: 'walker height (m)', min: 0.05, max: 1.5, step: 0.01 });

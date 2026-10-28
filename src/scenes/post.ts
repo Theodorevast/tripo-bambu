@@ -44,7 +44,7 @@ import type { World } from './world';
 // 地址带 ?look=0：整个后处理关掉，回到 renderer.render 直接画（对比、低画质档）
 
 const query = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
-export const DEBUG_VIEWS = ['off', 'contact', 'rays', 'mask', 'sky'] as const;
+export const DEBUG_VIEWS = ['off', 'contact', 'rays', 'mask', 'sky', 'world'] as const;
 export type DebugView = (typeof DEBUG_VIEWS)[number];
 
 export const POST = {
@@ -55,9 +55,10 @@ export const POST = {
 
 // 接触阴影（?tune → Look）
 export const CONTACT = {
-  strength: 0.6, // 正中间压暗多少（0..1）
+  strength: 0.7, // 最暗处压暗多少（0..1）
+  hole: 0.45, // 中间这么大一块（× 半径）不压：那里是作品、翠宝的脚和鞋，只暗它们周围的地面和草
   spread: 1.3, // 半径 = 作品占地半径 × spread
-  height: 0.3, // 作品往上压多高：× 半径（至少 0.12 米）
+  height: 0.18, // 作品往上压多高：× 半径（至少 0.12 米）。低一点：展台顶面基本不压
   walker: 0.5, // 翠宝脚下那一圈的半径（米）
   walkerHeight: 0.45, // 翠宝那一圈往上压多高（米）：整根草从根到尖都暗一点，不只是贴地的一截
   color: '#5b5470', // 压暗时乘的颜色（偏冷紫，不是黑）
@@ -159,6 +160,7 @@ export class MainPost {
   private readonly contactCount = uniform(0, 'int');
   private readonly contactStrength = uniform(CONTACT.strength);
   private readonly contactColor = uniform(new THREE.Vector3());
+  private readonly contactHole = uniform(CONTACT.hole);
   private readonly planetList = Array.from({ length: MAX_PLANETS }, () => new THREE.Vector4()); // 星球中心（世界坐标）、半径
   private readonly planetArray = uniformArray(this.planetList, 'vec4');
   private readonly planetCount = uniform(0, 'int');
@@ -246,6 +248,7 @@ export class MainPost {
   apply(): void {
     this.contactStrength.value = CONTACT.strength;
     linear(CONTACT.color, this.contactColor.value);
+    this.contactHole.value = CONTACT.hole;
     linear(WASH.warm, this.washWarm.value);
     linear(WASH.cool, this.washCool.value);
     this.washShade.value = WASH.shade;
@@ -564,9 +567,12 @@ export class MainPost {
           const h = dot(rel, b.xyz);
           const rho = length(rel.sub(b.xyz.mul(h)));
           const top = b.w;
-          const ring = float(1).sub(smoothstep(a.w.mul(0.15), a.w, rho));
-          // 贴地最暗，往上线性变淡（草根暗、草尖亮，像环境光遮蔽）；地面以下一点也算（坡地、草根）
-          const k = ring.mul(ring).mul(float(1).sub(h.div(top)).clamp(0, 1)).mul(smoothstep(top.mul(-0.5), 0, h));
+          // 一圈：中间 hole 以内不压，往外很快到最暗，再慢慢淡到半径处
+          const inner = a.w.mul(this.contactHole);
+          const ring = smoothstep(inner, inner.add(a.w.mul(0.2)), rho).mul(float(1).sub(smoothstep(inner.add(a.w.mul(0.2)), a.w, rho)));
+          // 贴地最暗，往上按平方变淡（草根暗、草尖亮，像环境光遮蔽）；地面以下一点也算（坡地、草根）
+          const up = float(1).sub(h.div(top)).clamp(0, 1);
+          const k = ring.mul(up.mul(up)).mul(smoothstep(top.mul(-0.5), 0, h));
           occ.assign(max(occ, k));
         });
         c.assign(mix(c, c.mul(this.contactColor), occ.mul(this.contactStrength)));
@@ -588,6 +594,9 @@ export class MainPost {
       });
       If(this.debugView.equal(3), () => {
         graded.assign(vec4(vec3(mask.sample(st).r), 1));
+      });
+      If(this.debugView.equal(5), () => {
+        graded.assign(vec4(world.mul(0.5).fract(), 1));
       });
       If(this.debugView.equal(4), () => {
         graded.assign(vec4(vec3(d.greaterThanEqual(SKY_DEPTH).select(float(1), float(0))), 1));
