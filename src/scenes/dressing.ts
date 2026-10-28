@@ -3,7 +3,8 @@ import { renderGroup, uniform } from 'three/tsl';
 import { createGrassField, type GrassField, type GrassPlanet } from '../nature/grass';
 import { trampleUV, type Life } from '../nature/life';
 import { windNode } from '../nature/wind';
-import { DECOR_CENTER, DecorField, proceduralDecorKit, type DecorKit, type DecorStats } from '../planet/decor';
+import { DECOR_CENTER, DecorField, type DecorKit, type DecorStats } from '../planet/decor';
+import { painterlyRockKit } from '../nature/decorRocks';
 import { GRASS_GROUND, setGroundGrass } from '../planet/ground';
 import { CLEARING, PATH } from '../planet/mask';
 import { MAX_PLINTH_RADIUS } from '../planet/placement';
@@ -59,7 +60,7 @@ const _shadow = new THREE.Color();
 const _dusk = new THREE.Color();
 
 export class Dressing {
-  kit: DecorKit = proceduralDecorKit();
+  kit: DecorKit = painterlyRockKit(); // stage 角色：圆润、手绘上色的石头（nature/decorRocks.ts）
   field: DecorField = new DecorField(this.kit);
   grass: GrassField | null = null;
   rocks: DecorStats = { instances: 0, drawCalls: 0, triangles: 0 };
