@@ -3,6 +3,7 @@ import { abs, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, 
 import type { PresetId } from '../data/types';
 import { grassTint } from '../nature/grass';
 import { onPlanetRadius, PLANET_RADIUS, PRESETS, type GroundPalette } from './presets';
+import { shapeSea } from './noise';
 import { fbm2, valueNoise3 } from './tslNoise';
 
 // 地表着色器（「小王子」方向）：不再按高度分色带，而是草地、干草、苔藓、泥土、土路之间按噪声遮罩平滑混合；
@@ -142,10 +143,23 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode): THREE
   const canopy = U.grassOn.mul(float(1).sub(smoothstep(U.grassNear.mul(0.8), U.grassFar.mul(0.75), camDist)));
   meadow = mix(meadow, mix(pal.root, tint.mul(0.55), 0.4).mul(shade), canopy);
 
-  // 水塘：水面以下的地面往深青色压（越深越暗，透过半透明的水面看得出深浅），岸边一圈湿土、不长花
-  const seaN = float(PRESETS[preset].sea ?? -9);
-  const under = smoothstep(seaN.add(0.02), seaN.sub(0.35), hn);
-  const shore = smoothstep(seaN.add(0.07), seaN.add(0.005), hn).mul(float(1).sub(under));
+  // 海岸（planet 角色）：rel 是离「海面」的归一化高度（没有水的预设是假想的低地线），岸线附近加一点噪声抖动，
+  // 色带边缘不跟着三角形走成直线。海面以下：浅处是沙、往深处过渡到深青（透过半透明的水面看得出深浅）；
+  // 岸上一窄条沙滩、湿沙。没有水的预设，低地线以下是盆地：沙漠是发白的干湖，火山是灰紫的火山灰平原
+  const hasWater = PRESETS[preset].sea !== null;
+  const rel = hn.sub(shapeSea(preset)).add(mid.sub(0.5).mul(0.08)).add(clump.sub(0.5).mul(0.04).mul(keep(U.clump)));
+  const lowFloor = smoothstep(0.012, -0.025, rel); // 水下 / 盆地里
+  const depthT = smoothstep(0.0, 0.42, rel.negate());
+  const under = hasWater ? lowFloor : float(0);
+  const beach = smoothstep(hasWater ? 0.075 : 0.07, hasWater ? 0.018 : 0.0, rel).mul(float(1).sub(lowFloor));
+  const shore = smoothstep(0.05, 0.012, rel).mul(float(1).sub(lowFloor));
+  // 高地偏干、偏黄；靠海的低地更嫩、更绿（远看一块块大陆有层次）
+  const upland = smoothstep(0.14, 0.6, rel);
+  const lowland = smoothstep(0.32, 0.1, rel).mul(float(1).sub(beach));
+  meadow = mix(meadow, pal.dry.mul(U.tint).mul(shade), upland.mul(0.3));
+  meadow = mix(meadow, meadow.mul(1.12), lowland.mul(0.4));
+  const sandCol = pal.sand.mul(grain.sub(0.5).mul(0.25).mul(kGrain).add(mid.sub(0.5).mul(0.2)).add(1));
+  meadow = mix(meadow, sandCol, beach.mul(hasWater ? 0.8 : 0.6));
 
   // 远看的野花：白、黄、淡紫的小点（约 0.15 米一朵），只在镜头 20 米以外出现（近处是 3D 的花），防闪按像素大小
   const bloomN = valueNoise3(p.mul(3.4).add(83.1));
@@ -153,10 +167,11 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode): THREE
   const bloomPatch = smoothstep(0.35, 0.7, valueNoise3(p.mul(0.12).add(7.7))); // 花一片一片地开，不是到处均匀
   // 远看的花点比原来稀、淡一些（集成时调的）：地面按 AgX 压暗以后，原来的密度在星球视图里像撒了一层彩色碎屑
   const bloom = smoothstep(0.87, 0.91, bloomN).mul(bloomPatch).mul(smoothstep(20, 40, camDist)).mul(keep(3.4))
-    .mul(float(1).sub(soilAmt)).mul(float(1).sub(shore)).mul(0.55);
+    .mul(float(1).sub(soilAmt)).mul(float(1).sub(max(beach, lowFloor))).mul(0.55);
   const flower = mix(mix(color('#f5f0e1'), color('#f2cc4b'), smoothstep(0.45, 0.55, bloomKind)), color('#b59bd9'), smoothstep(0.68, 0.74, bloomKind));
   meadow = mix(meadow, flower, bloom);
-  meadow = mix(meadow, pal.soil.mul(0.8), shore.mul(0.5));
+  // 贴着水边的一圈湿沙（颜色深一点）
+  meadow = mix(meadow, sandCol.mul(hasWater ? 0.62 : 0.85), shore.mul(0.55));
 
   // 土路：遮罩的边缘按噪声抖一抖，像被踩出来的；路中间被踩得浅一点、平一点，路边深一点、混着草；
   // 路面有细碎石（颗粒、碎屑）。路上的小石头是 3D 的（planet/decor.ts 沿路边撒），这里不画
@@ -173,9 +188,12 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode): THREE
   const clearAmt = smoothstep(0.38, 0.62, masks.g.add(wobble)).mul(float(1).sub(under));
   const clearCol = mix(pal.soil, pal.path, 0.45).mul(gravel);
   col = mix(col, clearCol, clearAmt);
-  // 低洼处暗一点（像积了阴影）；水下往深青色压
-  col = col.mul(mix(float(0.86), float(1.04), smoothstep(-0.9, 0.5, hn)));
-  col = mix(col, col.mul(0.35).add(color(PRESETS[preset].water).mul(0.25)), under);
+  // 低洼处暗一点（像积了阴影）
+  col = col.mul(mix(float(0.9), float(1.03), smoothstep(-0.2, 0.5, rel)));
+  // 海底 / 盆地：浅处是沙，往深处过渡到 deep；盆地里再加大块的深浅斑（干湖的盐壳、火山灰的起伏）
+  const floorMottle = mid.sub(0.5).mul(0.3).add(clump.sub(0.5).mul(0.16)).add(1);
+  const floorCol = mix(pal.sand.mul(hasWater ? 0.5 : 1), pal.deep, depthT.mul(hasWater ? 1 : 0.75)).mul(floorMottle);
+  col = mix(col, floorCol, lowFloor);
   // 掠射角下草地发亮一点（远看一片草叶迎着光的那层绒感）
   const facing = saturate(dot(normalize(normalView), normalize(positionView.negate())));
   const sheen = pow(float(1).sub(facing), 3).mul(float(1).sub(max(pathAmt, clearAmt))).mul(0.22);
