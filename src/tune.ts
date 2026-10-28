@@ -10,7 +10,7 @@ import { addLookTune, LOOK_TUNE } from './scenes/postTune';
 import { SHOTS } from './scenes/shots';
 import { SKY, WEATHER, type World } from './scenes/world';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
-import { tuneWater, WATER, WATER_COLORS } from './nature/water';
+import { tuneWater, WATER, WATER_COLORS, WATER_ICE } from './nature/water';
 import { toast } from './ui/toast';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
@@ -61,7 +61,7 @@ export function tuneJson(world?: World): string {
       museumLook: LOOK,
       museumLights: LIGHTS,
       look: LOOK_TUNE,
-      water: { ...WATER, colors: WATER_COLORS },
+      water: { ...WATER, colors: WATER_COLORS, ice: WATER_ICE },
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
     2,

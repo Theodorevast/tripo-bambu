@@ -6,6 +6,7 @@ import {
   abs,
   attribute,
   cameraPosition,
+  color,
   cos,
   dot,
   exp,
@@ -70,6 +71,7 @@ export const WATER = {
   caustics: 1, // 水底光斑
   roughness: 0.07, // 水面的粗糙度：越小天空的倒影越清楚
   sheen: 2, // 天光反射的倍数（正对着看时；掠射时总是全反射）：物理上的水是 1，绘本里水面映的天光更明显
+  iceLat: 0.9, // 冰川预设：|y|（纬度的正弦）超过它的水面整片冻住。舞台在北纬约 56°（|y| ≈ 0.83），舞台前的水塘只结岸边那一圈
 };
 
 // 每个预设一组颜色（sRGB）：浅水、中间、深水、白沫。没有水的预设也给一组，类型完整
@@ -79,6 +81,9 @@ export interface WaterPalette {
   deep: string;
   foam: string;
 }
+
+// 海冰的多少（配方「海冰」）：只有冰川预设结冰
+export const WATER_ICE: Record<PresetId, number> = { verdant: 0, desert: 0, glacier: 1, volcanic: 0, coral: 0 };
 
 export const WATER_COLORS: Record<PresetId, WaterPalette> = {
   verdant: { shallow: '#7cc9b4', mid: '#3f9a9c', deep: '#1f5f78', foam: '#f4f0e2' },
@@ -114,6 +119,7 @@ const U = {
   caustics: uniform(WATER.caustics).setGroup(renderGroup),
   roughness: uniform(WATER.roughness).setGroup(renderGroup),
   sheen: uniform(WATER.sheen).setGroup(renderGroup),
+  iceLat: uniform(WATER.iceLat).setGroup(renderGroup),
   rain: uniform(0).setGroup(renderGroup), // 平滑过的雨量 0..1（installWater 每帧从生机层取）
   walker: uniform(new THREE.Vector4(0, -1e5, 0, 0)).setGroup(renderGroup), // 角色在水里时：xyz = 水面上脚下那一点（世界坐标），w = 1
 };
@@ -134,6 +140,7 @@ export function applyWater(): void {
   U.caustics.value = WATER.caustics;
   U.roughness.value = WATER.roughness;
   U.sheen.value = WATER.sheen;
+  U.iceLat.value = WATER.iceLat;
 }
 
 type ColorUniform = THREE.UniformNode<'color', THREE.Color>;
@@ -150,11 +157,23 @@ function paletteOf(preset: PresetId): Record<keyof WaterPalette, ColorUniform> {
   return p;
 }
 
+const ices = new Map<PresetId, THREE.UniformNode<'float', number>>();
+
+function iceOf(preset: PresetId): THREE.UniformNode<'float', number> {
+  let u = ices.get(preset);
+  if (!u) {
+    u = uniform(WATER_ICE[preset]).setGroup(renderGroup);
+    ices.set(preset, u);
+  }
+  return u;
+}
+
 export function applyWaterPalette(): void {
   for (const [preset, p] of palettes) {
     const c = WATER_COLORS[preset];
     for (const k of Object.keys(p) as Array<keyof WaterPalette>) p[k].value.set(c[k]);
   }
+  for (const [preset, u] of ices) u.value = WATER_ICE[preset];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -334,13 +353,34 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // 角色站在水里：腿边一圈碎白沫
   const toWalker = length(positionWorld.sub(U.walker.xyz));
   const legs = exp(toWalker.sub(0.2).div(0.05).pow(2).negate()).mul(U.walker.w).mul(smoothstep(0.35, 0.6, fN2));
-  const foam = saturate(max(max(rim, lace.mul(0.85)), max(line.mul(0.5), legs.mul(0.8))).add(rings.w.mul(0.3))).mul(U.foam).mul(exists).toVar();
+  // ---- 海冰（配方「海冰」，只有冰川预设的 ice > 0）：岸边先结一圈不规则的薄冰，离岸两三米内漂着一块块冰（慢慢漂），
+  // 两极（|y| 超过 iceLat）整片冻住、边缘按噪声抖。冰上有细细的裂纹，冰的边上一道白边
+  const iceAmt = iceOf(preset);
+  const ice = Fn(() => {
+    const r = float(0).toVar();
+    If(iceAmt.greaterThan(0.001), () => {
+      const iN = valueNoise3(p.mul(0.25).add(31.7));
+      const iN2 = valueNoise3(p.mul(1.6).add(vec3(t.mul(0.012), 0, t.mul(-0.01))).add(9.2));
+      const rimIce = float(1).sub(smoothstep(0.1, 0.2, e.add(iN.sub(0.5).mul(0.3)).add(iN2.sub(0.5).mul(0.2))));
+      const floes = smoothstep(0.7, 0.73, iN2).mul(smoothstep(0.2, 0.5, e)).mul(float(1).sub(smoothstep(1.2, 2.2, e)));
+      const polar = smoothstep(U.iceLat.sub(0.02), U.iceLat.add(0.02), abs(n.y).add(iN.sub(0.5).mul(0.12)).add(iN2.sub(0.5).mul(0.03)));
+      r.assign(max(max(rimIce, floes), polar).mul(iceAmt));
+    });
+    return r;
+  })().mul(exists).toVar();
+  // 冰的颜色：薄冰（浅水上）透一点水的青色，厚冰发白；一块块冰有大块的明暗；裂纹是细的青线；边上一道白
+  const crack = float(1).sub(smoothstep(0.0, 0.035, abs(valueNoise3(p.mul(2.4).add(4.4)).sub(0.5)))).mul(keep(2.4));
+  const iceEdge = smoothstep(0.05, 0.45, ice).mul(float(1).sub(smoothstep(0.55, 0.95, ice)));
+  const iceBase = mix(mix(pal.shallow, color('#dcebf0'), 0.6), color('#e8f2f5'), smoothstep(0.0, 0.4, d).mul(0.7).add(patch.add(0.5).mul(0.3)));
+  const iceCol = mix(mix(iceBase, color('#9fc7d6'), crack.mul(0.6)), color('#fbfdfd'), iceEdge);
 
-  const alpha = mix(alphaBody, exists, foam);
-  m.colorNode = mix(body.mul(alphaBody), pal.foam.mul(exists), foam); // 预乘过透明度
+  const foam = saturate(max(max(rim, lace.mul(0.85)), max(line.mul(0.5), legs.mul(0.8))).add(rings.w.mul(0.3))).mul(U.foam).mul(exists.sub(ice).max(0)).toVar();
+
+  const alpha = mix(mix(alphaBody, exists, foam), exists, ice);
+  m.colorNode = mix(mix(body.mul(alphaBody), pal.foam.mul(exists), foam), iceCol.mul(exists), ice); // 预乘过透明度
   m.opacityNode = alpha;
-  m.roughnessNode = mix(U.roughness, float(0.85), foam);
-  m.normalNode = transformNormalToView(mix(nWater, n, foam));
+  m.roughnessNode = mix(mix(U.roughness, float(0.85), foam), float(0.3), ice);
+  m.normalNode = transformNormalToView(mix(nWater, n, max(foam, ice)));
   // 反光：F0 = 0.02（水的折射率 1.333）× sheen（绘本里水面的天光更明显），F90 = exists：画出来的水边外面不反光
   m.specularColorNode = vec3(U.sheen);
   m.specularIntensityNode = exists;
@@ -366,7 +406,7 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // ---- 水底光斑：沿折射后的视线落到水底的那一点上取两层「脊」噪声相乘，成一张网；浅水最亮，深了、浑了就淡。
   // 只在浅水、看得见底的地方算噪声
   const causticK = U.caustics.mul(0.35).mul(smoothstep(0.01, 0.06, d)).mul(float(1).sub(smoothstep(0.12, 0.55, d)))
-    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(foam)).mul(keep(12)).toVar(); // 远处就不画了：从星球视图看像撒了一层白点
+    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(max(foam, ice))).mul(keep(12)).toVar(); // 远处就不画了：从星球视图看像撒了一层白点
   const causticAmt = Fn(() => {
     const out = float(0).toVar();
     If(causticK.greaterThan(0.001), () => {
@@ -609,10 +649,12 @@ export function tuneWater(pane: TuneFolder): void {
   f.addBinding(WATER, 'caustics', { min: 0, max: 3, step: 0.01 });
   f.addBinding(WATER, 'roughness', { min: 0.02, max: 0.5, step: 0.005 });
   f.addBinding(WATER, 'sheen', { label: 'sky sheen ×', min: 0, max: 5, step: 0.05 });
+  f.addBinding(WATER, 'iceLat', { label: 'polar ice from |y|', min: 0.5, max: 1.05, step: 0.005 });
   f.on('change', () => applyWater());
   for (const preset of ['verdant', 'glacier', 'coral'] as const) {
     const c = f.addFolder({ title: `Colors · ${preset}`, expanded: false });
     for (const k of Object.keys(WATER_COLORS[preset]) as Array<keyof WaterPalette>) c.addBinding(WATER_COLORS[preset], k);
+    c.addBinding(WATER_ICE, preset, { label: 'sea ice', min: 0, max: 1, step: 0.01 });
     c.on('change', () => applyWaterPalette());
   }
 }
