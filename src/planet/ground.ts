@@ -1,8 +1,8 @@
 import * as THREE from 'three/webgpu';
-import { abs, acos, clamp, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, max, mix, modelPosition, normalize, normalLocal, normalView, positionLocal, positionView, positionWorld, pow, renderGroup, saturate, sign, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
+import { abs, acos, clamp, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, max, mix, modelPosition, normalize, normalLocal, normalView, positionLocal, positionView, positionWorld, pow, renderGroup, saturate, sign, sin, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
 import type { PresetId } from '../data/types';
 import { grassTint } from '../nature/grass';
-import { overviewFactor, planetSurfaceLook, stageFactor, sunTint } from '../nature/planetLook';
+import { galaxyFactor, overviewFactor, planetSurfaceLook, stageFactor, sunTint } from '../nature/planetLook';
 import { onPlanetRadius, PLANET_RADIUS, PRESETS, type GroundPalette } from './presets';
 import { shapeSea } from './noise';
 import { SHOWCASE_POLE } from './placement';
@@ -26,6 +26,9 @@ export const GROUND = {
   farTint: 0.3, // 俯瞰那几种颜色（far、field、花）的亮度：和 tint 一样是把 sRGB 颜色对齐到 AgX 下的地面亮度
   fieldSun: 0.8, // 朝阳的黄绿大片
   fieldDeep: 0.7, // 低处的深绿
+  teamCover: 0.35, // 团队色花海的覆盖（星球视图里）
+  teamCoverGalaxy: 0.8, // 星系里
+  teamBright: 1.1, // 花海的亮度
   fieldFlowers: 1, // 花田
   warmCool: 0.8, // 冷暖渐变
 };
@@ -67,6 +70,9 @@ const U = {
   farTint: uniform(GROUND.farTint).setGroup(renderGroup),
   fieldSun: uniform(GROUND.fieldSun).setGroup(renderGroup),
   fieldDeep: uniform(GROUND.fieldDeep).setGroup(renderGroup),
+  teamCover: uniform(GROUND.teamCover).setGroup(renderGroup),
+  teamCoverGalaxy: uniform(GROUND.teamCoverGalaxy).setGroup(renderGroup),
+  teamBright: uniform(GROUND.teamBright).setGroup(renderGroup),
   fieldFlowers: uniform(GROUND.fieldFlowers).setGroup(renderGroup),
   warmCool: uniform(GROUND.warmCool).setGroup(renderGroup),
   rimCenter: uniform(RIM.center).setGroup(renderGroup),
@@ -93,6 +99,9 @@ export function applyGround(): void {
   U.farTint.value = GROUND.farTint;
   U.fieldSun.value = GROUND.fieldSun;
   U.fieldDeep.value = GROUND.fieldDeep;
+  U.teamCover.value = GROUND.teamCover;
+  U.teamCoverGalaxy.value = GROUND.teamCoverGalaxy;
+  U.teamBright.value = GROUND.teamBright;
   U.fieldFlowers.value = GROUND.fieldFlowers;
   U.warmCool.value = GROUND.warmCool;
   U.rimCenter.value = RIM.center;
@@ -142,7 +151,7 @@ export function applyGroundPalette(): void {
 
 // 地表材质。mask：星球遮罩的贴图节点（R 土路，G 作品空地；mask.ts 里换贴图只改它的 value）
 // look：这颗星球的远看部件（nature/planetLook.ts 的云层偏移、淡出系数）：远看时地面上有云影、边缘有一层空气；不给就没有（演示页）
-export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?: { cloudOffset: THREE.UniformNode<'vec3', THREE.Vector3>; fade: THREE.UniformNode<'float', number>; accent: THREE.UniformNode<'color', THREE.Color>; accentAmount: THREE.UniformNode<'float', number> }): THREE.MeshStandardNodeMaterial {
+export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?: { cloudOffset: THREE.UniformNode<'vec3', THREE.Vector3>; fade: THREE.UniformNode<'float', number>; accent: THREE.UniformNode<'color', THREE.Color>; accentAmount: THREE.UniformNode<'float', number>; construction: THREE.UniformNode<'float', number> }): THREE.MeshStandardNodeMaterial {
   const pal = paletteOf(preset);
   const amp = PRESETS[preset].amp;
   // 草地、泥土是很「哑」的表面：镜面反射压到标准材质的 GROUND_SPECULAR 倍（集成时加的）。
@@ -219,6 +228,22 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   const fieldCol = look ? mix(pal.field, look.accent, look.accentAmount.mul(0.38)) : pal.field;
   meadow = mix(meadow, fieldCol.mul(U.farTint).mul(shade), sunny.mul(overview).mul(U.fieldSun));
   meadow = mix(meadow, pal.far.mul(U.farTint).mul(0.42).mul(color('#cfe0ee')).mul(shade), hollow.mul(overview).mul(U.fieldDeep));
+  // 团队的花海（planet 角色，lead 第三轮）：约 30 米一片、按噪声扭过的大块，颜色是团队色（提一点饱和、按 AgX 对齐亮度），
+  // 里面有更亮的小花点。星系里覆盖得多一些（一眼分得开：金色麦浪、薰衣草、樱粉、雪原……），星球视图里少一点（作品是主角）
+  if (look) {
+    const tq = p.mul(0.026).add(valueNoise3(p.mul(0.018).add(9.7)).sub(0.5).mul(2.4));
+    const teamN = fbm2(tq.add(51.3));
+    const cover = mix(U.teamCover, U.teamCoverGalaxy, galaxyFactor(U.radius)).mul(float(1).sub(look.construction.mul(0.5)));
+    const th = float(0.66).sub(cover.mul(0.3));
+    const teamAmt = smoothstep(th, th.add(0.05), teamN).mul(meadowOnly).mul(overview).mul(look.accentAmount);
+    const accentLin = look.accent as unknown as THREE.Node<'vec3'>; // 颜色 uniform 在着色器里就是 vec3
+    const luma = dot(accentLin, vec3(0.2126, 0.7152, 0.0722));
+    const vivid = mix(vec3(luma), accentLin, 1.35).max(0.002);
+    const teamCol = vivid.mul(U.farTint).mul(U.teamBright).mul(shade);
+    meadow = mix(meadow, teamCol, teamAmt.mul(0.85));
+    const teamDots = cellDots(p.mul(1.8).add(33.3), 0.6).mul(keep(1.8));
+    meadow = mix(meadow, mix(vivid, vec3(1), 0.45).mul(0.5), teamDots.mul(teamAmt).mul(0.6));
+  }
   // 花田：约 13 米一片（按噪声扭过，边缘不规则），每片一种主色（白、黄、淡紫）
   const fq = p.mul(0.075).add(valueNoise3(p.mul(0.035).add(3.9)).sub(0.5).mul(3));
   const flowerField = smoothstep(0.57, 0.67, valueNoise3(fq.add(77.7))).mul(meadowOnly).mul(overview).mul(U.fieldFlowers);
@@ -269,7 +294,11 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
 
   // 作品空地：露土加碎石，边上被草啃得不规则
   const clearAmt = smoothstep(0.38, 0.62, masks.g.add(wobble)).mul(float(1).sub(under));
-  const clearCol = mix(pal.soil, pal.path, 0.45).mul(gravel);
+  // 作品空地；建设中的星球上是工地：浅色的沙土（远远地看得出来是一块刚翻过的地）
+  // 工地上一垄一垄翻过的土（平行的条纹，约 0.8 米一垄，按像素大小淡出）
+  const furrow = look ? sin(dot(p, vec3(0.83, 0.12, -0.55)).mul(7.8)).mul(0.5).add(0.5).mul(keep(1.25)).mul(look.construction) : float(0);
+  const siteSand = mix(pal.sand, pal.path, 0.45).mul(float(1.05).sub(furrow.mul(0.22)));
+  const clearCol = look ? mix(mix(pal.soil, pal.path, 0.45), siteSand, look.construction).mul(gravel) : mix(pal.soil, pal.path, 0.45).mul(gravel);
   col = mix(col, clearCol, clearAmt);
   // 低洼处暗一点（像积了阴影）
   col = col.mul(mix(float(0.9), float(1.03), smoothstep(-0.2, 0.5, rel)));
