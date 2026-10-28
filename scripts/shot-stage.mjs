@@ -14,13 +14,15 @@ const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] :
 const out = args[0] && !args[0].startsWith('--') ? args[0] : '.superpowers/sdd/2026-10-27-community-planets/team/stage-shots';
 const only = opt('--only', null)?.split(',') ?? null;
 const webgl2 = flag('--webgl2');
+const nolocal = flag('--nolocal'); // 用仓库里的占位作品（主目录没有私有模型时看到的样子）
+const suffix = (webgl2 ? '-webgl2' : '') + (nolocal ? '-placeholder' : '');
 mkdirSync(out, { recursive: true });
 const team = 'lumen-guild';
 const { server, base } = await startServer();
 const browser = await chromium.launch({ executablePath: CHROME, headless: process.env.HEADED !== '1', args: ['--ignore-gpu-blocklist'] });
 const problems = [];
 
-async function open({ dpr = 1, query = '' } = {}) {
+async function open({ dpr = 1, query = nolocal ? '?nolocal' : '' } = {}) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr });
   const errors = watchErrors(page);
   if (webgl2) await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
@@ -82,7 +84,7 @@ async function shot(name, setup, opts = {}) {
   const { page, errors } = await open(opts);
   try {
     await setup(page);
-    if (name.endsWith('.png')) await page.screenshot({ path: path.join(out, name) });
+    if (name.endsWith('.png')) await page.screenshot({ path: path.join(out, name.replace(/.png$/, `${suffix}.png`)) });
     console.log(`✓ ${name}`);
   } catch (e) {
     problems.push(`${name}: ${e.message}`);

@@ -8,6 +8,7 @@ import { applyLights, LIGHTS } from './scenes/lights';
 import { applyLook, LOOK, TONE_MAPPINGS } from './scenes/look';
 import { addLookTune, LOOK_TUNE } from './scenes/postTune';
 import { SHOTS } from './scenes/shots';
+import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
 import { SKY, WEATHER, type World } from './scenes/world';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
 import { tuneWater, WATER, WATER_COLORS } from './nature/water';
@@ -62,6 +63,7 @@ export function tuneJson(world?: World): string {
       museumLights: LIGHTS,
       look: LOOK_TUNE,
       water: { ...WATER, colors: WATER_COLORS },
+      stage: STAGE_TUNE,
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
     2,
@@ -113,6 +115,7 @@ export function installTune(world: World): void {
   }
 
   tuneWater(pane); // —— Water ——（nature/water.ts）
+  addStageTune(pane); // —— Works & gardens ——（scenes/stageTune.ts：地标放大、间距、花园、摆放反馈）
 
   // —— Grass ——
   const grass = pane.addFolder({ title: 'Grass', expanded: false });

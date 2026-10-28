@@ -18,8 +18,8 @@ import { windNode } from './wind';
 // - aTint（每个实例）：rgb 色调（这一丛花什么颜色、这道栅栏刷什么漆），w = 这一件弯多少（米 / 单位风力）
 // 路牌的字是另一份材质（SignAtlas 的贴图），每个实例按 aRect 取图集里自己那一格
 
-export type PieceId = 'post' | 'rail' | 'daisy' | 'bell' | 'pom' | 'tuft' | 'bush' | 'pebble' | 'slab' | 'bench' | 'signpost' | 'signface';
-export const PIECE_IDS: readonly PieceId[] = ['post', 'rail', 'daisy', 'bell', 'pom', 'tuft', 'bush', 'pebble', 'slab', 'bench', 'signpost', 'signface'];
+export type PieceId = 'post' | 'rail' | 'daisy' | 'bell' | 'pom' | 'tuft' | 'bush' | 'bloom' | 'pebble' | 'slab' | 'bench' | 'signpost' | 'signface' | 'flag';
+export const PIECE_IDS: readonly PieceId[] = ['post', 'rail', 'daisy', 'bell', 'pom', 'tuft', 'bush', 'bloom', 'pebble', 'slab', 'bench', 'signpost', 'signface', 'flag'];
 
 export interface GardenPiece {
   id: PieceId;
@@ -106,13 +106,13 @@ const aoGrey = (y0: number, y1: number, lo = 0.62) => (p: THREE.Vector3) => new 
 function postGeometry(): THREE.BufferGeometry {
   return merge([
     part(new THREE.CylinderGeometry(0.036, 0.042, 0.38, 10, 2, true), mat(0, 0.15), aoGrey(-0.03, 0.16), 1, 0),
-    part(new THREE.SphereGeometry(0.052, 12, 8), mat(0, 0.37), (p) => new THREE.Color().setScalar(0.9 + 0.1 * smooth(0.34, 0.42, p.y)), 1, 0),
+    part(new THREE.SphereGeometry(0.052, 10, 6), mat(0, 0.37), (p) => new THREE.Color().setScalar(0.9 + 0.1 * smooth(0.34, 0.42, p.y)), 1, 0),
   ]);
 }
 
 // 横杆：长 1（实例按两根柱子的距离拉长 x），圆角方条
 function railGeometry(): THREE.BufferGeometry {
-  return merge([part(new RoundedBoxGeometry(1, 0.05, 0.032, 2, 0.014), null, (p) => new THREE.Color().setScalar(p.y < 0 ? 0.86 : 1), 1, 0)]);
+  return merge([part(new RoundedBoxGeometry(1, 0.05, 0.032, 1, 0.014), null, (p) => new THREE.Color().setScalar(p.y < 0 ? 0.86 : 1), 1, 0)]);
 }
 
 // 茎：细圆柱，往一边弯一点
@@ -193,9 +193,10 @@ function tuftGeometry(): THREE.BufferGeometry {
 }
 
 // 灌木：几团圆球挤在一起，法线往整丛的中心方向偏（整丛像一个软软的大球那样受光，Bruno Simon Foliage.js 的做法）；
-// 底下暗、顶上亮，表面点几朵小白花。高约 0.55 米、宽约 0.9 米
-function bushGeometry(): THREE.BufferGeometry {
-  const rng = mulberry32(31);
+// 底下暗、顶上亮，表面点几朵小白花。高约 0.55 米、宽约 0.9 米。
+// bloom：开满花的灌木（像杜鹃、绣球），花朵吃实例的色调（团队色、粉、黄……），远看是一团颜色
+function bushGeometry(bloom = false): THREE.BufferGeometry {
+  const rng = mulberry32(bloom ? 47 : 31);
   const blobs: Array<[number, number, number, number]> = [[0, 0.25, 0, 0.3]];
   for (let k = 0; k < 5; k++) {
     const a = (k / 5) * Math.PI * 2 + rng() * 0.5;
@@ -219,14 +220,14 @@ function bushGeometry(): THREE.BufferGeometry {
     parts.push(part(g, null, (p) => {
       const t = smooth(0.0, 0.5, p.y);
       return t < 0.5 ? BUSH_DARK.clone().lerp(BUSH_MID, t * 2) : BUSH_MID.clone().lerp(BUSH_LIGHT, (t - 0.5) * 2);
-    }, 0.5, (p) => 0.4 * smooth(0.05, 0.55, p.y)));
+    }, bloom ? 0.2 : 0.5, (p) => 0.4 * smooth(0.05, 0.55, p.y)));
   }
-  // 小白花：贴在上半部的表面上
-  for (let k = 0; k < 16; k++) {
+  // 小白花：贴在上半部的表面上（开花的灌木多得多，颜色交给实例色调）
+  for (let k = 0; k < (bloom ? 38 : 16); k++) {
     const b = blobs[Math.floor(rng() * blobs.length)];
     const dir = new THREE.Vector3(rng() - 0.5, 0.4 + rng() * 0.6, rng() - 0.5).normalize();
     const at = new THREE.Vector3(b[0], b[1], b[2]).addScaledVector(dir, b[3] * 0.98);
-    parts.push(part(new THREE.IcosahedronGeometry(0.03, 1), mat(at.x, at.y, at.z), BLOSSOM, 0, 0.4));
+    parts.push(part(new THREE.IcosahedronGeometry(bloom ? 0.04 : 0.032, 0), mat(at.x, at.y, at.z), bloom ? WHITE : BLOSSOM, bloom ? 1 : 0, 0.4));
   }
   return merge(parts);
 }
@@ -270,6 +271,42 @@ function signfaceGeometry(): THREE.BufferGeometry {
   return g;
 }
 
+// 小旗：细杆（顶上一颗翠宝黄的圆球）+ 三角旗（吃实例色调：团队色）。旗面沿 +x 伸出去，越往外越软，风一吹就摆。高 1.3 米
+function flagGeometry(): THREE.BufferGeometry {
+  const pole = 1.3;
+  const len = 0.42;
+  const top = 1.24;
+  const bottom = 1.0;
+  const seg = 8;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  // 正反两面，各 seg 段；旗面在 x = 0.02 .. len 之间，往外收成尖
+  for (const side of [1, -1]) {
+    const base = pos.length / 3;
+    for (let i = 0; i <= seg; i++) {
+      const t = i / seg;
+      const x = 0.02 + t * (len - 0.02);
+      const mid = (top + bottom) / 2 - 0.03 * t;
+      const half = ((top - bottom) / 2) * (1 - t) + 0.004;
+      pos.push(x, mid + half, 0.004 * side, x, mid - half, 0.004 * side);
+    }
+    for (let i = 0; i < seg; i++) {
+      const a = base + i * 2;
+      if (side > 0) idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      else idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+    }
+  }
+  const cloth = new THREE.BufferGeometry();
+  cloth.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  cloth.setIndex(idx);
+  cloth.computeVertexNormals();
+  return merge([
+    part(new THREE.CylinderGeometry(0.014, 0.018, pole, 8, 3, true), mat(0, pole / 2 - 0.03), aoGrey(-0.03, 0.3, 0.7), 0, 0),
+    part(new THREE.SphereGeometry(0.032, 10, 6), mat(0, pole - 0.01), CENTER, 0, 0),
+    part(cloth, null, (p) => new THREE.Color().setScalar(0.86 + 0.14 * smooth(0.02, 0.3, p.x)), 1, (p) => smooth(0.0, len, p.x)),
+  ]);
+}
+
 let pieces: GardenPiece[] | null = null;
 
 export function gardenPieces(): GardenPiece[] {
@@ -281,12 +318,14 @@ export function gardenPieces(): GardenPiece[] {
     ['bell', bellGeometry, false],
     ['pom', pomGeometry, false],
     ['tuft', tuftGeometry, false],
-    ['bush', bushGeometry, true],
+    ['bush', () => bushGeometry(false), true],
+    ['bloom', () => bushGeometry(true), true],
     ['pebble', () => stoneGeometry('round', 97), true],
     ['slab', () => stoneGeometry('slab', 41), true],
     ['bench', benchGeometry, true],
     ['signpost', signpostGeometry, true],
     ['signface', signfaceGeometry, false],
+    ['flag', flagGeometry, true],
   ];
   pieces = defs.map(([id, make, castShadow]) => ({ id, geometry: make(), castShadow }));
   return pieces;
