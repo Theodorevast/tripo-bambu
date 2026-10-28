@@ -153,8 +153,11 @@ export class PlanetMask {
   exclude(d: THREE.Vector3): number {
     const path = smooth(0.25, 0.75, this.sample(d, 0));
     const clear = smooth(0.15, 0.55, this.sample(d, 1));
-    return Math.max(path, clear);
+    return Math.max(path, clear, this.extraExclude ? this.extraExclude(d) : 0);
   }
+
+  // 别的东西也要草和石头让开（water 角色加的接入口：nature/waterStream.ts 的小溪），0..1，和土路、空地取最大
+  extraExclude: ((d: THREE.Vector3) => number) | null = null;
 
   dispose(): void {
     if (this.texture !== EMPTY) this.texture.dispose();

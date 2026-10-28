@@ -261,6 +261,64 @@ try {
     await page.keyboard.up('w');
     await page.waitForTimeout(500);
   });
+  // 小溪：从斜上方看整条（泉眼到入水口），再贴着溪边看
+  const streamInfo = (page) => page.evaluate((t) => {
+    const e = window.__world.planets.get(t);
+    const s = e.planet.group.getObjectByName('stream');
+    if (!s) return null;
+    const g = s.geometry;
+    g.computeBoundingSphere();
+    const c = g.boundingSphere.center;
+    const a = g.getAttribute('streamA');
+    const P = g.getAttribute('position');
+    // 泉眼（顺流路程最小）和入水口（路程 0 附近）在哪
+    let src = 0;
+    let mouth = 0;
+    for (let i = 0; i < a.count; i++) {
+      if (a.getY(i) < a.getY(src)) src = i;
+      if (Math.abs(a.getY(i)) < Math.abs(a.getY(mouth)) && Math.abs(a.getX(i)) < 0.1) mouth = i;
+    }
+    const v = (i) => [P.getX(i), P.getY(i), P.getZ(i)];
+    return { center: [c.x, c.y, c.z], radius: g.boundingSphere.radius, source: v(src), mouth: v(mouth), length: -a.getY(src) };
+  }, team);
+  await shot('water-stream', async (page) => {
+    const s = await streamInfo(page);
+    if (!s) throw new Error('这颗星球上没有小溪');
+    console.log(`  小溪：长 ${s.length.toFixed(1)} 米`);
+    await page.evaluate(([t, si]) => {
+      const w = window.__world;
+      const e = w.planets.get(t);
+      const cam = w.rig.camera;
+      const V = cam.position.constructor;
+      const up = new V(...si.center).normalize();
+      const target = new V(...si.center).add(e.home);
+      const flow = new V(...si.mouth).sub(new V(...si.source));
+      const side = new V().crossVectors(up, flow).normalize();
+      const pos = target.clone().addScaledVector(side, Math.max(5, si.radius * 0.9)).addScaledVector(up, Math.max(3.5, si.radius * 0.6));
+      w.rig.drive = () => { cam.position.copy(pos); cam.up.copy(up); cam.lookAt(target); };
+    }, [team, s]);
+    await page.waitForTimeout(1500);
+  });
+  await shot('water-stream-walk', async (page) => {
+    const s = await streamInfo(page);
+    if (!s) throw new Error('这颗星球上没有小溪');
+    // 翠宝站在溪边（溪中段的旁边 0.9 米），面朝下游
+    await page.locator('.topbar button.walk').click();
+    await page.waitForFunction(() => window.__walk.state().phase === 'walk', null, { timeout: 8000 });
+    await page.evaluate((si) => {
+      const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+      const src = n(si.source);
+      const mouth = n(si.mouth);
+      const mid = n(src.map((x, k) => x * 0.6 + mouth[k] * 0.4));
+      const flow = n(mouth.map((x, k) => x - src[k]));
+      const side = n([mid[1] * flow[2] - mid[2] * flow[1], mid[2] * flow[0] - mid[0] * flow[2], mid[0] * flow[1] - mid[1] * flow[0]]);
+      const R = window.__walk.state().radius;
+      const at = n(mid.map((x, k) => x + side[k] * (0.9 / R) - flow[k] * (1.5 / R)));
+      const head = n(flow.map((x, k) => x * 0.8 - side[k] * 0.6));
+      window.__walk.teleport(at, head);
+    }, s);
+    await page.waitForTimeout(2200);
+  });
   await shot('water-galaxy', async (page) => {
     await page.evaluate(() => { location.hash = '#/'; });
     await page.waitForFunction(() => window.__app.routeIdle() && location.hash === '#/', null, { timeout: 15000 });
