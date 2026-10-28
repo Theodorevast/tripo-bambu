@@ -39,6 +39,7 @@ import {
 import type { PresetId } from '../data/types';
 import { valueNoise3 } from '../planet/tslNoise';
 import type { World } from '../scenes/world';
+import { createStream, type StreamHost } from './waterStream';
 import { windUniforms } from './wind';
 
 // 水：星球低洼处的小水塘（以后有海、小溪也走这里）。做法来自用户笔记「14-星球视觉效果」的「海洋增强」配方，翻译成 TSL，
@@ -106,7 +107,7 @@ export const RING = {
   jitter: 0.09, // 每圈的圆心在脚下随机挪开多远（米）：两只脚轮流踩，圈不是同心的
 };
 
-// 所有水面材质共用的 uniform：放进 renderGroup（每次 render 刷新一次）
+// 所有水面材质共用的 uniform：放进 renderGroup（每次 render 刷新一次）。小溪（waterStream.ts）也读其中几个（WATER_U）
 const U = {
   clarity: uniform(WATER.clarity).setGroup(renderGroup),
   deep: uniform(WATER.deep).setGroup(renderGroup),
@@ -123,6 +124,8 @@ const U = {
   rain: uniform(0).setGroup(renderGroup), // 平滑过的雨量 0..1（installWater 每帧从生机层取）
   walker: uniform(new THREE.Vector4(0, -1e5, 0, 0)).setGroup(renderGroup), // 角色在水里时：xyz = 水面上脚下那一点（世界坐标），w = 1
 };
+
+export const WATER_U = U;
 
 const sources = Array.from({ length: SOURCES }, () => new THREE.Vector4(0, -1e5, 0, -1e3)); // xyz = 圆心（世界坐标），w = 出生时刻（秒，TSL 的 time）
 const uSources = uniformArray(sources, 'vec4').setGroup(renderGroup);
@@ -147,7 +150,7 @@ type ColorUniform = THREE.UniformNode<'color', THREE.Color>;
 const palettes = new Map<PresetId, Record<keyof WaterPalette, ColorUniform>>();
 
 // 同一预设的水面共用一组颜色 uniform（?tune 改一次全部生效）
-function paletteOf(preset: PresetId): Record<keyof WaterPalette, ColorUniform> {
+export function paletteOf(preset: PresetId): Record<keyof WaterPalette, ColorUniform> {
   let p = palettes.get(preset);
   if (!p) {
     const c = WATER_COLORS[preset];
@@ -187,7 +190,7 @@ function hash33(p: V3): V3 {
 }
 
 // 三个通道的值噪声（0..1）：一次调用给出一个随机方向，拿来推歪法线（配方里的 snoise 换成它：便宜，WebGL2 上编译快）
-const noise3v = Fn(([p]: [V3]) => {
+export const noise3v = Fn(([p]: [V3]) => {
   const i = floor(p);
   const f = fract(p);
   const u = f.mul(f).mul(f.mul(-2).add(3));
@@ -245,9 +248,12 @@ const ringsNode = Fn(([p, pw]: [V3, V3]) => {
 // 材质
 
 // 光照模型多加的两项（每盏平行光调一次）：L 是指向光源的方向（观察空间）
-interface WaterExtras {
+export interface WaterExtras {
   glint: (L: V3) => F; // 闪光：乘在光的颜色上，加进镜面反射
   caustic: (L: V3) => V3; // 水底光斑：乘在光的颜色上，加进漫反射（透过水看到的水底多出来的光）
+  // 画出来的水在哪（0..1）：平行光的漫反射和高光都乘它。three 的直接高光把 F90 写死成 1（BRDF_GGX 的 f90: 1），
+  // specularIntensity 压不住：水边外面那一窄条透明的三角形掠射时会反出一道白光
+  mask: F;
 }
 
 class WaterLightingModel extends THREE.PhysicalLightingModel {
@@ -259,8 +265,8 @@ class WaterLightingModel extends THREE.PhysicalLightingModel {
   }
 
   direct(input: THREE.LightingModelDirectInput, builder: THREE.NodeBuilder): void {
-    super.direct(input, builder);
-    const light = input.lightColor as V3;
+    const light = (input.lightColor as V3).mul(this.extras.mask);
+    super.direct({ ...input, lightColor: light }, builder);
     const L = input.lightDirection as V3;
     (input.reflectedLight.directSpecular as V3).addAssign(light.mul(this.extras.glint(L)));
     (input.reflectedLight.directDiffuse as V3).addAssign(light.mul(this.extras.caustic(L)));
@@ -280,8 +286,9 @@ class WaterNodeMaterial extends THREE.MeshPhysicalNodeMaterial {
 }
 
 // 水面材质（几何体要带 waterDepth 属性，见 buildWaterGeometry）。所有噪声按星球本地坐标（米）取，图案大小和星球半径无关
-export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial {
-  const pal = paletteOf(preset);
+// 水面用的材质：Physical + 上面的光照模型；输出预乘透明度（One / OneMinusSrcAlpha），colorNode 要自己乘好透明度。
+// extras 在材质建好以后、第一次编译之前填（小溪 waterStream.ts 也用它）
+export function litWaterMaterial(name: string, extras: WaterExtras | null = null): THREE.MeshPhysicalNodeMaterial & { _extras: WaterExtras | null } {
   const m = new WaterNodeMaterial({
     transparent: true,
     blending: THREE.CustomBlending,
@@ -292,7 +299,14 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
     metalness: 0,
     ior: 1.333,
   });
-  m.name = `water-${preset}`;
+  m.name = name;
+  m._extras = extras;
+  return m;
+}
+
+export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial {
+  const pal = paletteOf(preset);
+  const m = litWaterMaterial(`water-${preset}`);
   const p = positionLocal; // 星球本地坐标（米），在水面球壳上
   const n = normalize(p);
   // 水深（米）：二次插值（见 buildWaterGeometry），等深线是弯的，三角形之间没有折痕
@@ -424,6 +438,7 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   m._extras = {
     glint,
     caustic: (L) => pal.shallow.mul(causticAmt.mul(saturate(dot(nView, L)))),
+    mask: exists,
   };
   return m;
 }
@@ -552,15 +567,14 @@ export function buildWaterGeometry(terrain: THREE.BufferGeometry, sea: number): 
   return geo;
 }
 
-// 水面挂在哪颗星球上：PlanetObject 满足这个接口（只读它的地表、水面半径、预设）
-export interface WaterHost {
-  readonly terrain: THREE.Mesh;
-  readonly sea: number;
-  readonly currentRecipe: { preset: PresetId };
-}
+// 水面挂在哪颗星球上：PlanetObject 满足这个接口（地表、水面半径、高度、遮罩、预设和种子；小溪要找路线、让草让开）
+export type WaterHost = StreamHost;
 
-// 建一颗星球的水面（PlanetObject.rebuild 调）。地表换了几何体（换细分）时，下一次画之前跟着重建
-export function createWater(host: WaterHost): THREE.Mesh {
+// 建一颗星球的水（PlanetObject.rebuild 调）：水面（水塘、海）+ 一条小溪（找得到路线时）。
+// 地表换了几何体（换细分）时，下一次画之前跟着重建
+export function createWater(host: WaterHost): THREE.Object3D {
+  const group = new THREE.Group();
+  group.name = 'water-bodies';
   let builtFrom = host.terrain.geometry;
   const mesh = new THREE.Mesh(buildWaterGeometry(builtFrom, host.sea), waterMaterial(host.currentRecipe.preset));
   mesh.name = 'water';
@@ -573,7 +587,10 @@ export function createWater(host: WaterHost): THREE.Mesh {
     mesh.geometry = buildWaterGeometry(g, host.sea);
     old.dispose();
   };
-  return mesh;
+  group.add(mesh);
+  const stream = createStream(host);
+  if (stream) group.add(stream);
+  return group;
 }
 
 // ---------------------------------------------------------------------------------------------
