@@ -7,6 +7,7 @@ import { footprintGroundRadius } from '../planet/footprint';
 import { MAX_PLINTH_RADIUS, placementTransform, plinthRadius } from '../planet/placement';
 import { onPlanetRadius, PLANET_RADIUS, PRESETS } from '../planet/presets';
 import { plinthMaterial, STAND_TOP, standGeometry } from './plinth';
+import { compileShadowExact } from './shadowWarm';
 import type { PlanetEntry, World } from './world';
 
 export { plinthRadius };
@@ -125,14 +126,18 @@ export class PlanetView {
     this.dust = world.scene ? new DustPuffs() : null;
     if (this.dust) world.scene.add(this.dust.mesh);
     // 等开场预热做完（阴影贴图建好）再编：主画面和投影那一遍都编好。花园每种零件先放一个、尘土先显示（编译跳过数量 0 和不可见的）
+    // 投影那一遍另外用 compileShadowExact 编（shadowWarm.ts：Stager.compileShadow 在 three r186 上编出来的阴影管线对不上，进星球时会同步重建）
+    const shadowLight = () => world.stage.shadowLight?.() ?? null;
     (world.warm ?? Promise.resolve())
       .then(async () => {
         await world.stage.precompile(this.warmPlinths);
+        await compileShadowExact(world.renderer, this.warmPlinths, shadowLight(), world.scene);
         // 路牌图集只被着色器节点引用（不是材质的 map），Stager 找不到它：开场先传一次（连 mipmap 的管线一起建好），进星球时不在那一帧做
         world.renderer?.initTexture(this.gardens.atlas.texture);
         this.gardens.showOneEach(true);
         try {
           await world.stage.precompile(this.gardens.group);
+          await compileShadowExact(world.renderer, this.gardens.group, shadowLight(), world.scene);
         } finally {
           this.gardens.showOneEach(false);
         }

@@ -10,7 +10,9 @@ const webgl2 = args.includes('--webgl2');
 const local = args.includes('--local');
 const frames = Number(opt('--frames', 240));
 
-const { server, base } = await startServer();
+// 自己的 Vite 依赖缓存：主目录的 node_modules/.vite 是各个 worktree 共用的（node_modules 是链接），
+// 用共用的那份，这边重新预构建依赖会让别的开发服务器（包括用户正在看的 5173）报 Outdated Optimize Dep、整页刷新
+const { server, base } = await startServer({ cacheDir: '.tmp/vite-stage' });
 const browser = await chromium.launch({ executablePath: CHROME, headless: process.env.HEADED !== '1', args: ['--ignore-gpu-blocklist', '--enable-webgpu-developer-features'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
 const errors = watchErrors(page);
