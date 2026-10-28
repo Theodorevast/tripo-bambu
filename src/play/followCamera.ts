@@ -16,9 +16,12 @@ const _e = new THREE.Euler();
 const _q = new THREE.Quaternion();
 
 // 镜头的手感（GDC「Juicing Your Cameras」、Daniel Holden 的弹簧）：注视点用临界阻尼弹簧追角色（起步、停下都顺，没有过冲）；
+// 镜头离角色的距离也用一个弹簧：滚轮缩放不跳，走起来往后让一点（角色跑在画面里不显得挤），停下慢慢回来；
 // 站着时有很轻的「呼吸」晃动；撞上作品时按「创伤值」的平方抖一下，很快衰减。晃动、抖动都只转镜头、不挪位置
 export const FEEL = {
-  spring: 9, // 弹簧的角频率（1/秒）：越大追得越紧
+  spring: 9, // 注视点弹簧的角频率（1/秒）：越大追得越紧
+  zoomSpring: 4, // 距离弹簧的角频率（1/秒）：缩放、往后让的快慢
+  pullBack: 0.1, // 全速走的时候镜头往后让多少（× 距离）
   breathe: 0.0022, // 呼吸晃动的幅度（弧度，约 0.13°）
   bump: 0.55, // 一次正面撞上加多少创伤值（0..1；按撞上时的速度打折）
   decay: 1.6, // 创伤值每秒衰减多少
@@ -44,7 +47,7 @@ export class FollowCamera {
   readonly up = new THREE.Vector3(0, 1, 0); // 角色的 dir
   readonly heading = new THREE.Vector3(0, 0, 1); // 镜头的水平朝向（up 的切平面里）：WASD 的「前」
   pitch = FOLLOW.pitch;
-  distance = FOLLOW.distance;
+  distance = FOLLOW.distance; // 想要的距离（滚轮改它）；实际的距离 dist 用弹簧追它
   readonly focus = new THREE.Vector3(); // 注视点：角色胸口，有一点滞后
   readonly position = new THREE.Vector3();
   readonly quaternion = new THREE.Quaternion();
@@ -52,6 +55,11 @@ export class FollowCamera {
   readonly screenUp = new THREE.Vector3(0, 1, 0);
   trauma = 0; // 创伤值 0..1：撞上作品时加，抖动按它的平方
   private readonly focusVel = new THREE.Vector3();
+  private dist = FOLLOW.distance;
+  private distVel = 0;
+  // ?tune 改了 FOLLOW 的距离、俯角：下一帧就用新值（记下上次看到的值，只在表变了的时候覆盖，拖动、滚轮改的照旧）
+  private seenDistance = FOLLOW.distance;
+  private seenPitch = FOLLOW.pitch;
   private lift = 0; // 地形高过镜头时沿径向抬起的量
   private time = 0;
   private wasBumped = false;
@@ -62,6 +70,9 @@ export class FollowCamera {
     retangent(this.heading.copy(heading), this.up, walker.facing);
     walker.positionInto(this.focus).addScaledVector(this.up, FOLLOW.focus);
     this.focusVel.set(0, 0, 0);
+    this.syncTable();
+    this.dist = this.distance;
+    this.distVel = 0;
     this.lift = 0;
     this.trauma = 0;
     this.wasBumped = false;
@@ -81,6 +92,7 @@ export class FollowCamera {
   // floor(dir)：那个方向上镜头不能低于的半径（地面或水面再加一点余量）
   update(dt: number, walker: Walker, autoTurn: boolean, floor: (dir: THREE.Vector3) => number): void {
     this.time += dt;
+    this.syncTable();
     this.heading.applyQuaternion(walker.turned);
     this.focusVel.applyQuaternion(walker.turned);
     this.up.copy(walker.dir);
@@ -93,12 +105,20 @@ export class FollowCamera {
     if (walker.bumped && !this.wasBumped) this.trauma = Math.min(1, this.trauma + FEEL.bump * Math.min(1, walker.impact / WALK.speed));
     this.wasBumped = walker.bumped;
     this.trauma = Math.max(0, this.trauma - FEEL.decay * dt);
-    // 从注视点往后 distance·cos(pitch)、往上 distance·sin(pitch)，再往右偏一点（越肩）；偏完把这段距离拉回 distance
-    const back = Math.cos(this.pitch) * this.distance;
-    const rise = Math.sin(this.pitch) * this.distance;
+    // 距离：想要的距离，走得越快往后让得越多；临界阻尼弹簧追过去（精确解，和帧率无关）
+    const goal = this.distance * (1 + FEEL.pullBack * Math.min(1, speed / WALK.speed));
+    const e = Math.exp(-FEEL.zoomSpring * dt);
+    const j0 = this.dist - goal;
+    const j1 = this.distVel + j0 * FEEL.zoomSpring;
+    this.dist = goal + (j0 + j1 * dt) * e;
+    this.distVel = (this.distVel - j1 * FEEL.zoomSpring * dt) * e;
+    const d = this.dist;
+    // 从注视点往后 d·cos(pitch)、往上 d·sin(pitch)，再往右偏一点（越肩）；偏完把这段距离拉回 d
+    const back = Math.cos(this.pitch) * d;
+    const rise = Math.sin(this.pitch) * d;
     _right.crossVectors(this.heading, this.up);
     _goal.copy(this.heading).multiplyScalar(-back).addScaledVector(this.up, rise).addScaledVector(_right, FOLLOW.shoulder);
-    _goal.multiplyScalar(this.distance / _goal.length());
+    _goal.multiplyScalar(d / _goal.length());
     this.position.copy(this.focus).add(_goal);
     // 镜头低于地面（身后是山坡）或水面时沿径向抬起来：上升立刻跟上，回落慢慢来，不跟着起伏的地面颠
     const r = this.position.length();
@@ -106,6 +126,12 @@ export class FollowCamera {
     this.lift = need > this.lift ? need : this.lift + (need - this.lift) * damp(FOLLOW.lift, dt);
     this.position.multiplyScalar((r + this.lift) / r);
     this.aim();
+  }
+
+  // FOLLOW 表（?tune）变了：用新的距离、俯角
+  private syncTable(): void {
+    if (FOLLOW.distance !== this.seenDistance) this.distance = this.seenDistance = FOLLOW.distance;
+    if (FOLLOW.pitch !== this.seenPitch) this.pitch = this.seenPitch = FOLLOW.pitch;
   }
 
   // 看着注视点上方一点。右方向取 heading × up 再和视线正交化：它和角色一起连续地转，
