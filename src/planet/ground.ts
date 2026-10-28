@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
-import { abs, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, max, mix, normalize, normalLocal, normalView, positionLocal, positionView, pow, saturate, sign, smoothstep, uniform, vec2 } from 'three/tsl';
+import { abs, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, max, mix, normalize, normalLocal, normalView, positionLocal, positionView, pow, renderGroup, saturate, sign, smoothstep, uniform, vec2 } from 'three/tsl';
 import type { PresetId } from '../data/types';
+import { grassTint } from '../nature/grass';
 import { onPlanetRadius, PLANET_RADIUS, PRESETS, type GroundPalette } from './presets';
 import { fbm2, valueNoise3 } from './tslNoise';
 
@@ -19,15 +20,31 @@ export const GROUND = {
   pathEdge: 0.45, // 路边被草啃出来的不规则程度
 };
 
+export const GROUND_SPECULAR = 0.25; // 地面镜面反射的强度（MeshPhysicalNodeMaterial.specularIntensity，标准材质相当于 1）
+
+// 地表和草叶的衔接（集成时加的，Dressing 每帧按聚焦星球上的草设）：
+// 草画到的范围里，草缝里露出来的地面压暗成草根色（近处），往外按距离过渡到「远看的草色」（grassTint，和草叶同一条公式），
+// 草淡出的地方地面接得上，不露出一圈边界
+export const GRASS_GROUND = {
+  dryness: 0.35, // 枯黄色斑的多少（和草叶的 settings.dryness 一致）
+  tint: 0.4, // 远看的草色乘多少（地面是 PBR 受光，草叶是自己的风格化受光：用它把两边的亮度对齐）
+};
+
+// 所有地面材质共用的 uniform：放进 renderGroup（每次 render 刷新一次，不跟着某个物体的 objectGroup 走）
 const U = {
-  patch: uniform(GROUND.patch),
-  moss: uniform(GROUND.moss),
-  soil: uniform(GROUND.soil),
-  clump: uniform(GROUND.clump),
-  bump: uniform(GROUND.bump),
-  grain: uniform(GROUND.grain),
-  pathEdge: uniform(GROUND.pathEdge),
-  radius: uniform(PLANET_RADIUS),
+  patch: uniform(GROUND.patch).setGroup(renderGroup),
+  moss: uniform(GROUND.moss).setGroup(renderGroup),
+  soil: uniform(GROUND.soil).setGroup(renderGroup),
+  clump: uniform(GROUND.clump).setGroup(renderGroup),
+  bump: uniform(GROUND.bump).setGroup(renderGroup),
+  grain: uniform(GROUND.grain).setGroup(renderGroup),
+  pathEdge: uniform(GROUND.pathEdge).setGroup(renderGroup),
+  radius: uniform(PLANET_RADIUS).setGroup(renderGroup),
+  dryness: uniform(GRASS_GROUND.dryness).setGroup(renderGroup),
+  tint: uniform(GRASS_GROUND.tint).setGroup(renderGroup),
+  grassOn: uniform(0).setGroup(renderGroup), // 0..1：聚焦星球上的草在不在画（草量 0、还没编译好时是 0）
+  grassNear: uniform(6).setGroup(renderGroup), // 草的满密度半径（米）：这以内地面是草根色
+  grassFar: uniform(32).setGroup(renderGroup), // 草画到多远（米）：这以外地面就是远看的草色
 };
 
 export function applyGround(): void {
@@ -38,6 +55,15 @@ export function applyGround(): void {
   U.bump.value = GROUND.bump;
   U.grain.value = GROUND.grain;
   U.pathEdge.value = GROUND.pathEdge;
+  U.dryness.value = GRASS_GROUND.dryness;
+  U.tint.value = GRASS_GROUND.tint;
+}
+
+// 聚焦星球上的草：on 0..1，near / far 是草的满密度半径和最远半径（米）。Dressing 每帧调，值没变就不写
+export function setGroundGrass(on: number, near: number, far: number): void {
+  U.grassOn.value = on;
+  U.grassNear.value = near;
+  U.grassFar.value = far;
 }
 
 onPlanetRadius((r) => {
@@ -53,10 +79,10 @@ function paletteOf(preset: PresetId): Record<keyof GroundPalette, ColorUniform> 
   let p = palettes.get(preset);
   if (!p) {
     const g = PRESETS[preset].ground;
-    p = {
-      grass: uniform(new THREE.Color(g.grass)), dry: uniform(new THREE.Color(g.dry)), moss: uniform(new THREE.Color(g.moss)),
-      soil: uniform(new THREE.Color(g.soil)), path: uniform(new THREE.Color(g.path)), rock: uniform(new THREE.Color(g.rock)),
-    } as Record<keyof GroundPalette, ColorUniform>;
+    // 同一预设的地面材质共用：放进 renderGroup
+    p = Object.fromEntries(
+      (Object.keys(g) as Array<keyof GroundPalette>).map((k) => [k, uniform(new THREE.Color(g[k])).setGroup(renderGroup)]),
+    ) as Record<keyof GroundPalette, ColorUniform>;
     palettes.set(preset, p);
   }
   return p;
@@ -74,7 +100,10 @@ export function applyGroundPalette(): void {
 export function groundMaterial(preset: PresetId, mask: THREE.TextureNode): THREE.MeshStandardNodeMaterial {
   const pal = paletteOf(preset);
   const amp = PRESETS[preset].amp;
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.94, metalness: 0 });
+  // 草地、泥土是很「哑」的表面：镜面反射压到标准材质的 GROUND_SPECULAR 倍（集成时加的）。
+  // AgX 下草地的目标亮度很低（参考图里草地中间调只有天空的几十分之一），标准材质固定 4% 的镜面反射会把偏蓝的天光整片叠上去，
+  // 草色发灰、发白（实测星球视图里这一项和草本身的亮度差不多大）
+  const m = new THREE.MeshPhysicalNodeMaterial({ roughness: 0.94, metalness: 0, specularIntensity: GROUND_SPECULAR });
   m.name = `ground-${preset}`;
   const p = positionLocal;
   const dir = normalize(p);
@@ -96,16 +125,21 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode): THREE
   const kGrain = keep(U.grain);
   const kCrumb = keep(46);
 
-  // 草地：主草色和干草按大斑混，苔藓按中斑（低洼处更多），再按一丛丛（0.6 米）、一簇簇（0.25 米）、颗粒（几厘米）的明暗起伏。
+  // 草地：底色是「远看的草色」（grassTint：和草叶同一条公式、同一组颜色，主草色 / 嫩草色一片片交替、枯黄斑），
+  // 苔藓按中斑（低洼处更多），再按一丛丛（0.6 米）、一簇簇（0.25 米）、颗粒（几厘米）的明暗起伏。
   // 细的那几层按像素大小淡出：远看是均匀的草色，近看有颗粒
-  const dryAmt = smoothstep(0.45, 0.78, big.add(mid.sub(0.5).mul(0.25)));
+  const tint = grassTint(p, { lush: pal.grass, fresh: pal.fresh, dry: pal.dry, tip: pal.tip, dryness: U.dryness }).mul(U.tint).toVar();
   const mossAmt = smoothstep(U.moss, U.moss.add(0.16), mid.mul(0.7).add(float(1).sub(big).mul(0.3))).mul(smoothstep(0.4, -0.8, hn).mul(0.45).add(0.55));
   const shade = clump.sub(0.5).mul(0.3).add(tuft.sub(0.5).mul(0.28).mul(kTuft)).add(grain.sub(0.5).mul(0.26).mul(kGrain)).add(1);
-  const grass = mix(mix(pal.grass, pal.dry, dryAmt), pal.moss, mossAmt.mul(0.85)).mul(shade);
+  const grass = mix(tint, pal.moss.mul(U.tint), mossAmt.mul(0.6)).mul(shade);
   // 露土：零星的小块，坡陡的地方更多；土里有颗粒
   const soilAmt = max(smoothstep(U.soil, U.soil.add(0.16), clump.mul(0.55).add(mid.mul(0.45))).mul(0.75), smoothstep(0.05, 0.14, slope));
   const soil = pal.soil.mul(grain.sub(0.5).mul(0.35).mul(kGrain).add(crumb.sub(0.5).mul(0.25).mul(kCrumb)).add(1));
   let meadow = mix(grass, soil, soilAmt);
+  // 聚焦星球上草画到的范围：草缝里露出来的地面是草丛深处的颜色（草根色，带一点草色），往外按距离过渡回远看的草色。
+  // 满密度半径以内全是草根色，到草最远半径的 3/4 处完全是远看的草色（那里草已经很稀，地面的颜色就是草的颜色）
+  const canopy = U.grassOn.mul(float(1).sub(smoothstep(U.grassNear.mul(0.8), U.grassFar.mul(0.75), camDist)));
+  meadow = mix(meadow, mix(pal.root, tint.mul(0.55), 0.4).mul(shade), canopy);
 
   // 水塘：水面以下的地面往深青色压（越深越暗，透过半透明的水面看得出深浅），岸边一圈湿土、不长花
   const seaN = float(PRESETS[preset].sea ?? -9);

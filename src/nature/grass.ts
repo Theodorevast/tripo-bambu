@@ -22,6 +22,7 @@ import {
   normalize,
   positionGeometry,
   pow,
+  renderGroup,
   saturate,
   select,
   sin,
@@ -78,6 +79,9 @@ export interface GrassOptions {
   density?: number; // 0..1，画质档位
   wind?: GrassWind; // 不给就用模块自己的风
   trample?: GrassTrample; // 不给就不踩草
+  // 集成时加的：角色的「影响球」（生机层的 life.influence：xyz = 脚底世界坐标，w = 半径，没有角色时 0），
+  // 草尖从角色身边往外分开（N3 报告里的 pushApart）
+  influence?: N<'vec4'>;
 }
 
 // 可以实时调的参数：update() 每帧读一次
@@ -129,6 +133,10 @@ export interface GrassField {
   windAt: GrassWind; // 实际在用的风（外面传进来的，或者模块自己的）
   groundTint(posWorld: N<'vec3'>): N<'vec3'>; // 这里的草从远处看是什么颜色：给地面着色器用，草淡出的地方地面接得上
   inspect(): GrassListEntry[]; // 调试用（测试、自查）：本帧各档画了哪些瓦片。会新建数组，不要每帧调
+  // 集成时加的：换到另一颗同样半径的星球（草的网格、材质都留着，不重新生成着色器）。
+  // 地面网格的缓存全部作废，下一次镜头靠近时按近到远重新算、按名次长出来
+  setPlanet(planet: GrassPlanet, exclude?: (dir: THREE.Vector3) => number): void;
+  readonly radius: number; // 这片草按哪个星球半径建的（瓦片划分、着色器里的常数都按它）：半径变了要重建
 }
 
 // —— 常量 ——
@@ -408,6 +416,34 @@ function releaseNoise(): void {
   }
 }
 
+// —— 远看的草色（集成时抽出来的）：草叶的色斑和地面着色器共用同一条公式、同一张噪声 ——
+// 地面着色器（planet/ground.ts）用星球预设的颜色调它，聚焦星球上的草叶用同一组颜色（Dressing 按预设设 settings.colors），
+// 所以草淡出的地方地面的颜色正好接上（N1 报告：地面随距离过渡到 groundTint）
+type ColorNode = N<'vec3'> | N<'color'>;
+export interface GrassTintColors {
+  lush: ColorNode;
+  fresh: ColorNode;
+  dry: ColorNode;
+  tip: ColorNode;
+  dryness: N<'float'>;
+}
+
+let tintNoise: THREE.Data3DTexture | null = null; // 地面材质一直在用：占一个永久的引用，不随草场释放
+
+// q：星球本地坐标（米）。返回 { patch（四个通道的噪声）, body（这一片草的主色）}
+export function grassPatch(q: N<'vec3'>, c: GrassTintColors, noise?: THREE.Data3DTexture): { patch: N<'vec4'>; body: N<'vec3'> } {
+  const tex = noise ?? (tintNoise ??= acquireNoise());
+  const patch = texture3D(tex, q.mul(1 / 75)).toVar();
+  const hue = smoothstep(0.3, 0.72, patch.r);
+  const dry = smoothstep(0.5, 0.78, patch.g).mul(c.dryness);
+  return { patch, body: mix(mix(c.lush, c.fresh, hue), c.dry, dry) };
+}
+
+// 这里的草从远处看是什么颜色（反照率，不含光照）
+export function grassTint(q: N<'vec3'>, c: GrassTintColors, noise?: THREE.Data3DTexture): N<'vec3'> {
+  return mix(grassPatch(q, c, noise).body, c.tip, 0.25).mul(0.85);
+}
+
 // —— 几何：草叶和花 ——
 
 // 一根草：每节两侧各一个顶点，尖上一个。position = (side, t, 0)：side 是 -1/0/1，t 是从根到尖 0..1
@@ -453,7 +489,10 @@ function flowerGeometry(): THREE.InstancedBufferGeometry {
 // —— 主体 ——
 
 export function createGrassField(opts: GrassOptions): GrassField {
-  const { planet } = opts;
+  // 星球和 exclude 可以换（setPlanet：同样半径的另一颗星球），半径不能换
+  let planet = opts.planet;
+  let exclude = opts.exclude;
+  const fieldRadius = planet.radius;
   const settings = defaultSettings();
   const tiles = new SphereTiles(SphereTiles.sizeFor(planet.radius));
   const tileCount = tiles.count;
@@ -503,34 +542,36 @@ export function createGrassField(opts: GrassOptions): GrassField {
   const noise = acquireNoise();
 
   // —— uniform ——
+  // 都放进 renderGroup（集成时改的）：groundTint 会编进地面材质，每次 render 刷新一次，不跟着某个物体的 objectGroup 走
   const sunDir = new THREE.Vector3(0.2, 0.25, -1).normalize();
+  const g = renderGroup;
   const U = {
-    time: uniform(0),
-    windTime: uniform(0),
-    gust: uniform(1),
-    cam: uniform(new THREE.Vector3()), // 镜头（星球局部坐标）
-    center: uniform(new THREE.Vector3()),
-    density: uniform(density),
-    fullRadius: uniform(settings.fullRadius),
-    radius: uniform(settings.radius),
-    flowerRadius: uniform(settings.flowerRadius),
-    flowers: uniform(settings.flowers),
-    pixelAngle: uniform(0.0005),
-    sea: uniform(planet.sea ?? -1),
-    heightScale: uniform(1),
-    widthScale: uniform(1),
-    windDir: uniform(new THREE.Vector3()),
-    windStrength: uniform(settings.windStrength),
-    translucency: uniform(1),
-    dryness: uniform(settings.dryness),
-    sunDir: uniform(sunDir.clone()),
-    sunColor: uniform(new THREE.Color(1, 0.86, 0.66).multiplyScalar(2.2)),
-    root: uniform(new THREE.Color()),
-    lush: uniform(new THREE.Color()),
-    fresh: uniform(new THREE.Color()),
-    dry: uniform(new THREE.Color()),
-    tip: uniform(new THREE.Color()),
-    shadow: uniform(new THREE.Color()),
+    time: uniform(0).setGroup(g),
+    windTime: uniform(0).setGroup(g),
+    gust: uniform(1).setGroup(g),
+    cam: uniform(new THREE.Vector3()).setGroup(g), // 镜头（星球局部坐标）
+    center: uniform(new THREE.Vector3()).setGroup(g),
+    density: uniform(density).setGroup(g),
+    fullRadius: uniform(settings.fullRadius).setGroup(g),
+    radius: uniform(settings.radius).setGroup(g),
+    flowerRadius: uniform(settings.flowerRadius).setGroup(g),
+    flowers: uniform(settings.flowers).setGroup(g),
+    pixelAngle: uniform(0.0005).setGroup(g),
+    sea: uniform(planet.sea ?? -1).setGroup(g),
+    heightScale: uniform(1).setGroup(g),
+    widthScale: uniform(1).setGroup(g),
+    windDir: uniform(new THREE.Vector3()).setGroup(g),
+    windStrength: uniform(settings.windStrength).setGroup(g),
+    translucency: uniform(1).setGroup(g),
+    dryness: uniform(settings.dryness).setGroup(g),
+    sunDir: uniform(sunDir.clone()).setGroup(g),
+    sunColor: uniform(new THREE.Color(1, 0.86, 0.66).multiplyScalar(2.2)).setGroup(g),
+    root: uniform(new THREE.Color()).setGroup(g),
+    lush: uniform(new THREE.Color()).setGroup(g),
+    fresh: uniform(new THREE.Color()).setGroup(g),
+    dry: uniform(new THREE.Color()).setGroup(g),
+    tip: uniform(new THREE.Color()).setGroup(g),
+    shadow: uniform(new THREE.Color()).setGroup(g),
   };
 
   // —— 风 ——
@@ -546,17 +587,10 @@ export function createGrassField(opts: GrassOptions): GrassField {
   };
   const windAt: GrassWind = opts.wind ?? defaultWind;
 
-  // 地面颜色：草从远处看的颜色，色斑和草叶共用一个噪声
-  const patchColor = (q: N<'vec3'>) => {
-    const patch = texture3D(noise, q.mul(1 / 75)).toVar();
-    const hue = smoothstep(0.3, 0.72, patch.r);
-    const dry = smoothstep(0.5, 0.78, patch.g).mul(U.dryness);
-    return { patch, body: mix(mix(U.lush, U.fresh, hue), U.dry, dry) };
-  };
-  const groundTint = (posWorld: N<'vec3'>): N<'vec3'> => {
-    const { body } = patchColor(posWorld.sub(U.center));
-    return mix(body, U.tip, 0.25).mul(0.85);
-  };
+  // 地面颜色：草从远处看的颜色，色斑和草叶共用一个噪声（公式在 grassPatch / grassTint，地面着色器也用它）
+  const tintColors: GrassTintColors = { lush: U.lush, fresh: U.fresh, dry: U.dry, tip: U.tip, dryness: U.dryness };
+  const patchColor = (q: N<'vec3'>) => grassPatch(q, tintColors, noise);
+  const groundTint = (posWorld: N<'vec3'>): N<'vec3'> => grassTint(posWorld.sub(U.center), tintColors, noise);
 
   // —— 着色器公用部分：从绘制列表和地面网格取出一根草（或一朵花）的根 ——
   const vN = varyingProperty('vec3', 'gN');
@@ -703,6 +737,15 @@ export function createGrassField(opts: GrassOptions): GrassField {
         if (tb) {
           bend.addAssign(tb.push.mul(tb.amount.mul(2.2)));
           height.mulAssign(float(1).sub(tb.amount.mul(0.35)));
+        }
+        // 角色身边的草往外分开（影响球半径的 45% 以内，越近倒得越多；没有角色时 w = 0，这一项是 0）
+        const inf = opts.influence;
+        if (inf) {
+          const away = base.add(U.center).sub(inf.xyz).toVar();
+          const awayT = away.sub(up.mul(dot(away, up))).toVar();
+          const reach = inf.w.mul(0.45);
+          const k = saturate(reach.sub(length(awayT)).div(max(reach, 1e-3)));
+          bend.addAssign(normalize(awayT.add(facing.mul(1e-4))).mul(k.mul(1.1)));
         }
         const theta = min(max(length(bend), 0.02), MAX_BEND).toVar();
         const bdir = normalize(bend.add(facing.mul(1e-4))).toVar();
@@ -942,9 +985,9 @@ export function createGrassField(opts: GrassOptions): GrassField {
         tiles.dirAt(tile, gx / (GRID - 1), gy / (GRID - 1), tmpDir);
         const r = planet.height(tmpDir);
         let mask = 0;
-        if (opts.exclude) {
+        if (exclude) {
           tiles.dirAt(tile, gx / (GRID - 1), gy / (GRID - 1), tmpDir);
-          mask = THREE.MathUtils.clamp(opts.exclude(tmpDir), 0, 1);
+          mask = THREE.MathUtils.clamp(exclude(tmpDir), 0, 1);
         }
         const k = ((layer * AW + qy + gy) * AW + qx + gx) * 2;
         atlasData[k] = r;
@@ -1273,6 +1316,29 @@ export function createGrassField(opts: GrassOptions): GrassField {
     }
   }
 
+  // 换星球（同样半径）：网格、材质、贴图都不动，只把地面网格的缓存和绘制列表清空。
+  // 下一帧当作「第一帧」：镜头够近的话附近的瓦片一次算完、直接长满（进漫游时镜头是一路降下来的，那时才开始算）
+  function setPlanet(p: GrassPlanet, ex?: (dir: THREE.Vector3) => number): void {
+    if (Math.abs(p.radius - fieldRadius) > 1e-6) throw new Error(`grass: setPlanet radius ${p.radius} != ${fieldRadius}; create a new field`);
+    planet = p;
+    exclude = ex;
+    slotOfTile.fill(-1);
+    tileOfSlot.fill(-1);
+    slotSeen.fill(-1);
+    stale.fill(0);
+    visit.fill(-1);
+    maxRelief = p.radius * 0.05;
+    reliefKnown = false;
+    frame = 0;
+    for (const l of lists) {
+      l.len = 0;
+      l.dirty = true;
+    }
+    flowerList.len = 0;
+    flowerList.dirty = true;
+    clearLists();
+  }
+
   function dispose(): void {
     object.removeFromParent();
     for (const mesh of [...bandMeshes, flowerMesh]) {
@@ -1299,5 +1365,7 @@ export function createGrassField(opts: GrassOptions): GrassField {
     windAt,
     groundTint,
     inspect,
+    setPlanet,
+    radius: fieldRadius,
   };
 }

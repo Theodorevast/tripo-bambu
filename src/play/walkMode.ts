@@ -32,6 +32,8 @@ const _v = new THREE.Vector3();
 const _pos = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 const _anchor = new THREE.Vector3();
+const _feet = new THREE.Vector3();
+const _feetVel = new THREE.Vector3();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 interface Drag {
@@ -205,6 +207,7 @@ export class WalkMode {
     this.label.hidden = true;
     this.hint.hidden = true;
     this.app.topbar.setWalking(false);
+    this.app.world.setWalker(null); // 角色退场：生机层不再扬尘、踩草
     if (instantly) {
       this.finish();
       return;
@@ -254,6 +257,7 @@ export class WalkMode {
     this.screen.setInteractive(true);
     this.phase = 'off';
     this.entry = null;
+    this.app.world.setWalker(null);
   }
 
   // CameraRig 每帧调（替代 OrbitControls）：读输入 → 角色走一步 → 跟随镜头 → 角色动作 → 摆镜头
@@ -276,6 +280,13 @@ export class WalkMode {
     this.walker.step(dt, _wish, this.obstacles, this.obstacleCount);
     this.cam.update(dt, this.walker, this.walker.hasTarget && !this.dragging, this.floor);
     this.character.pose(this.walker, dt);
+    // 生机层：脚底的世界坐标、世界坐标下的速度、着地（角色一直贴地走）。星球组没有旋转，本地 → 世界只差平移和缩放
+    if (this.phase !== 'exit') {
+      const scale = entry.planet.group.scale.x;
+      this.walker.positionInto(_feet).multiplyScalar(scale).add(entry.home);
+      _feetVel.copy(this.walker.velocity).multiplyScalar(scale);
+      this.app.world.setWalker(_feet, _feetVel, true);
+    }
     // 镜头的 up：漫游时是角色脚下的球面法线，轨道镜头是 +Y；过渡时两者之间走大圆插值。
     // 天空和云海（nature/atmosphere.ts）按 camera.up 找「水平面」，云海跟着角色转、始终在脚下
     let upK = 1;

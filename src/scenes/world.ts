@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { createAtmosphere, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
+import { createLife, type Life, type LifePlanet } from '../nature/life';
 import { decorInstances } from '../planet/decor';
 import { focusDetail, LOD_LOW, prewarmTerrain } from '../planet/generate';
 import { PlanetObject } from '../planet/planetObject';
@@ -9,7 +10,6 @@ import { onPlanetRadius, PLANET_RADIUS } from '../planet/presets';
 import { CameraRig, type Framing } from './camera';
 import { Dressing } from './dressing';
 import { galaxyPositions } from './layout';
-import { useLook } from './look';
 import { galaxyFraming, planetFraming } from './shots';
 import { compileShadow, compileUnculled, Stager } from './stager';
 
@@ -43,6 +43,17 @@ export const SHADOW = {
   near: 14, // 漫游时阴影罩住角色周围多大（半边长，米）
 };
 
+// 天气（?tune → Life 改这里）：雨、风 0..1；evening 是生机层的傍晚系数（萤火虫、粒子的受光），
+// null 表示跟着天空预设走（太阳高度 22° 白天 → 0，6° 日落 → EVENING_AT_SUNSET）
+export const WEATHER: { rain: number; wind: number; evening: number | null } = { rain: 0, wind: 0.35, evening: null };
+export const EVENING_AT_SUNSET = 0.6;
+const SEA_RATE = 3; // 云海淡入淡出的速率（每秒）：约 1 秒，和 1.2 秒的镜头飞行同时进行
+
+// 傍晚系数：按太阳高度（度）在白天（22°）和日落（6°）之间插值；预设过渡时太阳高度是缓动的，傍晚系数跟着走
+export function eveningFor(sunElevation: number): number {
+  return THREE.MathUtils.clamp((22 - sunElevation) / 16, 0, 1) * EVENING_AT_SUNSET;
+}
+
 // 3D 世界：一个渲染器、一个场景，星系里所有星球都在里面；聚焦就是把镜头飞到某颗星球前面
 export class World {
   readonly renderer: THREE.WebGPURenderer;
@@ -52,7 +63,8 @@ export class World {
   readonly planets = new Map<string, PlanetEntry>();
   readonly frameHooks = new Set<(dt: number) => void>();
   readonly renderHooks = new Set<() => void>(); // 画完这一帧之后调（读这一帧的绘制统计：renderer.info 在下一帧开始时清零）
-  readonly atmosphere: Atmosphere; // 天空、云海、太阳和天光（nature/atmosphere.ts）
+  readonly atmosphere: Atmosphere; // 天空、云海、太阳和天光（nature/atmosphere.ts）；色调映射和曝光也归它
+  readonly life: Life; // 生机层：脚步扬尘、踩踏图、蝴蝶、飘落物、萤火虫、雨（nature/life.ts），只在聚焦的星球上
   readonly dressing: Dressing; // 聚焦星球上的草、花、石头
   focused: PlanetEntry | null = null;
   hovered: PlanetEntry | null = null;
@@ -72,6 +84,13 @@ export class World {
   private readonly ndc = new THREE.Vector2();
   private readonly shadowCenter = new THREE.Vector3();
   private readonly sunDir = new THREE.Vector3();
+  private seaNow = 0; // 云海的浓度（星系视图 0，星球上 1），frame() 里逐帧逼近 seaGoal
+  private seaGoal = 0;
+  private readonly walkerPos = new THREE.Vector3();
+  private readonly walkerVel = new THREE.Vector3();
+  private walkerOn = false;
+  private walkerGrounded = true;
+  readonly light = { sunDir: new THREE.Vector3(0, 1, 0), sunColor: new THREE.Color(), sunIntensity: 1, evening: 0 }; // 每帧从 atmosphere 取：给草、生机层
 
   private constructor(renderer: THREE.WebGPURenderer) {
     this.renderer = renderer;
@@ -79,9 +98,17 @@ export class World {
     this.rig = new CameraRig(renderer.domElement);
     this.stage = new Stager(renderer, this.scene, this.rig.camera);
     this.stage.shadowLight = () => (SHADOW.enabled ? this.atmosphere.sun : null);
-    this.atmosphere = createAtmosphere(this.scene, renderer, { planetRadius: PLANET_RADIUS, preset: this.skyPreset });
+    // 天空、云海、光：色调映射（AgX）和曝光由它设，World 不再调 useLook（Museum、查看器的渲染器照旧用 look.ts）。
+    // 阴影相机 World 自己摆（placeSun：跟着镜头看的地方）
+    this.atmosphere = createAtmosphere(this.scene, renderer, { planetRadius: PLANET_RADIUS, preset: this.skyPreset, frameShadow: false });
+    this.atmosphere.params.seaAmount = 0; // 开场是星系全景：没有聚焦的星球，云海藏起来
     this.setupShadows();
-    this.dressing = new Dressing({ renderer, scene: this.scene, precompile: (o) => this.stage.precompile(o) });
+    // 生机层：一份，跟着聚焦的星球换（setPlanet）。没有聚焦的星球时整个藏起来、不更新。
+    // 雨量（平滑过的）交给天空：光变冷变暗
+    this.life = createLife(this.scene, renderer, { radius: PLANET_RADIUS, center: new THREE.Vector3(0, -1e5, 0), height: () => PLANET_RADIUS, sea: null });
+    this.life.object.visible = false;
+    this.life.onRain((r) => this.atmosphere.setRain(r));
+    this.dressing = new Dressing({ renderer, scene: this.scene, life: this.life, precompile: (o) => this.stage.precompile(o) });
     // 悬停光圈：每帧转到正对镜头
     this.halo = new THREE.Mesh(
       new THREE.RingGeometry(1, 1.04, 96),
@@ -111,8 +138,8 @@ export class World {
     const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, trackTimestamp: new URLSearchParams(location.search).has('gputime') });
     await renderer.init();
     renderer.shadowMap.enabled = SHADOW.enabled;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    useLook(renderer);
+    renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoftShadowMap 在 WebGPURenderer 里已经去掉了（会退回 PCF 并打警告）
+    // 色调映射和曝光不走 look.ts 了：主画面由 atmosphere 管（AgX，曝光 = 预设 × params.exposure）
     // 模型贴图的各向异性：三个渲染器共用这个值（WebGPU 固定支持 16；WebGL2 看扩展，没有时是 0）
     setModelAnisotropy(Math.min(16, renderer.getMaxAnisotropy()));
     return new World(renderer);
@@ -151,13 +178,21 @@ export class World {
     const rocks = this.dressing.field;
     rocks.showOneEach(true);
     this.scene.add(rocks.group);
+    // 草场也开场就建好（按当前半径），和别的东西一起编译：进星球时只换星球数据，不再生成着色器。
+    // 生机层所有效果的网格临时都显示（compileAsync 跳过不可见的），踩踏图的盖章 / 恢复两个离屏 pass 各画一次空的
+    const grass = this.dressing.prepareGrass();
+    this.scene.add(grass);
+    this.life.object.visible = true;
+    this.life.prewarm(true);
     try {
       await Promise.all(this.scene.children.map((o) => compileUnculled(this.renderer, o, this.rig.camera, this.scene)));
       // 先画一帧（阴影贴图这时才建出来），再在后台编石头和展台投影那一遍的管线
       this.primeShadows();
       await compileShadow(this.renderer, rocks.group, SHADOW.enabled ? this.atmosphere.sun : null, this.scene);
     } finally {
-      this.scene.remove(rocks.group);
+      this.scene.remove(rocks.group, grass);
+      this.life.prewarm(false);
+      this.life.object.visible = this.focused !== null;
       rocks.showOneEach(false);
       this.halo.visible = this.hovered !== null;
       this.warming = false;
@@ -211,6 +246,29 @@ export class World {
     this.atmosphere.setPreset(p);
   }
 
+  // 漫游的角色（WalkMode 每帧调）：脚底的世界坐标、世界坐标下的速度（米/秒）、是否着地。pos = null：没有角色
+  setWalker(pos: THREE.Vector3 | null, velocity?: THREE.Vector3, grounded = true): void {
+    this.walkerOn = pos !== null;
+    if (pos) this.walkerPos.copy(pos);
+    if (velocity) this.walkerVel.copy(velocity);
+    else this.walkerVel.set(0, 0, 0);
+    this.walkerGrounded = grounded;
+  }
+
+  // 生机层要的星球数据：高度、海面每次现取；bare 是 V5 给草的「不长草」遮罩（土路、作品空地）：土路上扬黄土
+  private lifePlanet(e: PlanetEntry): LifePlanet {
+    const planet = e.planet;
+    return {
+      radius: planet.radius,
+      center: e.home,
+      height: (d) => planet.height(d.x, d.y, d.z),
+      get sea() {
+        return planet.sea > 0 ? planet.sea : null;
+      },
+      bare: (d) => planet.mask.exclude(d),
+    };
+  }
+
   // 屏幕坐标 → 射线；各处拾取共用
   rayFrom(clientX: number, clientY: number): THREE.Raycaster {
     const r = this.renderer.domElement.getBoundingClientRect();
@@ -251,8 +309,13 @@ export class World {
     this.focused = e;
     this.setHover(null);
     e.planet.setDetail(focusDetail());
-    // 草和石头在飞过去之前就摆好（草的着色器在后台编译，编好才出现）
+    // 草和石头在飞过去之前就摆好（草场开场就编译好了，这里只换星球数据）
     this.dressing.enter(e);
+    // 云海跟着聚焦的星球（1.2 秒缓动过去，和镜头飞行一样长），从星系视图的「没有」淡进来；生机层搬到这颗星球
+    this.atmosphere.setPlanet(e.home, PLANET_RADIUS);
+    this.seaGoal = 1;
+    this.life.setPlanet(this.lifePlanet(e));
+    this.life.object.visible = true;
     this.fadeRings(e);
     await this.rig.fly(planetFraming(e.home));
     return e;
@@ -262,8 +325,14 @@ export class World {
     const prev = this.focused;
     this.focused = null;
     this.fadeRings(null);
+    // 星系视图里云海淡出（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）
+    this.seaGoal = 0;
+    this.setWalker(null);
     await this.rig.fly(this.galaxyView());
-    if (this.focused === null) this.dressing.leave();
+    if (this.focused === null) {
+      this.dressing.leave();
+      this.life.object.visible = false;
+    }
     prev?.planet.setDetail(LOD_LOW);
   }
 
@@ -285,7 +354,11 @@ export class World {
       e.planet.rebuildForRadius();
       if (e === this.focused) e.planet.setDetail(focusDetail());
     }
-    if (this.focused) this.dressing.rebuild();
+    if (this.focused) {
+      this.dressing.rebuild();
+      this.atmosphere.setPlanet(this.focused.home, PLANET_RADIUS);
+      this.life.setPlanet(this.lifePlanet(this.focused));
+    }
     if (!this.rig.drive) this.applyShots();
   }
 
@@ -382,9 +455,29 @@ export class World {
       this.halo.quaternion.copy(this.rig.camera.quaternion);
     }
     for (const hook of this.frameHooks) hook(dt);
-    this.atmosphere.update(dt, this.rig.camera);
+    const camera = this.rig.camera;
+    // 云海：星系视图里淡出，进星球淡入
+    this.seaNow += (this.seaGoal - this.seaNow) * (1 - Math.exp(-SEA_RATE * dt));
+    if (Math.abs(this.seaGoal - this.seaNow) < 0.002) this.seaNow = this.seaGoal;
+    this.atmosphere.params.seaAmount = this.seaNow;
+    // 漫游时地平线的「上」是 camera.up（角色脚下的球面法线，进出漫游时和 +Y 之间插值）；轨道镜头时按镜头位置推算
+    this.atmosphere.setHorizonUp(this.rig.drive ? camera.up : null);
+    this.atmosphere.update(dt, camera);
     this.placeSun();
-    this.dressing.update(this.rig.camera);
+    // 太阳和傍晚系数：方向按 sun.position − sun.target.position 算（placeSun 每帧挪 target，不能只看 position）；
+    // 傍晚系数跟着天空预设的太阳高度走（?tune 可以手动定）
+    const sun = this.atmosphere.sun;
+    const light = this.light;
+    light.sunDir.copy(sun.position).sub(sun.target.position).normalize();
+    light.sunColor.copy(sun.color);
+    light.sunIntensity = sun.intensity;
+    light.evening = WEATHER.evening ?? eveningFor(this.atmosphere.params.sunElevation);
+    if (this.life.object.visible) {
+      this.life.setWalker(this.walkerOn ? this.walkerPos : null, this.walkerVel, this.walkerGrounded);
+      this.life.setWeather({ rain: WEATHER.rain, wind: WEATHER.wind, evening: light.evening, sunDir: light.sunDir });
+      this.life.update(dt, camera);
+    }
+    this.dressing.update(camera, light);
     if (this.paused || this.warming) return;
     this.renderer.render(this.scene, this.rig.camera);
     for (const hook of this.renderHooks) hook();

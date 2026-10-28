@@ -57,6 +57,8 @@ export type AtmospherePreset = 'day' | 'sunset';
 export interface AtmosphereOptions {
   planetRadius: number;
   preset?: AtmospherePreset;
+  // 阴影相机由谁摆：默认这里按整颗星球框（演示页）；游戏里 World 自己摆（跟着镜头看的地方），传 false
+  frameShadow?: boolean;
 }
 
 // 可调参数（演示页的 Tweakpane 直接改这张表，update() 每帧读）。切换预设时太阳高度、方位会在 2 秒内过渡到预设值
@@ -71,6 +73,7 @@ export interface AtmosphereParams {
   exposure: number; // 曝光的倍数（乘在预设的曝光上）
   farClouds: boolean; // 远处积云
   cloudSteps: number; // 云海每个像素的步进次数（画质 / 开销的旋钮：24 默认；弱显卡可降到 12 左右，开销大致按比例下降）
+  seaAmount: number; // 0..1：云海、远处积云和高度雾一起淡出（星系视图里没有聚焦的星球，云海压到 0；集成时加的）
 }
 
 export interface Atmosphere {
@@ -86,6 +89,11 @@ export interface Atmosphere {
   readonly preset: AtmospherePreset;
   readonly objects: { sky: THREE.Mesh; sea: THREE.Mesh; clouds: THREE.Mesh };
   visible: boolean; // 天空、云海、远处积云和雾一起显示 / 隐藏（量开销时对比用；光照和环境贴图不受影响）
+  // 以下是集成时加的最小接口
+  setRain(amount: number): void; // 0..1（生机层 onRain 给的平滑雨量）：光变冷变暗，天和云发灰，雾浓一点
+  readonly rain: number;
+  // 漫游时地平线的「上」：传 camera.up（角色脚下的球面法线），标架直接跟着它；传 null 回到按镜头位置算（轨道视角）
+  setHorizonUp(up: THREE.Vector3 | null): void;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -180,6 +188,35 @@ export const PRESETS: Record<AtmospherePreset, Palette> = {
   },
 };
 
+// 下雨时往这一套靠（集成时加的）：阴天的冷灰，太阳弱、偏冷，天光和云都发灰，雾浓一些、曝光低一点。
+// 太阳的高度、方位不跟着变（雨停了光照方向还是原来的）。雨量 1 时混到 RAIN_MIX，留一点预设的色调（日落下雨还带一点暖）
+export const RAIN_MIX = 0.82;
+export const RAIN_PALETTE: Palette = {
+  zenith: lin(0.13, 0.16, 0.21),
+  upper: lin(0.2, 0.23, 0.28),
+  horizon: lin(0.4, 0.42, 0.44),
+  horizonSun: lin(0.52, 0.51, 0.49),
+  gradUpper: 0.2,
+  gradZenith: 0.6,
+  glow: lin(0.35, 0.35, 0.36),
+  glowStrength: 0.25,
+  streaks: 0.85,
+  sunDisc: lin(1.6, 1.6, 1.6),
+  sunLight: lin(0.78, 0.84, 0.95),
+  sunIntensity: 2.2,
+  cloudLit: lin(0.78, 0.8, 0.84),
+  cloudMid: lin(0.36, 0.38, 0.43),
+  cloudShade: lin(0.15, 0.16, 0.2),
+  cloudDeep: lin(0.07, 0.08, 0.11),
+  ground: lin(0.06, 0.08, 0.05),
+  envIntensity: 0.75,
+  envBelow: 0.6,
+  fogDensity: 0.0016,
+  exposure: 1.22,
+  sunElevation: 22,
+  sunAzimuth: 35,
+};
+
 export const TRANSITION_SECONDS = 2;
 export const PLANET_SECONDS = 1.2; // 换星球时云海移过去的时长，和游戏里镜头在星球之间飞的时长一样
 
@@ -224,6 +261,7 @@ export const FRAME = {
   groundNear: 0.15, // 镜头离地面低于 0.15R：完全按镜头所在位置的球面法线当「上」
   groundFar: 0.6, // 高于 0.6R：按轨道视角算
   rate: 3, // 「上」逼近目标的速率（每秒）
+  hintRate: 10, // 漫游时跟 camera.up 的速率（camera.up 本身已经是平滑的，这里只做很轻的跟随）
   untwist: 0.8, // 轨道视角下，绕「上」的扭转慢慢回正的速率（每秒）
 };
 
@@ -260,22 +298,24 @@ export class AtmosphereFrame {
   private started = false;
   private readonly goal = new THREE.Vector3();
 
-  update(dt: number, camPos: THREE.Vector3, center: THREE.Vector3, radius: number): void {
-    targetUp(this.goal, camPos, center, radius, this.up);
+  // hint：漫游时外面给的「上」（camera.up）；给了就直接跟着它，不按镜头位置推算
+  update(dt: number, camPos: THREE.Vector3, center: THREE.Vector3, radius: number, hint: THREE.Vector3 | null = null): void {
+    if (hint && hint.lengthSq() > 1e-8) this.goal.copy(hint).normalize();
+    else targetUp(this.goal, camPos, center, radius, this.up);
     if (!this.started) {
       this.started = true;
       this.q.setFromUnitVectors(WORLD_UP, this.goal);
       this.up.copy(WORLD_UP).applyQuaternion(this.q);
       return;
     }
-    const k = 1 - Math.exp(-FRAME.rate * dt);
+    const k = 1 - Math.exp(-(hint ? FRAME.hintRate : FRAME.rate) * dt);
     _q.setFromUnitVectors(this.up, this.goal);
     _q2.identity().slerp(_q, k);
     this.q.premultiply(_q2).normalize();
     this.up.copy(WORLD_UP).applyQuaternion(this.q);
     // 回正扭转：只在离开地面、「上」不朝下时做（最小旋转在那里有定义且连续）
     const rel = _a.subVectors(camPos, center);
-    const ground = rel.length() - radius < FRAME.groundFar * radius;
+    const ground = hint !== null || rel.length() - radius < FRAME.groundFar * radius;
     if (!ground && this.up.y > 0.2) {
       _q.setFromUnitVectors(WORLD_UP, this.up);
       this.q.slerp(_q, 1 - Math.exp(-FRAME.untwist * dt)).normalize();
@@ -504,7 +544,14 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     exposure: 1,
     farClouds: true,
     cloudSteps: 24,
+    seaAmount: 1,
   };
+  const frameShadow = opts.frameShadow !== false;
+  // 实际用的配色：预设（含过渡）再按雨量往阴天那一套靠
+  const look = clonePalette(palette);
+  let rain = 0;
+  let lookDirty = true;
+  let horizonUp: THREE.Vector3 | null = null;
 
   // ---- 状态
   const center = new THREE.Vector3();
@@ -542,6 +589,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   const uFogDensity = uniform(palette.fogDensity).setGroup(renderGroup);
   const uCamRight = uniform(new THREE.Vector3(1, 0, 0)).setGroup(renderGroup);
   const uCamUp = uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup);
+  const uSeaAmount = uniform(1).setGroup(renderGroup); // 云海、远处积云、高度雾的整体浓度（星系视图里淡到 0）
 
   const uZenith = colorUniform(palette.zenith);
   const uUpper = colorUniform(palette.upper);
@@ -723,7 +771,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     col = mix(col, far, fogK);
     // 贴近星球表面时变透明（软过渡）；视线先碰到星球的像素完全透明
     const gap = length(ph.sub(uCenter)).sub(uRadius);
-    const alpha = select(onPlanet, float(0), smoothstep(0.0, uRadius.mul(0.05), gap));
+    const alpha = select(onPlanet, float(0), smoothstep(0.0, uRadius.mul(0.05), gap)).mul(uSeaAmount);
     return vec4(col, alpha);
   });
 
@@ -804,7 +852,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       const d = length(cameraPosition.sub(vCenter));
       const dirToC = normalize(vCenter.sub(cameraPosition));
       col = mix(col, hazeColor(dirToC).add(glow(dirToC)), float(1).sub(exp(d.mul(uHaze).mul(1.6).negate())));
-      return vec4(col, saturate(alpha));
+      return vec4(col, saturate(alpha).mul(uSeaAmount));
     })();
   }
   const clouds = new THREE.Mesh(cloudGeo, cloudMat);
@@ -822,7 +870,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const dir = rel.div(max(d, 1e-4));
     const distK = float(1).sub(exp(d.mul(uFogDensity).negate()));
     const above = dot(positionWorld.sub(uCenter), uUp).sub(uSeaTopNow);
-    const heightK = smoothstep(uRadius.mul(0.35), uRadius.mul(-0.05), above).mul(0.55);
+    const heightK = smoothstep(uRadius.mul(0.35), uRadius.mul(-0.05), above).mul(0.55).mul(uSeaAmount);
     // 高度雾的颜色按云的配色走：用星球表面的球面法线和太阳算受光量，雾里的星球底部和旁边的云一样有亮面和背光面
     const nrm = normalize(positionWorld.sub(uCenter));
     const cloudish = cloudRamp(saturate(dot(nrm, uSun).add(0.22).div(1.22)).mul(0.9), float(0.75));
@@ -888,25 +936,28 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   };
 
   const applyPalette = () => {
-    uZenith.value.set(palette.zenith.r, palette.zenith.g, palette.zenith.b);
-    uUpper.value.set(palette.upper.r, palette.upper.g, palette.upper.b);
-    uHorizon.value.set(palette.horizon.r, palette.horizon.g, palette.horizon.b);
-    uHorizonSun.value.set(palette.horizonSun.r, palette.horizonSun.g, palette.horizonSun.b);
-    uGlow.value.set(palette.glow.r, palette.glow.g, palette.glow.b);
-    uGlowStrength.value = palette.glowStrength;
-    uStreaks.value = palette.streaks;
-    uSunDisc.value.set(palette.sunDisc.r, palette.sunDisc.g, palette.sunDisc.b);
-    uCloudLit.value.set(palette.cloudLit.r, palette.cloudLit.g, palette.cloudLit.b);
-    uCloudMid.value.set(palette.cloudMid.r, palette.cloudMid.g, palette.cloudMid.b);
-    uGround.value.set(palette.ground.r, palette.ground.g, palette.ground.b);
-    uGradUpper.value = palette.gradUpper;
-    uGradZenith.value = palette.gradZenith;
-    uBelow.value = palette.envBelow;
-    uCloudShade.value.set(palette.cloudShade.r, palette.cloudShade.g, palette.cloudShade.b);
-    uCloudDeep.value.set(palette.cloudDeep.r, palette.cloudDeep.g, palette.cloudDeep.b);
-    sun.color.copy(palette.sunLight);
-    sun.intensity = palette.sunIntensity;
-    uEnvIntensity.value = palette.envIntensity;
+    // 预设（含过渡）→ 按雨量往阴天那一套靠，写进 look；下面全用 look
+    blendPalette(look, palette, RAIN_PALETTE, rain * RAIN_MIX);
+    lookDirty = false;
+    uZenith.value.set(look.zenith.r, look.zenith.g, look.zenith.b);
+    uUpper.value.set(look.upper.r, look.upper.g, look.upper.b);
+    uHorizon.value.set(look.horizon.r, look.horizon.g, look.horizon.b);
+    uHorizonSun.value.set(look.horizonSun.r, look.horizonSun.g, look.horizonSun.b);
+    uGlow.value.set(look.glow.r, look.glow.g, look.glow.b);
+    uGlowStrength.value = look.glowStrength;
+    uStreaks.value = look.streaks;
+    uSunDisc.value.set(look.sunDisc.r, look.sunDisc.g, look.sunDisc.b);
+    uCloudLit.value.set(look.cloudLit.r, look.cloudLit.g, look.cloudLit.b);
+    uCloudMid.value.set(look.cloudMid.r, look.cloudMid.g, look.cloudMid.b);
+    uGround.value.set(look.ground.r, look.ground.g, look.ground.b);
+    uGradUpper.value = look.gradUpper;
+    uGradZenith.value = look.gradZenith;
+    uBelow.value = look.envBelow;
+    uCloudShade.value.set(look.cloudShade.r, look.cloudShade.g, look.cloudShade.b);
+    uCloudDeep.value.set(look.cloudDeep.r, look.cloudDeep.g, look.cloudDeep.b);
+    sun.color.copy(look.sunLight);
+    sun.intensity = look.sunIntensity;
+    uEnvIntensity.value = look.envIntensity;
   };
   applyPalette();
 
@@ -937,10 +988,10 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       params.sunElevation = fromSun.el + (target.sunElevation - fromSun.el) * k;
       params.sunAzimuth = fromSun.az + (target.sunAzimuth - fromSun.az) * k;
       applyPalette();
-    }
+    } else if (lookDirty) applyPalette();
 
-    // 标架和太阳
-    frame.update(dt, camPos, center, radius);
+    // 标架和太阳（漫游时「上」跟着 camera.up）
+    frame.update(dt, camPos, center, radius, horizonUp);
     sunDirection(sunLocal, params.sunAzimuth, params.sunElevation);
     sunDir.copy(sunLocal).applyQuaternion(frame.q).normalize();
     uUp.value.copy(frame.up);
@@ -950,9 +1001,9 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     sun.position.copy(center).addScaledVector(sunDir, radius * 4);
     sun.target.position.copy(center);
     sun.target.updateMatrixWorld();
-    // 阴影相机（默认不开阴影；集成时打开 castShadow 就能用）：正交框住整颗星球
+    // 阴影相机（默认不开阴影；集成时打开 castShadow 就能用）：正交框住整颗星球。游戏里由 World 摆（frameShadow = false）
     const sc = sun.shadow.camera;
-    if (Math.abs(sc.right - radius * 1.25) > 1e-3) {
+    if (frameShadow && Math.abs(sc.right - radius * 1.25) > 1e-3) {
       sc.left = sc.bottom = -radius * 1.25;
       sc.right = sc.top = radius * 1.25;
       sc.near = radius * 0.5;
@@ -979,7 +1030,9 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uFlow1.value.y += speed * 0.0017;
     uFlow2.value.x -= speed * 0.0021;
     uFlow2.value.y += speed * 0.0036;
-    uFogDensity.value = palette.fogDensity * params.fog;
+    uFogDensity.value = look.fogDensity * params.fog;
+    const seaAmount = THREE.MathUtils.clamp(params.seaAmount, 0, 1);
+    uSeaAmount.value = seaAmount;
     uSteps.value = Math.round(THREE.MathUtils.clamp(params.cloudSteps, 4, 64));
     uHaze.value = (1 / (260 * R)) * Math.max(0.25, params.fog);
 
@@ -992,7 +1045,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const discR = Math.max(R * 4, far * 0.92);
     sea.scale.set(discR, 1, discR);
     sky.visible = shown;
-    sea.visible = shown && camH > discTop + 0.01;
+    sea.visible = shown && camH > discTop + 0.01 && seaAmount > 0.001;
 
     // 贴图细节等级：像素张角 × 距离 / 贴图像素的世界尺寸
     renderer.getDrawingBufferSize(size);
@@ -1004,11 +1057,11 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     camera.getWorldQuaternion(camQ);
     uCamRight.value.set(1, 0, 0).applyQuaternion(camQ);
     uCamUp.value.set(0, 1, 0).applyQuaternion(camQ);
-    clouds.visible = shown && params.farClouds;
+    clouds.visible = shown && params.farClouds && seaAmount > 0.001;
     if (sortPos.distanceToSquared(camPos) > (R * 0.5) ** 2 || sortUp.dot(frame.up) < 0.9995) sortPuffs();
 
-    // 曝光（色调映射在创建时设成 AgX；曝光随预设过渡）
-    renderer.toneMappingExposure = palette.exposure * params.exposure;
+    // 曝光（色调映射在创建时设成 AgX；曝光随预设过渡，下雨时低一点）
+    renderer.toneMappingExposure = look.exposure * params.exposure;
   };
 
   const api: Atmosphere = {
@@ -1062,6 +1115,18 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       sea.visible = v;
       clouds.visible = v && params.farClouds;
       sceneWithFog.fogNode = v ? fogNode : prevFogNode;
+    },
+    setRain(amount: number) {
+      const r = THREE.MathUtils.clamp(amount, 0, 1);
+      if (Math.abs(r - rain) < 1e-4) return;
+      rain = r;
+      lookDirty = true;
+    },
+    get rain() {
+      return rain;
+    },
+    setHorizonUp(up: THREE.Vector3 | null) {
+      horizonUp = up;
     },
   };
   centerGoal.set(0, 0, 0);

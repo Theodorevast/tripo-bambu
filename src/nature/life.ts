@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   abs, atan, attribute, cos, cross, dot, exp, float, floor, fract, length, max, min, mix, normalize, positionGeometry, positionWorld, pow,
-  saturate, select, sin, smoothstep, sqrt, uniform, uv, varying, vec2, vec3, vec4,
+  renderGroup, saturate, select, sin, smoothstep, sqrt, uniform, uv, varying, vec2, vec3, vec4,
 } from 'three/tsl';
 import { mulberry32, type Rng } from '../planet/rng';
 import { setWind, WIND, windAt, windClock, windNode } from './wind';
@@ -85,6 +85,11 @@ export interface Life {
   setPlanet(planet: LifePlanet): void; // 换星球：踩踏图清空（贴图对象不变，分辨率按创建时的半径），蝴蝶搬到新星球
   stats(): LifeStats;
   readonly debug: { trampleTarget: THREE.RenderTarget; butterflies: Float32Array }; // 自查脚本用：读回踩踏图、蝴蝶位置（世界坐标 xyz × N）
+  // 以下是集成时加的
+  readonly object: THREE.Object3D; // 所有效果的根（星系视图里整个藏起来）
+  // 开场预编译用：on = true 时所有效果的网格都显示（compileAsync 跳过不可见的），并且画一次空的踩踏盖章 / 恢复 pass，
+  // 这两个离屏 pass 的管线在开场就建好；on = false 恢复，下一帧 update() 按实际情况显示
+  prewarm(on: boolean): void;
 }
 
 // ---------- 八面体映射（踩踏图的坐标） ----------
@@ -416,28 +421,30 @@ export class ButterflySim {
 
 // ---------- GPU 小工具 ----------
 
-// 公用的 uniform：每帧 update() 写一次，所有效果的材质共用
+// 公用的 uniform：每帧 update() 写一次，所有效果的材质共用。
+// 都放进 renderGroup（集成时改的）：influence 会编进草叶的材质，每次 render 刷新一次，不跟着某个物体的 objectGroup 走
 function makeUniforms() {
+  const g = renderGroup;
   return {
-    time: uniform(0), // 生机层自己的时钟（秒）：CPU 写出生时间、GPU 算年龄用同一个钟
-    center: uniform(new THREE.Vector3()), // 星球中心
-    cam: uniform(new THREE.Vector3()), // 镜头位置
-    camRight: uniform(new THREE.Vector3(1, 0, 0)), // 镜头的右、上（世界坐标）：面向镜头的面片用
-    camUp: uniform(new THREE.Vector3(0, 1, 0)),
-    field: uniform(new THREE.Vector3()), // 场中心：镜头前方几米处的地面点。雨丝、花瓣、绒毛、萤火虫围着它
-    groundR: uniform(30), // 场中心的地面半径（雨、飘落物、萤火虫的高度从这里量）
-    pxAngle: uniform(0.001), // 1 米外一个像素有多大（米）：雨丝不细于 1 像素
-    sunDir: uniform(new THREE.Vector3(0.4, 0.5, 0.75).normalize()),
-    sunCol: uniform(new THREE.Vector3(1, 0.94, 0.84)), // 太阳光颜色 × 强度（rgb 存在 xyz 里）
-    ambCol: uniform(new THREE.Vector3(0.55, 0.62, 0.72)), // 环境光颜色
-    rainAmt: uniform(0),
-    rainTime: uniform(0), // 雨的进度时钟：按「下落速度 / 雨柱高度」累加
-    rainWind: uniform(new THREE.Vector3()), // 场中心的风（世界坐标，米/秒）：雨丝按高度往上风方向斜
-    rainLen: uniform(0.4), // 雨丝长度（米）
-    windMean: uniform(new THREE.Vector3()), // 平稳的平均风（不含阵风）：飘落物在空中的漂移
-    fireAmt: uniform(0), // 萤火虫（傍晚）
-    pollenAmt: uniform(0), // 花粉光点（白天）
-    influence: uniform(new THREE.Vector4()), // 角色的影响球：xyz 脚底，w 半径
+    time: uniform(0).setGroup(g), // 生机层自己的时钟（秒）：CPU 写出生时间、GPU 算年龄用同一个钟
+    center: uniform(new THREE.Vector3()).setGroup(g), // 星球中心
+    cam: uniform(new THREE.Vector3()).setGroup(g), // 镜头位置
+    camRight: uniform(new THREE.Vector3(1, 0, 0)).setGroup(g), // 镜头的右、上（世界坐标）：面向镜头的面片用
+    camUp: uniform(new THREE.Vector3(0, 1, 0)).setGroup(g),
+    field: uniform(new THREE.Vector3()).setGroup(g), // 场中心：镜头前方几米处的地面点。雨丝、花瓣、绒毛、萤火虫围着它
+    groundR: uniform(30).setGroup(g), // 场中心的地面半径（雨、飘落物、萤火虫的高度从这里量）
+    pxAngle: uniform(0.001).setGroup(g), // 1 米外一个像素有多大（米）：雨丝不细于 1 像素
+    sunDir: uniform(new THREE.Vector3(0.4, 0.5, 0.75).normalize()).setGroup(g),
+    sunCol: uniform(new THREE.Vector3(1, 0.94, 0.84)).setGroup(g), // 太阳光颜色 × 强度（rgb 存在 xyz 里）
+    ambCol: uniform(new THREE.Vector3(0.55, 0.62, 0.72)).setGroup(g), // 环境光颜色
+    rainAmt: uniform(0).setGroup(g),
+    rainTime: uniform(0).setGroup(g), // 雨的进度时钟：按「下落速度 / 雨柱高度」累加
+    rainWind: uniform(new THREE.Vector3()).setGroup(g), // 场中心的风（世界坐标，米/秒）：雨丝按高度往上风方向斜
+    rainLen: uniform(0.4).setGroup(g), // 雨丝长度（米）
+    windMean: uniform(new THREE.Vector3()).setGroup(g), // 平稳的平均风（不含阵风）：飘落物在空中的漂移
+    fireAmt: uniform(0).setGroup(g), // 萤火虫（傍晚）
+    pollenAmt: uniform(0).setGroup(g), // 花粉光点（白天）
+    influence: uniform(new THREE.Vector4()).setGroup(g), // 角色的影响球：xyz 脚底，w 半径
   };
 }
 type Uniforms = ReturnType<typeof makeUniforms>;
@@ -764,7 +771,7 @@ function makePetals(U: Uniforms, rng: Rng) {
   centerPos = centerPos.add(pushAway(U, centerPos, 0.9).mul(airK));
   const dist = length(centerPos.sub(U.cam));
   const restFade = float(1).sub(smoothstep(0.88, 1, p));
-  const fade = edge.mul(smoothstep(0, 0.05, p)).mul(restFade).mul(float(1).sub(smoothstep(9, 13, dist)));
+  const fade = edge.mul(smoothstep(0, 0.05, p)).mul(restFade).mul(float(1).sub(smoothstep(9, 13, dist))).mul(smoothstep(0.6, 1.6, dist)); // 贴着镜头的淡掉
   // 翻滚：绕随机轴转，角度 ∝ 离地高度（封顶 1.2 米）；高度为 0 时躺平在切平面上
   const axis = normalize(vec3(R.x.sub(0.5), R.y.sub(0.5), R.z.sub(0.5)).add(vec3(0.01, 0, 0)));
   const tumble = min(alt.sub(0.03), 1.2).div(1.2);
@@ -815,7 +822,7 @@ function makeFluff(U: Uniforms, rng: Rng) {
   let centerPos = U.center.add(up.mul(U.groundR.add(alt))).add(meanT.mul(p.mul(period).mul(Q.w.mul(0.4).add(0.8)))).add(wob);
   centerPos = centerPos.add(pushAway(U, centerPos, 1.2));
   const dist = length(centerPos.sub(U.cam));
-  const fade = edge.mul(smoothstep(0, 0.08, p)).mul(float(1).sub(smoothstep(0.85, 1, p))).mul(float(1).sub(smoothstep(8, 12, dist)));
+  const fade = edge.mul(smoothstep(0, 0.08, p)).mul(float(1).sub(smoothstep(0.85, 1, p))).mul(float(1).sub(smoothstep(8, 12, dist))).mul(smoothstep(0.6, 1.6, dist)); // 贴着镜头的淡掉
   const size = float(0.042).mul(Q.z.mul(0.5).add(0.75));
   const m = transparentMaterial();
   m.positionNode = centerPos.add(U.camRight.mul(positionGeometry.x.mul(size))).add(U.camUp.mul(positionGeometry.y.mul(size)));
@@ -857,7 +864,8 @@ function makeFireflies(U: Uniforms, rng: Rng) {
   const breathe = smoothstep(0.25, 1, sin(t.mul(Q.x.mul(1.2).add(0.8)).add(Q.w.mul(30))).mul(0.5).add(0.5));
   const flicker = sin(t.mul(17).add(Q.z.mul(40))).mul(0.12).add(0.88);
   const level = breathe.mul(flicker).mul(0.92).add(0.08);
-  const near = edge.mul(float(1).sub(smoothstep(14, 20, dist)));
+  // 贴着镜头的也淡掉（集成时加的）：叠加混合的光点离镜头不到 1 米时会糊成一大团光斑
+  const near = edge.mul(float(1).sub(smoothstep(14, 20, dist))).mul(smoothstep(0.8, 2.2, dist));
   const pollen = select(Q.w.lessThan(0.7), float(1), float(0)).mul(U.pollenAmt);
   const fire = U.fireAmt;
   const size = mix(float(0.07), float(0.2).mul(Q.y.mul(0.4).add(0.8)), fire).mul(select(fire.add(pollen).greaterThan(0.001), float(1), float(0)));
@@ -1022,6 +1030,15 @@ function makeTrample(renderer: THREE.WebGPURenderer, size: number) {
       passes++;
     },
     clear,
+    // 开场预热：盖一个强度 0 的章（MAX 混合，不改内容）、做一次减 0 的恢复，两个材质的管线就建好了
+    prewarm(): void {
+      uA.value.set(0, 0, 0);
+      uB.value.set(0, 0, 0);
+      uStrength.value = 0;
+      pass(() => stampQuad.render(renderer));
+      uDecay.value.set(0, 0);
+      pass(() => decayQuad.render(renderer));
+    },
     get passes() {
       return passes;
     },
@@ -1436,6 +1453,11 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
       };
     },
     debug: { trampleTarget: trample.rt, butterflies: sim.pos },
+    object: root,
+    prewarm(on: boolean) {
+      for (const m of meshes) m.visible = on;
+      if (on) trample.prewarm();
+    },
     dispose() {
       scene.remove(root);
       for (const d of [dust, splashes, rain, petals, fluff, fireflies, butterflies, trample]) d.dispose();

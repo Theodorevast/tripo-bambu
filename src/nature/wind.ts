@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { cross, dot, float, max, normalize, saturate, sin, texture, uniform, vec2, vec3 } from 'three/tsl';
+import { cross, dot, float, max, normalize, renderGroup, saturate, sin, texture, uniform, vec2, vec3 } from 'three/tsl';
 
 // 全局风场：草、飘落物、尘土、雨丝共用同一个风。
 // 同一套公式写了两份：windAt() 是纯 JS（CPU 上要风的地方用：飘落物的整体漂移、雨丝的斜度、尘土的初速度），
@@ -122,18 +122,20 @@ export function windClock(nowSec = performance.now() / 1000): number {
   return clockWind;
 }
 
-export const windTime = uniform(0).onRenderUpdate(() => windClock());
+// 风的 uniform 都放进 renderGroup（集成时改的）：风会编进草叶、生机层的材质，每次 render 刷新一次，
+// 不跟着某个物体的 objectGroup 走（没有节点属性的材质上 objectGroup 只在物体变了时才刷新，会停在旧值）
+export const windTime = uniform(0).setGroup(renderGroup).onRenderUpdate(() => windClock());
 
 // ---------- 参数和 uniform ----------
 
 const side = new THREE.Vector3(); // 和 direction 垂直的单位向量：横风坐标用
 
 export const windUniforms = {
-  strength: uniform(WIND.strength),
-  speed: uniform(WIND.speed),
-  direction: uniform(WIND.direction.clone()),
-  side: uniform(new THREE.Vector3()),
-  center: uniform(WIND.center.clone()),
+  strength: uniform(WIND.strength).setGroup(renderGroup),
+  speed: uniform(WIND.speed).setGroup(renderGroup),
+  direction: uniform(WIND.direction.clone()).setGroup(renderGroup),
+  side: uniform(new THREE.Vector3()).setGroup(renderGroup),
+  center: uniform(WIND.center.clone()).setGroup(renderGroup),
 };
 
 function syncSide(): void {
