@@ -5,7 +5,11 @@ import { Stager, type Entrance } from './stager';
 // 等转场说「可以了」（release，云层散开、镜头快落地时）再按顺序一件一件出场，每件隔 stagger 秒，复用原来的回弹出场。
 // 不转场的时候（编辑器摆作品）不挡：准备好就上场。
 // 拦在 prepare() 交回 Entrance 之前：PlanetView 拿到它才把模型挂上、把展台换成不透明、开始缩放淡入，
-// 所以展台变实、模型弹出来都在同一刻；它的 loaded（data-planet-ready）也是在最后一件出场时才 resolve
+// 所以展台变实、模型弹出来都在同一刻；它的 loaded（data-planet-ready）也是在最后一件出场时才 resolve。
+// 排着的时候，新来的作品晚几帧才开始准备：云层全遮住那一帧只摆展台（WebGL2 上第一次画展台就要停一下），
+// 换地表细分、草和石头各占一帧（director.ts），作品的着色器编译再往后排，不挤在同一帧里
+const HOLD_START_FRAMES = 3;
+
 export class GatedStager extends Stager {
   private held = false;
   private readonly waiting: Array<() => void> = [];
@@ -13,6 +17,7 @@ export class GatedStager extends Stager {
   private nextAt = -Infinity; // 下一件最早什么时候出场（-Infinity：下一帧就放，并从那一刻开始排）
   private stagger = 0;
   readonly releases: number[] = []; // 最近几次放行出场的时刻（stage 的时钟，秒）：自查脚本量间隔
+  private readonly later: Array<{ frames: number; resolve: () => void }> = []; // 等几帧再开始准备的
 
   // 转场开始：准备好的先排着
   hold(): void {
@@ -42,6 +47,9 @@ export class GatedStager extends Stager {
 
   tick(dt: number): void {
     this.clock += dt;
+    // 等几帧再开始准备的：按来的先后放（都是同样的帧数，先来的先到点）
+    for (const w of this.later) w.frames--;
+    while (this.later.length && this.later[0].frames <= 0) this.later.shift()!.resolve();
     super.tick(dt);
     if (this.held || this.waiting.length === 0) return;
     const due = Number.isFinite(this.nextAt) ? this.nextAt : this.clock;
@@ -55,7 +63,8 @@ export class GatedStager extends Stager {
   }
 
   prepare(object: THREE.Object3D, alive: () => boolean = () => true): Promise<Entrance | null> {
-    return super.prepare(object, alive).then(async (entrance) => {
+    const start = this.held ? new Promise<void>((resolve) => this.later.push({ frames: HOLD_START_FRAMES, resolve })) : Promise.resolve();
+    return start.then(() => super.prepare(object, alive)).then(async (entrance) => {
       if (!entrance) return null;
       await new Promise<void>((resolve) => this.waiting.push(resolve));
       if (alive()) return entrance;
