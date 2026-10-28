@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { vec4 } from 'three/tsl';
 import { modelTextures } from '../assets/models';
+import { compileShadowExact } from './shadowWarm';
 
 // 新模型上场。实测（30 万面的真实模型，进入星球时 4 件一起到）卡在挂上场景后的第一帧：
 // WebGL2 在这一帧里同步链接着色器、上传贴图，一帧 100–200 ms；WebGPU 主线程只忙 60 ms，但 GPU 进程同步建管线，画面停约 200 ms。
@@ -202,7 +203,8 @@ export class Stager implements Stage {
       this.uploaded.add(texture);
     }
     await compileUnculled(this.renderer, object, this.camera, this.scene);
-    await compileShadow(this.renderer, object, this.shadowLight?.() ?? null, this.scene);
+    // 投影那一遍按 three r186 真正画的时候的状态预编译（shadowWarm.ts）；compileShadow 建出来的是排队时的状态，管线对不上，第一次画还要现建
+    await compileShadowExact(this.renderer, object, this.shadowLight?.() ?? null, this.scene);
     return alive();
   }
 
