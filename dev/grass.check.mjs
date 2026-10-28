@@ -1,12 +1,14 @@
 // 草的自查：node dev/grass.check.mjs [输出目录]
 // 1440×900、DPR 2，WebGPU 和 WebGL2 各跑一遍：
-// - 每个视角：草开着、关着各画 90 帧，GPU 时间（时间戳查询）取中位数相减 = 草本身的 GPU 时间；
+// - 每个视角（贴地、整屏近草、逆光、斜上方）：草关着、开着交替量 4 轮，每轮各 ~22 帧取中位数相减，再取 4 轮的中位数 = 草本身的 GPU 时间（时间戳查询）；
 // - 实例数、三角形数、绘制调用；
+// - 不闪：镜头不动、关风时连拍 5 张逐像素相同（另拍一组藏起草的作对照）；开风时两帧不同；
 // - 贴地走 3 秒的帧间隔；用 CDP 采样堆分配，看 update() 有没有新建 three 对象；
-// - 截图：n1-ground / n1-orbit / n1-backlit（WebGPU）、n1-webgl2。
-// 环境变量：HEADED=1 用有界面的 Chrome；ONLY=webgpu|webgl2 只跑一个后端
+// - 截图：n1-ground / n1-orbit / n1-backlit（WebGPU）、n1-webgl2；给了 REFS_DIR（参考图目录，含 F/4.jpg、G/5.jpg）时再拼一张 n1-compare.png。
+// 环境变量：HEADED=1 用有界面的 Chrome；ONLY=webgpu|webgl2 只跑一个后端；VIEWS=ground,fill 只量这几个视角
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { CHROME, startServer, watchErrors } from '../scripts/lib/browser.mjs';
 
@@ -36,7 +38,32 @@ async function run(backend) {
     const shot = backend === 'webgpu' ? { ground: 'n1-ground.png', backlit: 'n1-backlit.png', orbit: 'n1-orbit.png' }[view] : view === 'ground' ? 'n1-webgl2.png' : null;
     if (shot) await page.screenshot({ path: path.join(outDir, shot) });
   }
-  // 贴地走 3 秒：帧间隔
+  // 不闪：镜头不动、关掉风，连拍 5 张（隔 0.3 秒）都逐像素一样；打开风，两帧不一样（草在动）。
+  // 对照组：把草藏起来再连拍 5 张。对照组也不一样时，说明是这个后端截图本身不稳定，和草无关
+  const burst = async () => {
+    const shots = [];
+    for (let i = 0; i < 5; i++) {
+      shots.push(await page.screenshot());
+      await page.waitForTimeout(300);
+    }
+    return shots.slice(1).filter((s) => Buffer.compare(s, shots[0]) !== 0).length;
+  };
+  await page.evaluate(() => window.__grass.view('ground'));
+  await page.evaluate(() => Object.assign(window.__grass.field.settings, { windStrength: 0, windSpeed: 0 }));
+  await page.waitForTimeout(1200);
+  const grassDiffers = await burst();
+  await page.evaluate(() => window.__grass.setVisible(false));
+  await page.waitForTimeout(300);
+  const controlDiffers = await burst();
+  await page.evaluate(() => window.__grass.setVisible(true));
+  await page.evaluate(() => Object.assign(window.__grass.field.settings, { windStrength: 0.55, windSpeed: 1 }));
+  await page.waitForTimeout(600);
+  const w1 = await page.screenshot();
+  await page.waitForTimeout(500);
+  const w2 = await page.screenshot();
+  r.still = { differingFramesOf4WithGrass: grassDiffers, differingFramesOf4GrassHidden: controlDiffers, movesWithWind: Buffer.compare(w1, w2) !== 0 };
+  console.log(backend, 'still', JSON.stringify(r.still));
+  // 贴地走 3 秒：帧间隔（不开堆采样，采样本身会让帧变慢）
   await page.evaluate(() => window.__grass.view('ground'));
   await page.waitForTimeout(800);
   await page.evaluate(() => {
@@ -51,18 +78,19 @@ async function run(backend) {
     requestAnimationFrame(tick);
   });
   await page.keyboard.down('w');
-  // 堆分配采样：走路时 grass.ts 的 update 下面有没有构造 three 对象
+  await page.waitForTimeout(3000);
+  const frames = await page.evaluate(() => {
+    const f = window.__frames ?? [];
+    window.__frames = null;
+    return f;
+  });
+  // 接着再走 3 秒，这次做堆分配采样：grass.ts 的 update 下面有没有构造 three 对象
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('HeapProfiler.enable');
   await cdp.send('HeapProfiler.startSampling', { samplingInterval: 128, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
   await page.waitForTimeout(3000);
   const { profile } = await cdp.send('HeapProfiler.stopSampling');
   await page.keyboard.up('w');
-  const frames = await page.evaluate(() => {
-    const f = window.__frames ?? [];
-    window.__frames = null;
-    return f;
-  });
   const CTORS = new Set(['Vector2', 'Vector3', 'Vector4', 'Quaternion', 'Matrix3', 'Matrix4', 'Color', 'Sphere', 'Frustum', 'Box3', 'clone', 'Float32Array', 'Int32Array', 'Array']);
   let grassBytes = 0;
   let allBytes = 0;
@@ -104,6 +132,30 @@ try {
     results.backends[b] = await run(b);
   }
   writeFileSync(path.join(outDir, 'n1-check.json'), JSON.stringify(results, null, 2));
+  // 对比图：REFS_DIR 指向参考图目录（里面有 F/4.jpg 和 G/5.jpg）时，把参考图和我们的截图拼成 2×2
+  if (process.env.REFS_DIR && results.backends.webgpu) {
+    const url = (p) => pathToFileURL(path.resolve(p)).href;
+    const cell = (src, caption) => `<figure><img src="${src}"><figcaption>${caption}</figcaption></figure>`;
+    const html = `<!doctype html><meta charset="utf-8"><style>
+      body { margin: 0; background: #15171a; color: #e8e6e1; font: 15px/1.3 system-ui, sans-serif; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; }
+      figure { margin: 0; } img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; border-radius: 4px; }
+      figcaption { padding: 4px 2px 0; opacity: 0.85; }
+    </style><div class="grid">
+      ${cell(url(path.join(process.env.REFS_DIR, 'F', '4.jpg')), 'Reference F4: The Little Prince: Among the Stars (backlit meadow)')}
+      ${cell(url(path.join(outDir, 'n1-backlit.png')), 'Ours: backlit, WebGPU, 1440×900 DPR 2')}
+      ${cell(url(path.join(process.env.REFS_DIR, 'G', '5.jpg')), 'Reference G5: Grow: Song of the Evertree (stylized blades, low sun)')}
+      ${cell(url(path.join(outDir, 'n1-ground.png')), 'Ours: ground view, front-lit, WebGPU, 1440×900 DPR 2')}
+    </div>`;
+    const file = path.join(outDir, 'n1-compare.html');
+    writeFileSync(file, html);
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1060 } });
+    await page.goto(url(file));
+    await page.waitForFunction(() => [...document.images].every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 15000 });
+    await page.screenshot({ path: path.join(outDir, 'n1-compare.png'), fullPage: true });
+    await page.close();
+    console.log('对比图', path.join(outDir, 'n1-compare.png'));
+  }
   console.log('写入', path.join(outDir, 'n1-check.json'));
 } finally {
   await browser.close();

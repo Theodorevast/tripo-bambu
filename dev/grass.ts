@@ -63,7 +63,7 @@ const along = (dir: THREE.Vector3, tangent: THREE.Vector3, meters: number, out =
 const plinthDir = along(along(home, north, 7.5), east, 2.2);
 const personDir = along(home, north, 3.2); // 胶囊人站的地方
 const PLINTH_R = 1.0;
-const demo = { exclusion: true, sea: false, trample: params.has('trample') };
+const demo = { exclusion: true, sea: params.has('sea'), trample: params.has('trample') };
 function exclusion(d: THREE.Vector3): number {
   if (!demo.exclusion) return 0;
   // 小路：离主视点东边 2.5 m 的一条南北向的小圆，带一点弯
@@ -119,7 +119,8 @@ const ground = new THREE.Mesh(groundGeo, groundMat);
 scene.add(ground);
 
 const water = new THREE.Mesh(new THREE.SphereGeometry(R - 0.35, 96, 64), new THREE.MeshStandardNodeMaterial({ color: '#3e6f86', roughness: 0.25, transparent: true, opacity: 0.85 }));
-water.visible = false;
+water.visible = demo.sea;
+if (demo.sea) planet.sea = R - 0.35; // 海面：低洼处在水下，水下不长草
 scene.add(water);
 
 // 一个约 1 m 高的胶囊当作人（看比例），一个石头展台
@@ -280,11 +281,13 @@ function setMode(m: 'ground' | 'orbit'): void {
 
 // 预设视角：贴地（顺光，看胶囊）、逆光（看向低太阳）、斜上方
 function view(name: string): void {
-  if (name === 'orbit') {
+  if (name === 'orbit' || name === 'high') {
+    // orbit：离地约 8 m 斜着看；high：离地约 22 m，看草在远处淡出、接到地面颜色上
     sun.azimuth = 150;
     sun.elevation = 20;
-    const t = along(home, north, 4);
-    camera.position.copy(along(home, north, -5)).multiplyScalar(terrain(t.x, t.y, t.z) + 8).addScaledVector(east, 3);
+    const high = name === 'high';
+    const t = along(home, north, high ? 10 : 4);
+    camera.position.copy(along(home, north, high ? -12 : -5)).multiplyScalar(terrain(t.x, t.y, t.z) + (high ? 22 : 8)).addScaledVector(east, 3);
     setMode('orbit');
     orbit.target.copy(t).multiplyScalar(terrain(t.x, t.y, t.z));
     orbit.update();
@@ -397,14 +400,26 @@ async function sampleGpu(frames: number): Promise<number> {
   const s = [...gpuSamples].sort((a, b) => a - b);
   return s[Math.floor(s.length / 2)];
 }
-async function measure(frames = 90): Promise<{ withGrass: number; without: number; grass: number; backend: string; samples: number }> {
-  grass.object.visible = false;
-  await sampleGpu(20);
-  const without = await sampleGpu(frames);
-  grass.object.visible = true;
-  await sampleGpu(20);
-  const withGrass = await sampleGpu(frames);
-  return { withGrass, without, grass: withGrass - without, backend, samples: gpuSamples.length };
+// 关着、开着交替量几轮（每轮各 frames/rounds 帧取中位数），草的时间 = 各轮差值的中位数。
+// 交替着量：同一块显卡上别的程序时忙时闲，只量一轮的话前后两段的负载不一样，差值会偏
+async function measure(frames = 90, rounds = 4): Promise<{ withGrass: number; without: number; grass: number; grassMin: number; backend: string; rounds: number[] }> {
+  const per = Math.max(10, Math.round(frames / rounds));
+  const diffs: number[] = [];
+  const withs: number[] = [];
+  const withouts: number[] = [];
+  for (let r = 0; r < rounds; r++) {
+    grass.object.visible = false;
+    await sampleGpu(8);
+    const off = await sampleGpu(per);
+    grass.object.visible = true;
+    await sampleGpu(8);
+    const on = await sampleGpu(per);
+    withouts.push(off);
+    withs.push(on);
+    diffs.push(on - off);
+  }
+  const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  return { withGrass: med(withs), without: med(withouts), grass: med(diffs), grassMin: Math.min(...diffs), backend, rounds: diffs };
 }
 
 // —— 主循环 ——

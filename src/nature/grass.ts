@@ -153,8 +153,8 @@ const SUN_RESPONSE = 0.62; // 草对太阳的响应：setSun 传进来的是灯�
 
 export function defaultSettings(): GrassSettings {
   return {
-    radius: 30,
-    fullRadius: 5,
+    radius: 32,
+    fullRadius: 6,
     height: 1,
     width: 1,
     windStrength: 0.55,
@@ -1107,7 +1107,8 @@ export function createGrassField(opts: GrassOptions): GrassField {
     const genStart = performance.now();
     const firstFrame = frame === 1;
     const flowerOn = settings.flowers > 0;
-    const bladeReach = HEIGHT_MAX * settings.height * 1.4;
+    // 最高的草：最高 0.45 m × 大片起伏 1.28 × 一丛 1.3 × 草茎 1.7 ≈ 1.27 m（倒向一侧时伸出去也不超过这个长度）
+    const bladeReach = HEIGHT_MAX * 1.28 * 1.3 * 1.7 * settings.height + 0.05;
     const fullDensity = density * densityScale * BLADES_PER_TILE;
 
     // 从镜头脚下的瓦片开始广度优先，大致由近到远
