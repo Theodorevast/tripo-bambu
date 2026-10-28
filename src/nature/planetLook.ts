@@ -2,7 +2,8 @@ import * as THREE from 'three/webgpu';
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { attribute, cameraPosition, color, dot, float, Fn, If, instanceColor, length, max, mix, modelPosition, modelScale, normalize, normalWorld, positionLocal, positionWorld, pow, renderGroup, saturate, smoothstep, uniform, vec3 } from 'three/tsl';
-import { decorInstances, rockGeometry } from '../planet/decor';
+import { DECOR, decorInstances, rockGeometry } from '../planet/decor';
+import { applyGround, GROUND, RIM, RIM_RING } from '../planet/ground';
 import { STAGE_DIR } from '../planet/noise';
 import { mulberry32 } from '../planet/rng';
 import { valueNoise3 } from '../planet/tslNoise';
@@ -282,6 +283,10 @@ export class PlanetLookParts {
   readonly cloudOffset = uniform(new THREE.Vector3());
   // 0..1：别的星球被聚焦时淡出（云层、大气、地面上的云影一起），回星系淡回来。updatePlanetLook 逐帧逼近
   readonly fade = uniform(1);
+  // 团队色（星系里各队的星球一眼分得开）：俯瞰时朝阳的大片、一种花田的颜色往它靠，大气、石头带也染一点
+  readonly accent = uniform(new THREE.Color('#ffffff'));
+  readonly accentAmount = uniform(0);
+  private accentHex: string | null = null;
   radius = 1;
   ring: THREE.Object3D | null = null; // 石头带（名字叫 ring：PlanetObject 的光环浓淡照旧开关它）
   private atmosphere: THREE.Mesh | null = null;
@@ -294,6 +299,18 @@ export class PlanetLookParts {
   constructor() {
     this.group.name = 'planet-look';
     parts.add(this);
+  }
+
+  // 团队色（十六进制）。null：不染（演示页、测试）。下一次 build 时大气和石头带用上；地面的 uniform 立刻生效
+  setAccent(hex: string | null): void {
+    this.accentHex = hex;
+    this.accentAmount.value = hex ? 1 : 0;
+    if (hex) this.accent.value.set(hex);
+  }
+
+  private tinted(base: THREE.ColorRepresentation, k: number): THREE.Color {
+    const c = new THREE.Color(base);
+    return this.accentHex ? c.lerp(new THREE.Color(this.accentHex), k) : c;
   }
 
   // 按配方重建：云层、大气外壳。几何每次新建（星球半径会变），云的材质留着（第一次画要编译着色器）
@@ -316,7 +333,7 @@ export class PlanetLookParts {
     }
     if (o.atmosphere) {
       const shell = o.top + o.radius * 0.11;
-      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(shell, 8), atmosphereRimMaterial(o.tint, o.radius, shell, o.haloStrength, o.seed, this.fade));
+      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(shell, 8), atmosphereRimMaterial(this.tinted(o.tint, 0.5), o.radius, shell, o.haloStrength, o.seed, this.fade));
       this.atmosphere.name = 'planet-atmosphere';
       this.atmosphere.renderOrder = 1;
       this.group.add(this.atmosphere);
@@ -345,7 +362,7 @@ export class PlanetLookParts {
     const s = new THREE.Vector3();
     const p = new THREE.Vector3();
     const c = new THREE.Color();
-    const rock = new THREE.Color(o.rock);
+    const rock = this.tinted(o.rock, 0.25);
     const sand = new THREE.Color(o.grass);
     for (let i = 0; i < n; i++) {
       const u = (rng() + rng() + rng()) / 3; // 中间密
@@ -379,7 +396,7 @@ export class PlanetLookParts {
     const rng = mulberry32((o.seed * 104729 + 7) >>> 0);
     const count = Math.round((1 + (rng() < 0.55 ? 1 : 0)) * GALAXY_DECOR.islands);
     if (count <= 0) return;
-    this.islandMaterial = floatingIslandMaterial(o.grass, o.rock);
+    this.islandMaterial = floatingIslandMaterial(this.tinted(o.grass, 0.15), o.rock);
     const R = o.radius;
     for (let i = 0; i < count; i++) {
       const az = rng() * Math.PI * 2;
@@ -434,6 +451,53 @@ export class PlanetLookParts {
 
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
+
+// ?tune 的「Copy parameters」里带上这几张表
+export function planetLookParams(): Record<string, unknown> {
+  return { look: PLANET_LOOK, galaxy: GALAXY_DECOR, rim: RIM, edge: RIM_RING, rimWall: DECOR.rimWall };
+}
+
+// ?tune 面板（tune.ts 调一次）：Planet 组里加「Look from afar」：俯瞰的草甸层次、外沿和舞台的边、云层、大气、石头带
+interface TuneEvents {
+  on(event: 'change', handler: () => void): unknown;
+}
+export interface TuneFolder extends TuneEvents {
+  addFolder(params: { title: string; expanded?: boolean }): TuneFolder;
+  addBinding<T extends object>(target: T, key: keyof T & string, params?: Record<string, unknown>): TuneEvents;
+}
+
+export function installPlanetLookTune(folder: TuneFolder, rebuildRocks: () => void): void {
+  const f = folder.addFolder({ title: 'Look from afar', expanded: false });
+  const meadow = f.addFolder({ title: 'Meadow from above', expanded: false });
+  meadow.addBinding(GROUND, 'farMix', { label: 'spring green', min: 0, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'farTint', { label: 'brightness', min: 0.05, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'fieldSun', { label: 'sunny fields', min: 0, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'fieldDeep', { label: 'deep hollows', min: 0, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'fieldFlowers', { label: 'flower fields', min: 0, max: 2, step: 0.01 });
+  meadow.addBinding(GROUND, 'warmCool', { label: 'warm / cool', min: 0, max: 2, step: 0.01 });
+  meadow.on('change', () => applyGround());
+  const rim = f.addFolder({ title: 'Stage rim', expanded: false });
+  rim.addBinding(RIM, 'center', { label: 'band latitude (sin)', min: -0.3, max: 0.4, step: 0.005 });
+  rim.addBinding(RIM, 'half', { label: 'band half width', min: 0, max: 0.3, step: 0.005 });
+  rim.addBinding(RIM_RING, 'angle', { label: 'edge ring angle°', min: 40, max: 90, step: 0.5 });
+  rim.addBinding(RIM_RING, 'width', { label: 'edge ring width°', min: 0, max: 15, step: 0.1 });
+  rim.addBinding(DECOR, 'rimWall', { label: 'rim boulders ×', min: 0, max: 3, step: 0.05 });
+  rim.on('change', () => {
+    applyGround();
+    rebuildRocks();
+  });
+  const sky = f.addFolder({ title: 'Clouds & air', expanded: false });
+  sky.addBinding(PLANET_LOOK, 'clouds', { label: 'cloud cover', min: 0, max: 1, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'cloudOpacity', { label: 'cloud opacity', min: 0, max: 1, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'cloudBrightness', { label: 'cloud brightness', min: 0.1, max: 1.5, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'cloudSpeed', { label: 'cloud drift', min: 0, max: 6, step: 0.05 });
+  sky.addBinding(PLANET_LOOK, 'cloudShadow', { label: 'cloud shadows', min: 0, max: 1, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'atmosphere', { label: 'atmosphere', min: 0, max: 3, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'atmosphereWarm', { label: 'dusk tint' });
+  sky.addBinding(PLANET_LOOK, 'limbHaze', { label: 'edge haze', min: 0, max: 2, step: 0.01 });
+  sky.addBinding(GALAXY_DECOR, 'beltSpeed', { label: 'rock belt spin', min: 0, max: 5, step: 0.05 });
+  sky.on('change', () => applyPlanetLook());
+}
 
 // World 每帧调：太阳方向、云层转动、各星球远看部件的开关。focused：聚焦的那颗星球的远看部件（星系视图里是 null）。
 // 镜头离星球近（星球视图、漫游）：这颗的远看部件藏起来（大气外壳会盖满整个屏幕）。
