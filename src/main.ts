@@ -18,6 +18,7 @@ import { Editor } from './editor/editor';
 import { installWalkDebug } from './play/debug';
 import { WalkMode } from './play/walkMode';
 import { startBoot } from './ui/boot';
+import { installWater } from './nature/water';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 // 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后云散开；Nunito 的几个字重从这里开始在后台预加载
@@ -28,6 +29,7 @@ const store = new LocalStore(seed, browserStorage());
 await boot.phase('sky');
 // 建不起来（没有 WebGPU 也没有 WebGL2，或者别的错）：停在启动画面上提示，后面的不再执行
 const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!).catch(boot.fail);
+installWater(world); // 水面每帧取雨量、角色涉水放波纹
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
