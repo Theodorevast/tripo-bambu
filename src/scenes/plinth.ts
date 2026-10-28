@@ -45,7 +45,7 @@ export function slabGeometry(): THREE.BufferGeometry {
 
 // 石板和苔藓的颜色按 AgX 重调过（集成时）：原来的浅灰在 AgX + 正式光照下发白，和地面、石头不像一个世界。
 // 所有展台共用：放进 renderGroup
-const STONE = uniform(new THREE.Color('#6e675b')).setGroup(renderGroup);
+const STONE = uniform(new THREE.Color('#5c564c')).setGroup(renderGroup);
 const MOSS = uniform(new THREE.Color('#3a4a1d')).setGroup(renderGroup);
 const SPOTS = 3.2; // 噪声频率：缩放前的石板半径约 1，一块石板上约 3 块深浅斑
 
