@@ -109,6 +109,7 @@ export function installTune(world: World): void {
   walk.addBinding(FOLLOW, 'distance', { label: 'distance (m)', min: FOLLOW.minDistance, max: FOLLOW.maxDistance, step: 0.05 });
   walk.addBinding(FOLLOW, 'pitch', { label: 'pitch (rad)', min: FOLLOW.minPitch, max: FOLLOW.maxPitch, step: 0.005 });
   walk.addBinding(FOLLOW, 'aim', { label: 'aim above (m)', min: 0, max: 2, step: 0.01 });
+  walk.addBinding(FOLLOW, 'shoulder', { label: 'shoulder (m)', min: -1.2, max: 1.2, step: 0.01 });
   walk.addBinding(FOLLOW, 'focus', { label: 'focus height (m)', min: 0.2, max: 1.5, step: 0.01 });
   walk.addBinding(WALK, 'speed', { label: 'walk speed (m/s)', min: 0.5, max: 8, step: 0.05 });
 

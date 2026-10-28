@@ -93,10 +93,13 @@ export class FollowCamera {
     if (walker.bumped && !this.wasBumped) this.trauma = Math.min(1, this.trauma + FEEL.bump * Math.min(1, walker.impact / WALK.speed));
     this.wasBumped = walker.bumped;
     this.trauma = Math.max(0, this.trauma - FEEL.decay * dt);
-    // 从注视点往后 distance·cos(pitch)、往上 distance·sin(pitch)
+    // 从注视点往后 distance·cos(pitch)、往上 distance·sin(pitch)，再往右偏一点（越肩）；偏完把这段距离拉回 distance
     const back = Math.cos(this.pitch) * this.distance;
     const rise = Math.sin(this.pitch) * this.distance;
-    this.position.copy(this.focus).addScaledVector(this.heading, -back).addScaledVector(this.up, rise);
+    _right.crossVectors(this.heading, this.up);
+    _goal.copy(this.heading).multiplyScalar(-back).addScaledVector(this.up, rise).addScaledVector(_right, FOLLOW.shoulder);
+    _goal.multiplyScalar(this.distance / _goal.length());
+    this.position.copy(this.focus).add(_goal);
     // 镜头低于地面（身后是山坡）或水面时沿径向抬起来：上升立刻跟上，回落慢慢来，不跟着起伏的地面颠
     const r = this.position.length();
     const need = Math.max(0, floor(_dir.copy(this.position).divideScalar(r)) - r);
@@ -109,8 +112,9 @@ export class FollowCamera {
   // 不像 lookAt 那样依赖一个固定的「世界上方」，看的方向接近上方时也不会翻。
   // 最后叠上呼吸和抖动（绕镜头自己的轴转一点点）
   private aim(): void {
-    _fwd.copy(this.focus).addScaledVector(this.up, FOLLOW.aim).sub(this.position).normalize();
     _right.crossVectors(this.heading, this.up);
+    // 越肩：看的点也往右挪（比镜头挪得少），视线和前进方向差不多平行，角色落在画面中间偏左
+    _fwd.copy(this.focus).addScaledVector(this.up, FOLLOW.aim).addScaledVector(_right, FOLLOW.shoulder * 0.6).sub(this.position).normalize();
     _right.addScaledVector(_fwd, -_right.dot(_fwd)).normalize();
     _camUp.crossVectors(_right, _fwd);
     _back.copy(_fwd).negate();

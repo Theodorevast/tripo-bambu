@@ -32,7 +32,7 @@ export function slabGeometry(): THREE.BufferGeometry {
     for (let i = 0; i < radial; i++) {
       const a = k * row + i;
       const b = (k + 1) * row + i;
-      idx.push(a, b, a + 1, a + 1, b, b + 1);
+      idx.push(a, a + 1, b, a + 1, b + 1, b); // 逆时针（从外面看）：顶面朝上、侧面朝外
     }
   }
   const g = new THREE.BufferGeometry();
@@ -43,7 +43,7 @@ export function slabGeometry(): THREE.BufferGeometry {
   return g;
 }
 
-const STONE = uniform(new THREE.Color('#a0978a'));
+const STONE = uniform(new THREE.Color('#8e8679'));
 const MOSS = uniform(new THREE.Color('#5d7a3a'));
 const SPOTS = 3.2; // 噪声频率：缩放前的石板半径约 1，一块石板上约 3 块深浅斑
 
@@ -52,7 +52,7 @@ const stoneColor = (() => {
   const p = positionLocal;
   const n = valueNoise3(p.mul(SPOTS)).mul(0.6).add(valueNoise3(p.mul(SPOTS * 4.1).add(9.3)).mul(0.4));
   const side = smoothstep(-0.01, -0.06, p.y);
-  return mix(STONE.mul(n.mul(0.35).add(0.8)), MOSS, side.mul(smoothstep(0.45, 0.75, n)).mul(0.6));
+  return mix(STONE.mul(n.mul(0.5).add(0.72)), MOSS, side.mul(smoothstep(0.45, 0.75, n)).mul(0.6));
 })();
 
 // 展台材质：模型挂上之前半透明（spec 2.2），挂上后不透明。emissiveIntensity 从 0 开始（自发光颜色是黑的，看不出区别）：
