@@ -228,7 +228,8 @@ function bushGeometry(bloom = false): THREE.BufferGeometry {
     const b = blobs[Math.floor(rng() * blobs.length)];
     const dir = new THREE.Vector3(rng() - 0.5, 0.4 + rng() * 0.6, rng() - 0.5).normalize();
     const at = new THREE.Vector3(b[0], b[1], b[2]).addScaledVector(dir, b[3] * 0.98);
-    parts.push(part(new THREE.IcosahedronGeometry(bloom ? 0.04 : 0.032, 0), mat(at.x, at.y, at.z), bloom ? WHITE : BLOSSOM, bloom ? 1 : 0, 0.4));
+    // 小花是压扁的圆球（低面数的二十面体看着像水晶）
+    parts.push(part(new THREE.SphereGeometry(bloom ? 0.042 : 0.034, 7, 4), mat(at.x, at.y, at.z, 0, 0, 0, 1, 0.7, 1), bloom ? WHITE : BLOSSOM, bloom ? 1 : 0, 0.4));
   }
   return merge(parts);
 }
@@ -321,8 +322,8 @@ export function gardenPieces(): GardenPiece[] {
     ['tuft', tuftGeometry, false],
     ['bush', () => bushGeometry(false), true],
     ['bloom', () => bushGeometry(true), true],
-    ['pebble', () => stoneGeometry('round', 97), true],
-    ['slab', () => stoneGeometry('slab', 41), true],
+    ['pebble', () => stoneGeometry('round', 97), false], // 小石子、踏脚石贴着地：投影看不出来，省掉阴影那一遍的两次绘制
+    ['slab', () => stoneGeometry('slab', 41), false],
     ['bench', benchGeometry, true],
     ['signpost', signpostGeometry, true],
     ['signface', signfaceGeometry, false],

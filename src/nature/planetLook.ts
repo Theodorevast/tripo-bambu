@@ -1,5 +1,11 @@
 import * as THREE from 'three/webgpu';
-import { cameraPosition, color, dot, float, Fn, If, length, max, mix, modelPosition, modelScale, normalize, positionWorld, pow, renderGroup, saturate, smoothstep, uniform, vec3 } from 'three/tsl';
+import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { attribute, cameraPosition, color, dot, float, Fn, If, instanceColor, length, max, mix, modelPosition, modelScale, normalize, normalWorld, positionLocal, positionWorld, pow, renderGroup, saturate, smoothstep, uniform, vec3 } from 'three/tsl';
+import { DECOR, decorInstances, rockGeometry } from '../planet/decor';
+import { applyGround, GROUND, RIM, RIM_RING } from '../planet/ground';
+import { STAGE_DIR } from '../planet/noise';
+import { mulberry32 } from '../planet/rng';
 import { valueNoise3 } from '../planet/tslNoise';
 
 // 星球远看的样子（planet 角色）：大气光晕、慢慢转的云层、云在地面上的影子、星球表面边缘的一层空气。
@@ -152,6 +158,105 @@ export function sunTint(n: V3, amount: F | number): V3 {
 
 export const sunDirNode = (): V3 => U.sun;
 
+// —— 星系里的点缀：石头带（带光环的星球）、小浮岛 ——
+// 石头带：一圈慢慢绕着转的圆润小石头（顶上长苔藓），代替原来半透明的条纹光环（那个太像科幻）；
+// 小浮岛：每颗星球旁边飘着一两个小岛，顶上是草、底下是圆润的石头，慢慢上下浮动（像《宇宙机器人》《光遇》的浮空岛）。
+// 都挂在远看部件里：镜头近了、看别的星球时跟着藏起来
+export const GALAXY_DECOR = {
+  beltRocks: 520, // 一条石头带多少块
+  beltSpeed: 1, // 转动速度倍数
+  islands: 1, // 小浮岛数量倍数（0 = 没有）
+};
+
+let floatMaterial: THREE.MeshStandardNodeMaterial | null = null;
+
+// 浮在空中的石头（石头带、浮岛底下）共用：顶亮底暗的绘本式渐变、大块深浅斑，朝上（世界 +Y）的面长苔藓。颜色 = 实例颜色
+function floatingRockMaterial(): THREE.MeshStandardNodeMaterial {
+  if (floatMaterial) return floatMaterial;
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.88, metalness: 0 });
+  m.name = 'floating-rock';
+  const p = positionLocal;
+  const facing = normalize(normalWorld).y;
+  const spots = valueNoise3(p.mul(2.4)).mul(0.6).add(valueNoise3(p.mul(6.1).add(3.7)).mul(0.4));
+  const light = mix(float(0.62), float(1.12), smoothstep(-0.6, 0.8, facing));
+  const moss = smoothstep(0.25, 0.75, facing).mul(smoothstep(0.32, 0.58, spots)).mul(0.9);
+  const stone = instanceColor.mul(vec3(1.06, 1.0, 0.9)).mul(light.mul(spots.mul(0.25).add(0.87)));
+  m.colorNode = mix(stone, color('#5d7a2c').mul(light), moss);
+  floatMaterial = m;
+  return m;
+}
+
+// 石头带里的石头（所有星球共用一份几何）：圆润的石头，挪到以中心为原点（飘在空中，不用「底面贴地」）
+let beltGeometry: THREE.BufferGeometry | null = null;
+function beltRockGeometry(): THREE.BufferGeometry {
+  if (beltGeometry) return beltGeometry;
+  const g = rockGeometry(131, 1);
+  g.center();
+  g.computeBoundingSphere();
+  beltGeometry = g;
+  return g;
+}
+
+// 舞台中心（星球本地方向）：小浮岛不放在这一面
+const STAGE_DIR_HINT = STAGE_DIR;
+
+// 小浮岛的几何（所有星球共用一份）：上半个球压成微微鼓起的草顶，下半个往下拉成圆润的倒锥；顶点颜色的 r 是「草」（1 草顶，0 石头）
+let islandGeometry: THREE.BufferGeometry | null = null;
+function floatingIslandGeometry(): THREE.BufferGeometry {
+  if (islandGeometry) return islandGeometry;
+  const ico = new THREE.IcosahedronGeometry(1, 3);
+  ico.deleteAttribute('normal');
+  ico.deleteAttribute('uv');
+  const geo = mergeVertices(ico, 1e-6);
+  ico.dispose();
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const col = new Float32Array(pos.count * 3);
+  const noise = new SimplexNoise({ random: mulberry32(907) });
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n = noise.noise3d(v.x * 1.7, v.y * 1.7, v.z * 1.7);
+    let grass = 0;
+    if (v.y > 0) {
+      // 草顶：半球压扁成缓缓鼓起的一块，边缘有一圈草垂下来
+      v.y = 0.16 * v.y + 0.04 * n;
+      v.x *= 1 + 0.08 * n;
+      v.z *= 1 + 0.08 * n;
+      grass = 1;
+    } else {
+      // 底：往下拉长，越往下越收，像倒挂的一块圆润石头
+      const d = -v.y;
+      v.y = -d * (1.15 + 0.25 * n);
+      const shrink = 1 - 0.55 * d * d;
+      v.x *= shrink * (1 + 0.12 * n);
+      v.z *= shrink * (1 + 0.12 * n);
+      grass = Math.max(0, 1 - d * 6); // 边上一圈草垂下来一点
+    }
+    pos.setXYZ(i, v.x, v.y, v.z);
+    col[i * 3] = grass;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  islandGeometry = geo;
+  return geo;
+}
+
+// 小浮岛的材质（每颗星球一份：草色、石头色按星球的配色）
+function floatingIslandMaterial(grass: THREE.ColorRepresentation, rock: THREE.ColorRepresentation): THREE.MeshStandardNodeMaterial {
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.9, metalness: 0 });
+  m.name = 'floating-island';
+  const p = positionLocal;
+  const g = smoothstep(0.35, 0.75, attribute('color', 'vec3').x);
+  const facing = normalize(normalWorld).y;
+  const light = mix(float(0.62), float(1.12), smoothstep(-0.6, 0.8, facing));
+  const spots = valueNoise3(p.mul(3.1)).mul(0.6).add(valueNoise3(p.mul(7.7).add(1.9)).mul(0.4));
+  const stone = color(new THREE.Color(rock)).mul(light.mul(spots.mul(0.3).add(0.85)));
+  const turf = color(new THREE.Color(grass)).mul(spots.mul(0.25).add(0.88));
+  m.colorNode = mix(stone, turf, g);
+  return m;
+}
+
 // —— 每颗星球的远看部件（PlanetObject 建、World 每帧按镜头距离开关）——
 const parts = new Set<PlanetLookParts>();
 
@@ -162,6 +267,15 @@ export interface PlanetLookOptions {
   tint: THREE.ColorRepresentation; // 大气的颜色
   atmosphere: boolean;
   haloStrength: THREE.UniformNode<'float', number>; // 大气光晕的浓淡（World 在星球视图里把聚焦的那颗压淡）
+  ring: boolean; // 有光环：做成一圈石头带
+  grass: THREE.ColorRepresentation; // 小浮岛的草顶
+  rock: THREE.ColorRepresentation; // 石头带、小浮岛底下的石头
+}
+
+interface Island {
+  mesh: THREE.Mesh;
+  base: THREE.Vector3; // 星球本地坐标
+  phase: number;
 }
 
 export class PlanetLookParts {
@@ -169,13 +283,34 @@ export class PlanetLookParts {
   readonly cloudOffset = uniform(new THREE.Vector3());
   // 0..1：别的星球被聚焦时淡出（云层、大气、地面上的云影一起），回星系淡回来。updatePlanetLook 逐帧逼近
   readonly fade = uniform(1);
+  // 团队色（星系里各队的星球一眼分得开）：俯瞰时朝阳的大片、一种花田的颜色往它靠，大气、石头带也染一点
+  readonly accent = uniform(new THREE.Color('#ffffff'));
+  readonly accentAmount = uniform(0);
+  private accentHex: string | null = null;
   radius = 1;
+  ring: THREE.Object3D | null = null; // 石头带（名字叫 ring：PlanetObject 的光环浓淡照旧开关它）
   private atmosphere: THREE.Mesh | null = null;
   private clouds: THREE.Mesh | null = null;
+  private belt: THREE.InstancedMesh | null = null;
+  private islands: Island[] = [];
+  private islandMaterial: THREE.MeshStandardNodeMaterial | null = null;
+  private time = Math.random() * 100;
 
   constructor() {
     this.group.name = 'planet-look';
     parts.add(this);
+  }
+
+  // 团队色（十六进制）。null：不染（演示页、测试）。下一次 build 时大气和石头带用上；地面的 uniform 立刻生效
+  setAccent(hex: string | null): void {
+    this.accentHex = hex;
+    this.accentAmount.value = hex ? 1 : 0;
+    if (hex) this.accent.value.set(hex);
+  }
+
+  private tinted(base: THREE.ColorRepresentation, k: number): THREE.Color {
+    const c = new THREE.Color(base);
+    return this.accentHex ? c.lerp(new THREE.Color(this.accentHex), k) : c;
   }
 
   // 按配方重建：云层、大气外壳。几何每次新建（星球半径会变），云的材质留着（第一次画要编译着色器）
@@ -198,10 +333,94 @@ export class PlanetLookParts {
     }
     if (o.atmosphere) {
       const shell = o.top + o.radius * 0.11;
-      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(shell, 8), atmosphereRimMaterial(o.tint, o.radius, shell, o.haloStrength, o.seed, this.fade));
+      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(shell, 8), atmosphereRimMaterial(this.tinted(o.tint, 0.5), o.radius, shell, o.haloStrength, o.seed, this.fade));
       this.atmosphere.name = 'planet-atmosphere';
       this.atmosphere.renderOrder = 1;
       this.group.add(this.atmosphere);
+    }
+    this.buildBelt(o);
+    this.buildIslands(o);
+  }
+
+  // 石头带：放在倾斜的赤道面上，半径 1.5–2.1 倍星球半径，中间密、两边稀；大小按幂律（小石头多、大石头少）
+  private buildBelt(o: PlanetLookOptions): void {
+    if (this.ring) {
+      this.ring.removeFromParent();
+      this.belt?.dispose();
+      this.belt = null;
+      this.ring = null;
+    }
+    if (!o.ring) return;
+    const R = o.radius;
+    const n = Math.round(GALAXY_DECOR.beltRocks);
+    const mesh = decorInstances(beltRockGeometry(), floatingRockMaterial(), n);
+    mesh.name = 'belt-rocks';
+    const rng = mulberry32((o.seed * 7919 + 13) >>> 0);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const s = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    const c = new THREE.Color();
+    const rock = this.tinted(o.rock, 0.25);
+    const sand = new THREE.Color(o.grass);
+    for (let i = 0; i < n; i++) {
+      const u = (rng() + rng() + rng()) / 3; // 中间密
+      const r = R * (1.6 + 0.42 * u);
+      const a = rng() * Math.PI * 2;
+      p.set(Math.cos(a) * r, (rng() + rng() - 1) * R * 0.03, Math.sin(a) * r);
+      const size = R * (0.009 + 0.034 * rng() ** 3);
+      s.set(size, size * (0.7 + rng() * 0.5), size);
+      q.setFromEuler(e.set(rng() * 6.28, rng() * 6.28, rng() * 6.28));
+      mesh.setMatrixAt(i, m.compose(p, q, s));
+      mesh.setColorAt(i, c.copy(rock).lerp(sand, 0.35).multiplyScalar(1.5 + rng() * 0.6));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingSphere();
+    const tilt = new THREE.Group();
+    tilt.name = 'ring';
+    tilt.rotation.set(0.38, 0, 0.22); // 赤道面再稍微倾斜（和原来的光环一样）
+    tilt.add(mesh);
+    this.belt = mesh;
+    this.ring = tilt;
+    this.group.add(tilt);
+  }
+
+  // 小浮岛：一两个，离星球中心 1.8–2.4 倍半径，避开舞台那一面（星球视图里不挡作品），大小 0.08–0.15 倍半径
+  private buildIslands(o: PlanetLookOptions): void {
+    for (const it of this.islands) it.mesh.removeFromParent();
+    this.islands = [];
+    this.islandMaterial?.dispose();
+    this.islandMaterial = null;
+    const rng = mulberry32((o.seed * 104729 + 7) >>> 0);
+    const count = Math.round((1 + (rng() < 0.55 ? 1 : 0)) * GALAXY_DECOR.islands);
+    if (count <= 0) return;
+    this.islandMaterial = floatingIslandMaterial(this.tinted(o.grass, 0.15), o.rock);
+    const R = o.radius;
+    for (let i = 0; i < count; i++) {
+      const az = rng() * Math.PI * 2;
+      const el = (rng() * 2 - 1) * 0.45;
+      const d = R * (1.65 + rng() * 0.5);
+      const base = new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)).multiplyScalar(d);
+      if (base.clone().normalize().dot(new THREE.Vector3(...STAGE_DIR_HINT)) > 0.55) base.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+      const mesh = new THREE.Mesh(floatingIslandGeometry(), this.islandMaterial);
+      mesh.name = 'floating-island';
+      mesh.scale.setScalar(R * (0.15 + rng() * 0.12));
+      mesh.rotation.y = rng() * Math.PI * 2;
+      mesh.position.copy(base);
+      this.group.add(mesh);
+      this.islands.push({ mesh, base, phase: rng() * Math.PI * 2 });
+    }
+  }
+
+  // 每帧：石头带慢慢转，小浮岛上下浮动
+  animate(dt: number): void {
+    this.time += dt;
+    if (this.belt) this.belt.rotation.y += dt * 0.03 * GALAXY_DECOR.beltSpeed;
+    for (const it of this.islands) {
+      it.mesh.position.y = it.base.y + Math.sin(this.time * 0.5 + it.phase) * this.radius * 0.02;
+      it.mesh.rotation.y += dt * 0.02;
     }
   }
 
@@ -211,6 +430,12 @@ export class PlanetLookParts {
     return _p.distanceTo(camPos) / (this.radius * this.group.getWorldScale(_s).x);
   }
 
+  // 石头带、小浮岛（不透明，不能跟着淡出）：别的星球被聚焦时藏起来。石头带还受光环浓淡管（PlanetObject.setRingStrength）
+  setSolidsVisible(on: boolean): void {
+    if (this.belt) this.belt.visible = on;
+    for (const it of this.islands) it.mesh.visible = on;
+  }
+
   dispose(): void {
     parts.delete(this);
     for (const m of [this.atmosphere, this.clouds]) {
@@ -218,12 +443,61 @@ export class PlanetLookParts {
       m.geometry.dispose();
       (m.material as THREE.Material).dispose();
     }
+    this.belt?.dispose();
+    this.islandMaterial?.dispose();
     this.group.removeFromParent();
   }
 }
 
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
+
+// ?tune 的「Copy parameters」里带上这几张表
+export function planetLookParams(): Record<string, unknown> {
+  return { look: PLANET_LOOK, galaxy: GALAXY_DECOR, rim: RIM, edge: RIM_RING, rimWall: DECOR.rimWall };
+}
+
+// ?tune 面板（tune.ts 调一次）：Planet 组里加「Look from afar」：俯瞰的草甸层次、外沿和舞台的边、云层、大气、石头带
+interface TuneEvents {
+  on(event: 'change', handler: () => void): unknown;
+}
+export interface TuneFolder extends TuneEvents {
+  addFolder(params: { title: string; expanded?: boolean }): TuneFolder;
+  addBinding<T extends object>(target: T, key: keyof T & string, params?: Record<string, unknown>): TuneEvents;
+}
+
+export function installPlanetLookTune(folder: TuneFolder, rebuildRocks: () => void): void {
+  const f = folder.addFolder({ title: 'Look from afar', expanded: false });
+  const meadow = f.addFolder({ title: 'Meadow from above', expanded: false });
+  meadow.addBinding(GROUND, 'farMix', { label: 'spring green', min: 0, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'farTint', { label: 'brightness', min: 0.05, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'fieldSun', { label: 'sunny fields', min: 0, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'fieldDeep', { label: 'deep hollows', min: 0, max: 1, step: 0.01 });
+  meadow.addBinding(GROUND, 'fieldFlowers', { label: 'flower fields', min: 0, max: 2, step: 0.01 });
+  meadow.addBinding(GROUND, 'warmCool', { label: 'warm / cool', min: 0, max: 2, step: 0.01 });
+  meadow.on('change', () => applyGround());
+  const rim = f.addFolder({ title: 'Stage rim', expanded: false });
+  rim.addBinding(RIM, 'center', { label: 'band latitude (sin)', min: -0.3, max: 0.4, step: 0.005 });
+  rim.addBinding(RIM, 'half', { label: 'band half width', min: 0, max: 0.3, step: 0.005 });
+  rim.addBinding(RIM_RING, 'angle', { label: 'edge ring angle°', min: 40, max: 90, step: 0.5 });
+  rim.addBinding(RIM_RING, 'width', { label: 'edge ring width°', min: 0, max: 15, step: 0.1 });
+  rim.addBinding(DECOR, 'rimWall', { label: 'rim boulders ×', min: 0, max: 3, step: 0.05 });
+  rim.on('change', () => {
+    applyGround();
+    rebuildRocks();
+  });
+  const sky = f.addFolder({ title: 'Clouds & air', expanded: false });
+  sky.addBinding(PLANET_LOOK, 'clouds', { label: 'cloud cover', min: 0, max: 1, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'cloudOpacity', { label: 'cloud opacity', min: 0, max: 1, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'cloudBrightness', { label: 'cloud brightness', min: 0.1, max: 1.5, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'cloudSpeed', { label: 'cloud drift', min: 0, max: 6, step: 0.05 });
+  sky.addBinding(PLANET_LOOK, 'cloudShadow', { label: 'cloud shadows', min: 0, max: 1, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'atmosphere', { label: 'atmosphere', min: 0, max: 3, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'atmosphereWarm', { label: 'dusk tint' });
+  sky.addBinding(PLANET_LOOK, 'limbHaze', { label: 'edge haze', min: 0, max: 2, step: 0.01 });
+  sky.addBinding(GALAXY_DECOR, 'beltSpeed', { label: 'rock belt spin', min: 0, max: 5, step: 0.05 });
+  sky.on('change', () => applyPlanetLook());
+}
 
 // World 每帧调：太阳方向、云层转动、各星球远看部件的开关。focused：聚焦的那颗星球的远看部件（星系视图里是 null）。
 // 镜头离星球近（星球视图、漫游）：这颗的远看部件藏起来（大气外壳会盖满整个屏幕）。
@@ -239,5 +513,8 @@ export function updatePlanetLook(dt: number, sunDir: THREE.Vector3, camera: THRE
     const now = p.fade.value;
     p.fade.value = Math.abs(goal - now) < 0.01 ? goal : now + (goal - now) * k;
     p.group.visible = p.fade.value > 0 && p.distanceInRadii(camera.position) > NEAR_HIDE;
+    if (p.group.visible) p.animate(dt);
+    // 石头带、小浮岛是不透明的，不能跟着淡：淡到一半就藏起来
+    p.setSolidsVisible(p.fade.value > 0.5);
   }
 }

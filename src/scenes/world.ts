@@ -170,7 +170,7 @@ export class World {
     const homes = galaxyPositions(teams.length);
     teams.forEach((team, i) => {
       const home = new THREE.Vector3(...homes[i]);
-      const planet = new PlanetObject(team.planet);
+      const planet = new PlanetObject(team.planet, team.color); // planet：团队色给星球染一点（星系里各队分得开）
       planet.group.position.copy(home);
       // 拾取球：单位球，按星球半径缩放（半径滑块拖动后只改缩放）
       const hit = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicNodeMaterial());
