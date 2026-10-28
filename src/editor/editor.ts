@@ -292,6 +292,7 @@ export class Editor {
       if (!press.moving) {
         if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < DRAG_THRESHOLD) return;
         press.moving = true;
+        this.view.pickUp(press.pw); // stage：作品提起来，花园先收起
         this.app.world.renderer.domElement.style.cursor = 'grabbing';
         this.panel.moveBar(null); // 拖动时藏起编辑条
       }
@@ -318,6 +319,7 @@ export class Editor {
     position.setLength(footprintGroundRadius(position.clone().normalize(), plinthRadius(this.ghostFootprint), entry.planet.height, entry.planet.sea));
     this.ghost.position.copy(position);
     this.ghost.quaternion.copy(quaternion);
+    this.ghost.scale.setScalar(this.view.presentScale); // stage：预览和摆上去以后一样大（星球视图里作品按地标放大）
   }
 
   private onRelease(e: PointerEvent): void {
@@ -340,6 +342,7 @@ export class Editor {
     } else if (p.yaw !== press.startYaw || p.dir.some((v, i) => v !== press.startDir[i])) {
       this.save();
     }
+    if (press.moving) this.view.putDown(press.pw); // stage：从悬着的高度落下，落地扬尘、花园在新位置长出来
   }
 
   private onKey(e: KeyboardEvent): void {
@@ -363,7 +366,7 @@ export class Editor {
     const placement: Placement = { workId: work.id, dir, yaw: faceYaw(dir, this.towardCamera()), scale: 1 };
     this.cancelPlacing();
     // place() 在等模型之前就把展台记进 view.placed：先存，模型还没加载完就离开星球（路由不等模型）摆放也不会丢
-    const placing = this.view.place(placement);
+    const placing = this.view.place(placement, { drop: true }); // stage：模型挂上时从半空落下、扬尘、花园长出来
     if (this.view.placed.has(work.id)) this.save();
     const pw = await placing;
     if (this.active) this.refreshTray();
@@ -458,7 +461,7 @@ export class Editor {
 
   // 作品在屏幕上的范围：从地面到模型顶、按展台和模型里较大的半径撑开的小盒子，8 个角投影后取包围盒；有角在镜头背后时返回 null
   private workRect(pw: PlacedWork): ScreenRect | null {
-    const s = pw.placement.scale;
+    const s = pw.placement.scale * pw.hero; // stage：算上地标放大
     const r = Math.max(pw.plinth.scale.x, pw.model?.footprint ?? 0) * s;
     const h = (PLINTH_HEIGHT + (pw.model?.height ?? 1)) * s;
     const rect: ScreenRect = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };

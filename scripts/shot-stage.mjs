@@ -82,7 +82,7 @@ async function shot(name, setup, opts = {}) {
   const { page, errors } = await open(opts);
   try {
     await setup(page);
-    if (name) await page.screenshot({ path: path.join(out, name) });
+    if (name.endsWith('.png')) await page.screenshot({ path: path.join(out, name) });
     console.log(`✓ ${name}`);
   } catch (e) {
     problems.push(`${name}: ${e.message}`);
@@ -93,7 +93,75 @@ async function shot(name, setup, opts = {}) {
   }
 }
 
+// 拿到应用里的 PlanetView：开发服务器上同一个模块地址就是同一个模块实例，改原型上的 pick / topOf，应用用到一次就记下 this（同 check-editor）
+const grabView = (page) => page.evaluate(async () => {
+  const { PlanetView } = await import('/src/scenes/planetView.ts');
+  const proto = PlanetView.prototype;
+  for (const name of ['pick', 'topOf']) {
+    const fn = proto[name];
+    proto[name] = function (...args) {
+      window.__view = this;
+      return fn.apply(this, args);
+    };
+  }
+  const desc = Object.getOwnPropertyDescriptor(proto, 'planet');
+  Object.defineProperty(proto, 'planet', { configurable: true, get() { window.__view = this; return desc.get.call(this); } });
+});
+
+// 作品脚下地面的屏幕坐标
+const groundPos = (page, id) => page.evaluate((i) => {
+  const pw = window.__view.placed.get(i);
+  const V = window.__world.rig.camera.position.constructor;
+  return window.__world.toScreen(pw.root.getWorldPosition(new V()));
+}, id);
+
+// 摆放的反馈：编辑模式里删掉一件作品（尘土一扬、花园缩回去）、从作品栏摆回去（从半空落下、压扁回弹、扬尘、花园一圈圈长出来）、
+// 再拖起来（悬在半空、花园收起）。放慢 4 倍拍，按时间顺序出 stage-remove、stage-drop-1..5、stage-lift
+async function feedback(page) {
+  const id = 'ph-03';
+  await page.evaluate(async () => { (await import('/src/scenes/planetView.ts')).STAGE.slowmo = 0.25; });
+  await grabView(page);
+  await page.locator('.topbar button.primary').click();
+  await page.waitForTimeout(300);
+  await lookAt(page, id, 7.5, 18, 30, 0.6);
+  await page.mouse.move(700, 450);
+  await page.waitForFunction(() => !!window.__view, null, { timeout: 5000 });
+  const ground = await groundPos(page, id);
+  const at = await page.evaluate((i) => window.__app.workScreenPos(i), id);
+  await page.mouse.click(at.x, at.y);
+  await page.waitForTimeout(250);
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: path.join(out, 'stage-remove.png') });
+  await page.waitForTimeout(2500);
+  const title = await page.evaluate((i) => window.__view.findWork(i)?.title, id);
+  await page.locator('.tray-item', { hasText: title }).click();
+  await page.waitForTimeout(600);
+  await page.mouse.move(ground.x, ground.y);
+  await page.waitForTimeout(400);
+  await page.mouse.click(ground.x, ground.y);
+  await page.waitForFunction((i) => !!window.__view.placed.get(i)?.model, id, { timeout: 15000 });
+  const t0 = Date.now();
+  const marks = [0.5, 1.45, 2.3, 3.4, 6.5];
+  for (let k = 0; k < marks.length; k++) {
+    const wait = t0 + marks[k] * 1000 - Date.now();
+    if (wait > 0) await page.waitForTimeout(wait);
+    await page.screenshot({ path: path.join(out, `stage-drop-${k + 1}.png`) });
+    console.log(`  stage-drop-${k + 1} @ ${((Date.now() - t0) / 1000).toFixed(2)} s`);
+  }
+  await page.keyboard.press('Escape');
+  const w = await page.evaluate((i) => window.__app.workScreenPos(i), id);
+  await page.mouse.move(w.x, w.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 6; i++) await page.mouse.move(w.x + 6 * i, w.y - 2 * i);
+  await page.waitForTimeout(1800);
+  await page.screenshot({ path: path.join(out, 'stage-lift.png') });
+  await page.mouse.up();
+  await page.waitForTimeout(3000);
+}
+
 try {
+  await shot('stage-feedback', feedback);
   await shot('stage-overview.png', async () => {});
   await shot('stage-close.png', (p) => lookAt(p, 'ph-03', 3.2, 12, 14, 0.8), { dpr: 2 });
   await shot('stage-garden.png', (p) => lookAt(p, 'ph-02', 5.5, 150, 28, 0.6), { dpr: 2 });

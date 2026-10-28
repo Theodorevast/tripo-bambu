@@ -6,9 +6,9 @@ import { windNode } from '../nature/wind';
 import { DECOR_CENTER, DecorField, type DecorKit, type DecorStats } from '../planet/decor';
 import { painterlyRockKit } from '../nature/decorRocks';
 import { GRASS_GROUND, setGroundGrass } from '../planet/ground';
-import { CLEARING, PATH } from '../planet/mask';
-import { MAX_PLINTH_RADIUS } from '../planet/placement';
+import { PATH } from '../planet/mask';
 import { PLANET_RADIUS, PRESETS } from '../planet/presets';
+import { gardenRockClearance } from './planetView';
 import type { PlanetEntry } from './world';
 
 // 聚焦星球的「地表点缀」：草和花（nature/grass.ts）、石头（planet/decor.ts）。只给聚焦的那一颗星球做：
@@ -186,16 +186,18 @@ export class Dressing {
     const planet = entry.planet;
     const recipe = planet.currentRecipe;
     DECOR_CENTER.value.copy(entry.home);
+    const gardens = recipe.placements.map((p) => ({ dir: new THREE.Vector3(...p.dir).normalize(), cos: Math.cos(gardenRockClearance(p.scale) / planet.radius) }));
     this.rocks = this.field.fill(this.kit, {
       radius: planet.radius,
       height: (d) => planet.height(d.x, d.y, d.z),
       sea: planet.sea,
-      exclude: (d) => planet.mask.exclude(d),
+      // stage：作品四周的花园（星球视图里会放大）范围里不放石头
+      exclude: (d) => (gardens.some((g) => d.dot(g.dir) > g.cos) ? 1 : planet.mask.exclude(d)),
       rockColor: new THREE.Color(PRESETS[recipe.preset].ground.rock),
       seed: recipe.seed,
       path: planet.mask.path,
       pathWidth: PATH.width,
-      clearings: recipe.placements.map((p) => ({ dir: new THREE.Vector3(...p.dir).normalize(), radius: (MAX_PLINTH_RADIUS + CLEARING.margin) * p.scale })),
+      clearings: [], // stage：作品空地四周的小石子换成花园自己的石头
     });
     if (this.field.group.parent !== planet.decor) planet.decor.add(this.field.group);
   }
