@@ -4,6 +4,7 @@
 // 作品是不是在云散开时已经准备好（排着等出场）、出场的间隔是不是约 60 ms、旧星球的作品是不是全遮住以后才撤。
 // WEBGL2=1：藏起 navigator.gpu，走 WebGL2 后备；HEADED=1：有界面的 Chrome（无头模式可能拿不到 WebGPU）。
 // DPR=<n>：设备像素比（默认 2，章程的 1440×900、DPR 2；录像默认 1）；LOCAL=1：「你的星球」用本机的私有真实模型（默认用种子数据的占位作品，?nolocal）。
+// SKY=sunset：录像前把天空换成日落（看转场的云跟着换色）。
 // 原来是 T2（卡通分支）的自查脚本，搬到 int/v6（motion）：云层改成全屏网格（director.ts、style/veil.ts），检查项不变。
 // --record <目录>：不量帧时间，改成「时间停住、一帧一帧往前走」逐帧截图，用 ffmpeg 拼成每个转场一段 MP4，再挑几张关键帧
 import { execFileSync } from 'node:child_process';
@@ -20,7 +21,7 @@ const building = seed.teams.find((t) => t.status === 'under-construction');
 const WEBGL2 = process.env.WEBGL2 === '1';
 const recordAt = process.argv.indexOf('--record');
 const RECORD = recordAt >= 0 ? process.argv[recordAt + 1] : null;
-const tag = WEBGL2 ? 'webgl2' : 'webgpu';
+const tag = (WEBGL2 ? 'webgl2' : 'webgpu') + (process.env.SKY ? `-${process.env.SKY}` : '');
 const DPR = Number(process.env.DPR ?? (RECORD ? 1 : 2));
 const QUERY = process.env.LOCAL === '1' ? '' : '?nolocal';
 const pct = (xs, p) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * p))];
@@ -131,6 +132,12 @@ try {
     const { context, page, pageErrors } = await openPage();
     await page.goto(`${base}/${QUERY}`);
     await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
+    if (process.env.SKY) {
+      await page.evaluate((p) => window.__world.setSkyPreset(p), process.env.SKY);
+      await page.waitForFunction(() => !window.__trans.state().peek, null, { timeout: 8000 });
+      await page.waitForTimeout(2200); // 天空预设 2 秒过渡完
+      await page.evaluate(() => window.__trans.peek());
+    }
     // 开场探头：开页就停住时间（探头前有 0.2 秒的等待，停住时还没开始）
     await record(page, 'peek', async () => {}, 2.5, { 'peek-wave': 70 });
     await page.waitForTimeout(400);
