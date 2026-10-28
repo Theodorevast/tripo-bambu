@@ -450,8 +450,6 @@ function flowerGeometry(): THREE.InstancedBufferGeometry {
   return geo;
 }
 
-const smooth01 = (t: number) => t * t * (3 - 2 * t);
-
 // —— 主体 ——
 
 export function createGrassField(opts: GrassOptions): GrassField {
@@ -1302,9 +1300,4 @@ export function createGrassField(opts: GrassOptions): GrassField {
     groundTint,
     inspect,
   };
-}
-
-// 本模块的 smoothstep，测试和 CPU 侧用
-export function smoothstepJS(a: number, b: number, x: number): number {
-  return smooth01(THREE.MathUtils.clamp((x - a) / (b - a), 0, 1));
 }
