@@ -9,16 +9,17 @@ import { dot, float, floor, fract, interleavedGradientNoise, length, max, min, m
 // 参数都是 uniform：?tune 改 GRADE 再调 applyGrade() 立刻生效，不重新编译着色器
 
 export const GRADE_DEFAULTS = {
-  warmth: 0.12, // 白平衡：正数偏暖，-1..1
+  warmth: 0.1, // 白平衡：正数偏暖，-1..1（整体偏暖会让草发黄发褐；暖主要放在亮部）
   tint: 0, // 正数偏品红、负数偏绿，-1..1
-  saturation: 1.08, // 整体饱和度（1 不变）
-  vibrance: 0.3, // 自然饱和度：越灰的颜色加得越多
-  contrast: 0.16, // S 曲线的强度（0 不变，1 是完整的 smoothstep）
+  saturation: 1.14, // 整体饱和度（1 不变）
+  vibrance: 0.25, // 自然饱和度：越灰的颜色加得越多（太大会把淡淡的大气光晕、光环也染出来）
+  contrast: 0.14, // S 曲线的强度（0 不变，1 是完整的 smoothstep）
+  mids: 0.08, // 中间调提亮（显示空间，0 不变）：阳光明快，暗部不跟着变灰
   lift: 0.018, // 黑位抬高（显示空间）
   shadowTint: '#6a5fd0', // 暗部偏的颜色（蓝紫）
-  shadows: 0.1, // 暗部偏色的量
+  shadows: 0.18, // 暗部偏色的量
   highlightTint: '#ffd08c', // 亮部偏的颜色（奶油金）
-  highlights: 0.07, // 亮部偏色的量
+  highlights: 0.16, // 亮部偏色的量
   vignette: 0.2, // 四角压暗的量（0 关）
   vignetteTint: '#5d4567', // 压暗时乘的颜色（暖紫）
   paper: 0, // 纸纹的强度（0 关；0.02–0.04 能看出来）
@@ -39,6 +40,7 @@ const U = {
   saturation: uniform(1),
   vibrance: uniform(0),
   contrast: uniform(0),
+  mids: uniform(0),
   lift: uniform(new THREE.Vector3()), // 黑位抬到的颜色
   shadowShift: uniform(new THREE.Vector3()), // 暗部加的偏移（亮度为 0 的偏移，只改色相）
   highlightShift: uniform(new THREE.Vector3()),
@@ -74,6 +76,7 @@ export function applyGrade(): void {
   U.saturation.value = g.saturation;
   U.vibrance.value = g.vibrance;
   U.contrast.value = g.contrast;
+  U.mids.value = g.mids;
   displayRgb(g.shadowTint, U.lift.value).multiplyScalar(g.lift * 2);
   hueShift(g.shadowTint, g.shadows, U.shadowShift.value);
   hueShift(g.highlightTint, g.highlights, U.highlightShift.value);
@@ -114,6 +117,8 @@ export function gradeDisplay(color: V3, uv: V2, pixel: V2): V3 {
   // 柔和的 S 曲线：两端不动，中间调对比高一点
   const s = c0.mul(c0).mul(float(3).sub(c0.mul(2)));
   const c = mix(c0, s, U.contrast).toVar();
+  // 中间调提亮：c + k·c·(1−c)·4，两端不动
+  c.addAssign(c.mul(float(1).sub(c)).mul(U.mids.mul(4)));
   // 分离色调：按亮度分暗部、亮部，各加一个不改亮度的色相偏移
   const l = dot(c, LUMA);
   c.addAssign(U.shadowShift.mul(float(1).sub(smoothstep(0.0, 0.6, l))));

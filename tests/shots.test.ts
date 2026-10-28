@@ -31,19 +31,19 @@ describe('镜头表：距离都按星球半径换算', () => {
     expect(f.maxDistance).toBeCloseTo(500 * 1.6 * k, 9);
   });
 
-  it('星球视图：沿展示方向的方位角、从斜上方 26° 看，离星球中心 2.6 个半径；抬头、远近限制都按半径；镜头不压到水平面 8° 以下', () => {
+  it('星球视图：沿展示方向的方位角、按镜头表的仰角和距离（× 半径）；抬头、远近限制都按半径；镜头不压到水平面 8° 以下', () => {
     const home = new THREE.Vector3(40, -12, 25);
     for (const radius of [15, 30, 60]) {
       const f = planetFraming(home, SHOTS.planet, radius);
       const offset = f.position.clone().sub(home);
-      expect(offset.length()).toBeCloseTo(2.6 * radius, 9);
+      expect(offset.length()).toBeCloseTo(SHOTS.planet.distance * radius, 9);
       const dir = offset.normalize();
-      expect(THREE.MathUtils.radToDeg(Math.asin(dir.y))).toBeCloseTo(26, 9);
+      expect(THREE.MathUtils.radToDeg(Math.asin(dir.y))).toBeCloseTo(SHOTS.planet.elevation, 9);
       // 和展示方向在同一个方位角上
       const pole = new THREE.Vector3(...SHOWCASE_POLE);
       expect(Math.atan2(dir.x, dir.z)).toBeCloseTo(Math.atan2(pole.x, pole.z), 9);
       expect(f.target.equals(home)).toBe(true);
-      expect(f.lift).toBeCloseTo(0.3 * radius, 9);
+      expect(f.lift).toBeCloseTo(SHOTS.planet.lift * radius, 9);
       expect([f.minDistance, f.maxDistance]).toEqual([1.35 * radius, 4 * radius]);
       expect(f.maxPolar).toBeCloseTo(THREE.MathUtils.degToRad(82), 9);
       expect(f.autoRotate).toBe(false);

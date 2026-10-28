@@ -33,9 +33,9 @@ export const SHOTS: { galaxy: GalaxyShot; planet: PlanetShot } = {
   // 星系全景：离中心 270、仰角 30°，画面中心压到星系中心下方 25（lift 为负）——
   // 离镜头近的星球在画面里偏低，整片星系往上提一点，上下才匀称。都是星球半径 10 时的数，按 galaxyScale 放大
   galaxy: { distance: 270, elevation: 30, lift: -25, fov: 45, minDistance: 140, maxDistance: 500 },
-  // 星球视图：沿展示方向的方位角、从斜上方 26° 看，离星球中心 2.6 个半径；画面中心比星球中心高 0.3 个半径（镜头往上抬约 6.6°），
-  // 星球露在云海上面的那半个（草地圆台和作品）占画面宽的六成多，上面还露出一条地平线和天空
-  planet: { distance: 2.6, elevation: 26, lift: 0.3, fov: 45, minDistance: 1.35, maxDistance: 4, minElevation: 8, maxElevation: 80 },
+  // 星球视图：沿展示方向的方位角、从斜上方 30° 看，离星球中心 2.8 个半径；画面中心比星球中心高 0.2 个半径（look 调的）：
+  // 整颗星球坐在云海上，左右和下面都留出一圈云，作品那一带在画面中上部
+  planet: { distance: 2.8, elevation: 30, lift: 0.2, fov: 45, minDistance: 1.35, maxDistance: 4, minElevation: 8, maxElevation: 80 },
 };
 
 // —— 分镜表：各个转场的镜头参数（转场的编排在 transition.ts / director.ts）——

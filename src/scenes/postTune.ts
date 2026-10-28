@@ -1,6 +1,6 @@
 import { FEEL } from '../play/followCamera';
 import { applyGrade, GRADE } from '../style/grade';
-import { CONTACT, DEBUG_VIEWS, POST, RAYS } from './post';
+import { CONTACT, DEBUG_VIEWS, POST, RAYS, WASH } from './post';
 import type { World } from './world';
 
 // ?tune 的「Look」组（look 角色的参数）：后处理开关、调色、接触阴影、日落光束、漫游镜头的手感。
@@ -15,7 +15,7 @@ interface Folder extends Events {
   addBinding<T extends object>(target: T, key: keyof T & string, params?: Record<string, unknown>): Events;
 }
 
-export const LOOK_TUNE = { grade: GRADE, contact: CONTACT, rays: RAYS, followFeel: FEEL };
+export const LOOK_TUNE = { grade: GRADE, wash: WASH, contact: CONTACT, rays: RAYS, followFeel: FEEL };
 
 export function addLookTune(pane: Folder, world: World): void {
   const look = pane.addFolder({ title: 'Look', expanded: false });
@@ -29,6 +29,7 @@ export function addLookTune(pane: Folder, world: World): void {
   grade.addBinding(GRADE, 'saturation', { min: 0, max: 2, step: 0.01 });
   grade.addBinding(GRADE, 'vibrance', { min: -1, max: 1.5, step: 0.01 });
   grade.addBinding(GRADE, 'contrast', { label: 'soft contrast', min: 0, max: 1, step: 0.01 });
+  grade.addBinding(GRADE, 'mids', { label: 'brighten mids', min: -0.3, max: 0.3, step: 0.005 });
   grade.addBinding(GRADE, 'lift', { label: 'black lift', min: 0, max: 0.1, step: 0.001 });
   grade.addBinding(GRADE, 'shadowTint', { label: 'shadow tint' });
   grade.addBinding(GRADE, 'shadows', { label: 'shadow tint ×', min: 0, max: 0.5, step: 0.005 });
@@ -39,6 +40,18 @@ export function addLookTune(pane: Folder, world: World): void {
   grade.addBinding(GRADE, 'paper', { label: 'paper grain', min: 0, max: 0.15, step: 0.005 });
   grade.addBinding(GRADE, 'dither', { min: 0, max: 2, step: 0.1 });
   grade.on('change', () => applyGrade());
+
+  const wash = look.addFolder({ title: 'Sun warm / shade cool', expanded: false });
+  wash.addBinding(WASH, 'strength', { min: 0, max: 1.5, step: 0.01 });
+  wash.addBinding(WASH, 'warm', { label: 'lit tint' });
+  wash.addBinding(WASH, 'lit', { label: 'lit brightness', min: 0.5, max: 2, step: 0.01 });
+  wash.addBinding(WASH, 'cool', { label: 'shade hue' });
+  wash.addBinding(WASH, 'shade', { label: 'shade brightness', min: 0.3, max: 1.2, step: 0.01 });
+  wash.addBinding(WASH, 'from', { label: 'warm from (cos)', min: -1, max: 1, step: 0.01 });
+  wash.addBinding(WASH, 'to', { label: 'warm to (cos)', min: -1, max: 1, step: 0.01 });
+  wash.addBinding(WASH, 'near', { label: 'fade below ×R', min: 0, max: 2, step: 0.01 });
+  wash.addBinding(WASH, 'far', { label: 'full above ×R', min: 0, max: 3, step: 0.01 });
+  wash.on('change', () => world.post.apply());
 
   const contact = look.addFolder({ title: 'Contact shadows', expanded: false });
   contact.addBinding(CONTACT, 'strength', { min: 0, max: 1, step: 0.01 });
