@@ -82,6 +82,7 @@ export interface Life {
   setEnabled(effect: LifeEffect, on: boolean): void;
   isEnabled(effect: LifeEffect): boolean;
   setQuality(q: LifeQuality): void;
+  setPlanet(planet: LifePlanet): void; // 换星球：踩踏图清空（贴图对象不变，分辨率按创建时的半径），蝴蝶搬到新星球
   stats(): LifeStats;
   readonly debug: { trampleTarget: THREE.RenderTarget; butterflies: Float32Array }; // 自查脚本用：读回踩踏图、蝴蝶位置（世界坐标 xyz × N）
 }
@@ -733,8 +734,8 @@ function makeRain(U: Uniforms, rng: Rng) {
 const PETAL_BOX = 18;
 const PETAL_TOP = 4.5; // 从这么高落下
 const PETAL_REST = 0.25; // 一轮里躺在地上的比例
-const PETAL_MAX: Record<LifeQuality, number> = { high: 56, low: 28 };
-const FLUFF_MAX: Record<LifeQuality, number> = { high: 44, low: 22 };
+const PETAL_MAX: Record<LifeQuality, number> = { high: 72, low: 32 };
+const FLUFF_MAX: Record<LifeQuality, number> = { high: 64, low: 28 };
 
 function makePetals(U: Uniforms, rng: Rng) {
   const n = PETAL_MAX.high;
@@ -769,7 +770,7 @@ function makePetals(U: Uniforms, rng: Rng) {
   const tumble = min(alt.sub(0.03), 1.2).div(1.2);
   const ang = sin(t.mul(Q.z.mul(1.5).add(1.1)).add(Q.w.mul(6.283))).mul(2.4).add(t.mul(Q.w.sub(0.5).mul(3))).mul(tumble);
   const { t1, t2 } = basisOf(up);
-  const size = float(0.034).mul(Q.y.mul(0.5).add(0.75)).mul(fade);
+  const size = float(0.04).mul(Q.y.mul(0.5).add(0.75)).mul(fade);
   const local = t1.mul(positionGeometry.x.mul(0.62)).add(t2.mul(positionGeometry.y)).mul(size);
   const m = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, alphaTest: 0.5 });
   m.alphaToCoverage = true;
@@ -815,7 +816,7 @@ function makeFluff(U: Uniforms, rng: Rng) {
   centerPos = centerPos.add(pushAway(U, centerPos, 1.2));
   const dist = length(centerPos.sub(U.cam));
   const fade = edge.mul(smoothstep(0, 0.08, p)).mul(float(1).sub(smoothstep(0.85, 1, p))).mul(float(1).sub(smoothstep(8, 12, dist)));
-  const size = float(0.03).mul(Q.z.mul(0.5).add(0.75));
+  const size = float(0.042).mul(Q.z.mul(0.5).add(0.75));
   const m = transparentMaterial();
   m.positionNode = centerPos.add(U.camRight.mul(positionGeometry.x.mul(size))).add(U.camUp.mul(positionGeometry.y.mul(size)));
   // 冠毛：一圈细丝 + 中心一点
@@ -833,10 +834,10 @@ function makeFluff(U: Uniforms, rng: Rng) {
 }
 
 // ---------- 萤火虫（傍晚）/ 花粉光点（白天）：无状态，叠加混合 ----------
-// 同一批实例：傍晚是会呼吸明灭的暖黄绿色光点（HDR，有 bloom 时会晕开）；白天其中四成是很淡的金色花粉，逆光时才看得清
+// 同一批实例：傍晚是会呼吸明灭的暖黄绿色光点（HDR，有 bloom 时会晕开）；白天其中七成是很淡的金色花粉，逆光时才看得清
 
 const FIRE_BOX = 24;
-const FIRE_MAX: Record<LifeQuality, number> = { high: 80, low: 40 };
+const FIRE_MAX: Record<LifeQuality, number> = { high: 120, low: 56 };
 
 function makeFireflies(U: Uniforms, rng: Rng) {
   const n = FIRE_MAX.high;
@@ -857,9 +858,9 @@ function makeFireflies(U: Uniforms, rng: Rng) {
   const flicker = sin(t.mul(17).add(Q.z.mul(40))).mul(0.12).add(0.88);
   const level = breathe.mul(flicker).mul(0.92).add(0.08);
   const near = edge.mul(float(1).sub(smoothstep(14, 20, dist)));
-  const pollen = select(Q.w.lessThan(0.4), float(1), float(0)).mul(U.pollenAmt);
+  const pollen = select(Q.w.lessThan(0.7), float(1), float(0)).mul(U.pollenAmt);
   const fire = U.fireAmt;
-  const size = mix(float(0.05), float(0.2).mul(Q.y.mul(0.4).add(0.8)), fire).mul(select(fire.add(pollen).greaterThan(0.001), float(1), float(0)));
+  const size = mix(float(0.07), float(0.2).mul(Q.y.mul(0.4).add(0.8)), fire).mul(select(fire.add(pollen).greaterThan(0.001), float(1), float(0)));
   const m = transparentMaterial(THREE.AdditiveBlending);
   m.positionNode = centerPos.add(U.camRight.mul(positionGeometry.x.mul(size))).add(U.camUp.mul(positionGeometry.y.mul(size)));
   const r2 = dot(positionGeometry.xy, positionGeometry.xy);
@@ -905,7 +906,7 @@ function makeButterflies(U: Uniforms, rng: Rng, n: number) {
   const span = c.x.mul(0.5).add(0.5); // 0 = 翅根，1 = 翅尖
   const wingDir = rgt.mul(sideSign.mul(cos(ang))).add(up.mul(sin(ang)));
   const wingPos = P.xyz.add(bob).add(f.mul(c.y.mul(0.75).mul(size))).add(wingDir.mul(span.mul(size)));
-  const bodyPos = P.xyz.add(bob).add(f.mul(c.y.mul(size).mul(0.55))).add(up.mul(c.x.mul(0.008)));
+  const bodyPos = P.xyz.add(bob).add(f.mul(c.y.mul(size).mul(0.42))).add(up.mul(c.x.mul(0.0045)));
   const m = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, alphaTest: 0.5 });
   m.alphaToCoverage = true;
   m.positionNode = select(isBody, bodyPos, wingPos);
@@ -1049,6 +1050,12 @@ const COL_CRUMB = new THREE.Color(0.46, 0.36, 0.26);
 
 const INFLUENCE_RADIUS = 1.3;
 
+// 踩踏图边长：一个像素约 0.2 米（高档）/ 0.4 米（低档），取 2 的幂，256–1024。半径 30 → 512²，60 → 1024²，15 → 256²
+export function trampleSizeFor(radius: number, quality: LifeQuality): number {
+  const want = radius * (quality === 'high' ? 16 : 8);
+  return THREE.MathUtils.clamp(2 ** Math.ceil(Math.log2(Math.max(1, want))), 256, 1024);
+}
+
 // ---------- createLife ----------
 
 export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, planet: LifePlanet, opts: LifeOptions = {}): Life {
@@ -1070,7 +1077,7 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
   const fireflies = makeFireflies(U, rng);
   const sim = new ButterflySim(BUTTERFLY_MAX.high, seed + 1);
   const butterflies = makeButterflies(U, rng, BUTTERFLY_MAX.high);
-  const trampleSize = quality === 'high' ? 512 : 256;
+  const trampleSize = trampleSizeFor(planet.radius, quality);
   const trample = makeTrample(renderer, trampleSize);
   const meshes = [butterflies.mesh, dust.mesh, splashes.mesh, petals.mesh, fluff.mesh, fireflies.mesh, rain.mesh];
   root.add(...meshes);
@@ -1396,6 +1403,15 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
     isEnabled: (effect) => enabled[effect],
     setQuality(q) {
       quality = q;
+    },
+    setPlanet(p) {
+      planet = p;
+      env.center = p.center;
+      env.flowerNear = p.flowerNear ? (pos, r, out) => p.flowerNear!(pos, r, out) : undefined;
+      U.center.value.copy(p.center);
+      trample.clear();
+      hasLastStamp = false;
+      sim.placed = false;
     },
     stats() {
       let drawCalls = 0;

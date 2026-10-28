@@ -1,4 +1,4 @@
-// 生机层自查：node dev/life.check.mjs [--out <目录>] [--no-func] [--no-perf] [--no-video] [--no-webgl] [--quick]
+// 生机层自查：node dev/life.check.mjs [--out <目录>] [--no-func] [--no-perf] [--no-webgpu-perf] [--no-video] [--no-webgl] [--quick]
 // 1. 功能：脚步扬尘出现 / 停下后消失、踩踏图写入并按时恢复、蝴蝶受惊、雨量平滑和回调、水花、萤火虫只在傍晚、页面无报错
 // 2. 堆分配采样：走路 + 下雨 3 秒，src/nature/ 的调用下面没有构造 three 对象
 // 3. 截图（WebGPU，1440×900）：n3-walk、n3-rain、n3-evening、n3-trample、n3-webgl2
@@ -263,7 +263,9 @@ try {
     const allAmp = await amplified('all', ALL_ON);
     if (!QUICK) {
       await amplified('all #2', ALL_ON);
-      for (const [n, keys] of [['rain+splashes', ['rain', 'splashes']], ['fireflies', ['fireflies']], ['petals+fluff', ['petals']], ['butterflies', ['butterflies']], ['dust', ['dust']]]) {
+      // 分项只在 WebGPU 上测：WebGL2（ANGLE）在不限帧率、每帧 11 遍渲染、计时查询连跑十几分钟后页面崩过一次（见报告），
+      // 分项对 WebGL2 不是必需的，不再冒这个险
+      if (label === 'WebGPU') for (const [n, keys] of [['rain+splashes', ['rain', 'splashes']], ['fireflies', ['fireflies']], ['petals+fluff', ['petals']], ['butterflies', ['butterflies']], ['dust', ['dust']]]) {
         await amplified(n, only(...keys));
       }
       await amplified('all (low tier)', ALL_ON, 'low');
@@ -275,7 +277,7 @@ try {
     await context.close();
     return out;
   }
-  if (!flag('--no-perf')) summary.perf.webgpu = await perf('WebGPU', '&auto');
+  if (!flag('--no-perf') && !flag('--no-webgpu-perf')) summary.perf.webgpu = await perf('WebGPU', '&auto');
 
   // ---------------- WebGL2 ----------------
   if (!flag('--no-webgl')) {
@@ -290,14 +292,22 @@ try {
     await shot(page, 'n3-webgl2.png');
     check('WebGL2 页无报错', errors.length === 0, errors.slice(0, 3).join(' | '));
     await context.close();
-    if (!flag('--no-perf')) summary.perf.webgl2 = await perf('WebGL2', '&auto&webgl');
+    if (!flag('--no-perf')) {
+      try {
+        summary.perf.webgl2 = await perf('WebGL2', '&auto&webgl');
+      } catch (e) {
+        check('WebGL2 测量跑完', false, e.message);
+      }
+    }
   }
 } catch (e) {
   check('自查脚本跑完', false, e.stack ?? e.message);
 } finally {
-  await browser.close();
-  if (perfBrowser) await perfBrowser.close();
-  await server.close();
+  // 页面崩了时 close() 可能一直等：每一步最多等 10 秒
+  const within = (p) => Promise.race([p, new Promise((r) => setTimeout(r, 10000))]);
+  await within(browser.close());
+  if (perfBrowser) await within(perfBrowser.close());
+  await within(server.close());
   const failed = results.filter((r) => !r.ok);
   writeFileSync(path.join(OUT, 'n3-check.json'), JSON.stringify(summary, null, 2));
   console.log(`\n${results.length - failed.length}/${results.length} 通过${failed.length ? `；失败：${failed.map((f) => f.name).join('；')}` : ''}`);

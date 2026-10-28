@@ -288,6 +288,7 @@ const walk = {
 };
 const cam = { fwd: new THREE.Vector3(0, 0, 1), pitch: 0.3, dist: 5.4 };
 const keys = new Set<string>();
+const freeCam = { on: false, pos: new THREE.Vector3(), target: new THREE.Vector3() };
 const opts = { auto: params.has('auto'), autoTurn: 0.22, autoPath: false }; // 自动走：绕圈，或者沿土路走
 addEventListener('keydown', (e) => {
   keys.add(e.code);
@@ -391,9 +392,16 @@ function placeWalkerAndCamera(dt: number): void {
   const camDir = _x.copy(_pos).normalize();
   const minR = height(camDir) + 0.35;
   if (_pos.length() < minR) _pos.copy(camDir).multiplyScalar(minR);
-  camera.position.lerp(_pos, 1 - Math.exp(-14 * dt));
-  camera.up.copy(up);
-  camera.lookAt(_target);
+  if (freeCam.on) {
+    // 截图用的自由镜头：位置和注视点直接给定，「上」取镜头所在处的球面法线
+    camera.position.copy(freeCam.pos);
+    camera.up.copy(freeCam.pos).normalize();
+    camera.lookAt(freeCam.target);
+  } else {
+    camera.position.lerp(_pos, 1 - Math.exp(-14 * dt));
+    camera.up.copy(up);
+    camera.lookAt(_target);
+  }
   // 影子相机跟着角色
   sun.target.position.copy(_feet);
   sun.position.copy(_feet).addScaledVector(sunDir, 40);
@@ -636,7 +644,7 @@ declare global {
     __life?: {
       ready: boolean;
       backend: string;
-      set(p: { bench?: { amp: number; target: 'life' | 'empty' }; rain?: number; wind?: number; evening?: number; auto?: boolean; autoTurn?: number; autoPath?: boolean; effects?: Partial<typeof fx>; quality?: LifeQuality; camera?: { pitch?: number; dist?: number; yaw?: number } }): void;
+      set(p: { bench?: { amp: number; target: 'life' | 'empty' }; rain?: number; wind?: number; evening?: number; auto?: boolean; autoTurn?: number; autoPath?: boolean; effects?: Partial<typeof fx>; quality?: LifeQuality; camera?: { pitch?: number; dist?: number; yaw?: number; free?: { pos: number[]; target: number[] } | null } }): void;
       gpu(frames: number): Promise<{ mean: number; median: number; p90: number; n: number }>;
       stats(): ReturnType<typeof life3.stats> & { fps: number; frameMs: number; gpuMs: number; rainLight: number; rain: number };
       key(code: string, down: boolean): void;
@@ -664,6 +672,13 @@ window.__life = {
     if (p.camera?.pitch !== undefined) cam.pitch = p.camera.pitch;
     if (p.camera?.dist !== undefined) cam.dist = p.camera.dist;
     if (p.camera?.yaw !== undefined) cam.fwd.applyAxisAngle(walk.dir, p.camera.yaw);
+    if (p.camera?.free !== undefined) {
+      freeCam.on = p.camera.free !== null;
+      if (p.camera.free) {
+        freeCam.pos.fromArray(p.camera.free.pos);
+        freeCam.target.fromArray(p.camera.free.target);
+      }
+    }
     applyLook();
     pushWeather();
     applyEffects();

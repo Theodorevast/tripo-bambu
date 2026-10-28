@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
-import { B_FLEE, B_REST, BUTTERFLY, ButterflySim, FootstepTracker, octDecode, octEncode, type ButterflyEnv } from '../src/nature/life';
+import { B_FLEE, B_REST, BUTTERFLY, ButterflySim, FootstepTracker, octDecode, octEncode, trampleSizeFor, type ButterflyEnv } from '../src/nature/life';
 
 describe('trample map coordinates (octahedral)', () => {
   it('round-trips every direction on the sphere', () => {
@@ -29,6 +29,14 @@ describe('trample map coordinates (octahedral)', () => {
     const ua = octEncode(a, new THREE.Vector2());
     const ub = octEncode(b, new THREE.Vector2());
     expect(ua.distanceTo(ub)).toBeLessThan(0.02);
+  });
+
+  it('map size follows the planet radius (about 0.2 m texels on the high tier), power of two, 256–1024', () => {
+    expect(trampleSizeFor(30, 'high')).toBe(512);
+    expect(trampleSizeFor(60, 'high')).toBe(1024);
+    expect(trampleSizeFor(15, 'high')).toBe(256);
+    expect(trampleSizeFor(30, 'low')).toBe(256);
+    expect(trampleSizeFor(200, 'high')).toBe(1024);
   });
 
   it('a 512² map gives about 0.2 m texels on a 30 m planet', () => {
