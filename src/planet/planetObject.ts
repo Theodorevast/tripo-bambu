@@ -4,10 +4,11 @@ import type { Placement, PlanetRecipe, PresetId } from '../data/types';
 import { buildTerrainGeometry, LOD_LOW } from './generate';
 import { groundMaterial } from './ground';
 import { maskWorks, PlanetMask } from './mask';
-import { atmosphereMaterial, ringMaterial, waterMaterial } from './materials';
+import { ringMaterial, waterMaterial } from './materials';
 import { makeHeightFn, seaRadius, type HeightFn } from './noise';
 import { MAX_PLINTH_RADIUS } from './placement';
 import { PLANET_RADIUS, PRESETS } from './presets';
+import { PlanetLookParts } from '../nature/planetLook';
 
 // 一颗星球的 3D 对象：地表（两档细分）、小水塘、大气、光环；works 组挂作品，decor 组挂石头等点缀（聚焦时才有），重建时都保留。
 // mask 是星球遮罩（土路、作品空地）：地表着色器画路，草和石头按它避开
@@ -16,6 +17,7 @@ export class PlanetObject {
   readonly works = new THREE.Group();
   readonly decor = new THREE.Group();
   readonly mask = new PlanetMask();
+  readonly look = new PlanetLookParts(); // 远看的样子：大气光晕、云层（nature/planetLook.ts；镜头近了自己藏起来）
   terrain!: THREE.Mesh;
   height!: HeightFn;
   sea = 0;
@@ -31,7 +33,7 @@ export class PlanetObject {
 
   constructor(recipe: PlanetRecipe) {
     this.decor.name = 'decor';
-    this.group.add(this.works, this.decor);
+    this.group.add(this.works, this.decor, this.look.group);
     this.setRecipe(recipe);
   }
 
@@ -101,10 +103,8 @@ export class PlanetObject {
     this.rebuildMask(false);
     this.rebuildTerrain();
     if (this.sea > 0) this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(this.sea, 24), waterMaterial(preset)));
-    if (this.recipe.atmosphere) {
-      const r = R * (1 + PRESETS[preset].amp) * 1.05; // 薄外壳：比最高的地形再高 5%，光晕只占轮廓外窄窄一圈
-      this.addPart(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 8), atmosphereMaterial(preset, R, this.haloStrengthNode)));
-    }
+    // 大气光晕、云层：远看的部件（外壳贴着最高的地形外面一点）
+    this.look.build({ radius: R, top: R * (1 + PRESETS[preset].amp * 0.75), seed: this.recipe.seed, tint: PRESETS[preset].atmosphere, atmosphere: this.recipe.atmosphere, haloStrength: this.haloStrengthNode });
     if (this.recipe.ring) {
       const inner = R * 1.45;
       const outer = R * 2.15;
@@ -141,7 +141,7 @@ export class PlanetObject {
       this.group.remove(this.terrain);
       disposeTree(this.terrain);
     }
-    this.terrain = new THREE.Mesh(geometry, groundMaterial(preset, this.mask.node));
+    this.terrain = new THREE.Mesh(geometry, groundMaterial(preset, this.mask.node, this.look.cloudOffset));
     this.terrainPreset = preset;
     this.terrain.name = 'terrain';
     this.terrain.receiveShadow = true;
