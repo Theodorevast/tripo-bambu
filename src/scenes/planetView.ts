@@ -85,6 +85,7 @@ const _t2 = new THREE.Vector3();
 
 // 聚焦星球上的作品：放展台和拾取盒，模型加载完再挂上；地形变了重新贴地
 export class PlanetView {
+  static active: PlanetView | null = null; // 页面里正在用的那一个（?tune 的 Works & gardens 组找它）
   readonly library = new ModelLibrary();
   readonly placed = new Map<string, PlacedWork>();
   readonly extraWorks = new Map<string, Work>(); // 拖进来的临时作品
@@ -106,6 +107,7 @@ export class PlanetView {
 
   constructor(world: World) {
     this.world = world;
+    PlanetView.active = this;
     for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
       // 和真的展台一样投影、接受阴影：接受阴影的着色器不一样，不设的话预热的是另一份
       const warm = new THREE.Mesh(plinthGeometry(), plinthMaterial(loading, glow));

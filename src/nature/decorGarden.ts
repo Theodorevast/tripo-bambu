@@ -85,6 +85,13 @@ const smooth = (e0: number, e1: number, x: number) => {
 const pick = <T>(rng: Rng, xs: readonly T[]): T => xs[Math.floor(rng() * xs.length) % xs.length];
 const hex = (s: string) => new THREE.Color(s);
 
+// 团队色多半是浅浅的粉彩：小旗、开花的灌木要从远处看得见，同一个色相提饱和度、亮度压到中间
+const _hsl = { h: 0, s: 0, l: 0 };
+export function vivid(c: THREE.Color): THREE.Color {
+  c.getHSL(_hsl, THREE.SRGBColorSpace);
+  return new THREE.Color().setHSL(_hsl.h, Math.max(_hsl.s, 0.72), Math.min(0.6, Math.max(0.46, _hsl.l)), THREE.SRGBColorSpace);
+}
+
 // —— 布局：一件作品的全部候选零件（放大倍数 1，切平面坐标）——
 // 只依赖作品 id、展台半径、作品缩放和团队色：和地面、邻居无关（过滤在 filterGarden 里做）
 export function gardenCandidates(work: GardenWork): Item[] {
@@ -101,7 +108,8 @@ export function gardenCandidates(work: GardenWork): Item[] {
     return it;
   };
   const polar = (r: number, a: number): [number, number] => [Math.sin(a) * r, Math.cos(a) * r]; // a = 0 正面，往 +x（右）转
-  const flowerColors = [...PALETTE.flowers.map(hex), work.accent.clone().lerp(new THREE.Color(1, 1, 1), 0.25)];
+  const accent = vivid(work.accent);
+  const flowerColors = [...PALETTE.flowers.map(hex), accent];
 
   // 1. 踏脚石：从展台正面往土路铺 3 块扁石板
   for (let i = 0; i < 3; i++) {
@@ -157,11 +165,14 @@ export function gardenCandidates(work: GardenWork): Item[] {
     prev = [x, z];
   }
 
-  // 4. 灌木：栅栏两头各一丛，背后偶尔再来一丛大的
+  // 4. 灌木：栅栏两头各一丛（一丛常常是开满花的，远看是一团颜色），背后偶尔再来一丛大的
+  const bloomColor = rng() < 0.5 ? accent.clone() : pick(rng, flowerColors);
   for (const end of [-1, 1]) {
     const [x, z] = polar(rf + 0.12, Math.PI + end * (half + 0.28));
     const s = (0.8 + rng() * 0.3) * k;
-    add('bush', x, z, { yaw: rng() * 6.28, sx: s, sy: s * (0.85 + rng() * 0.3), sz: s, sink: 0.04 * k, sway: 0.02, tint: new THREE.Color(1, 1, 1).multiplyScalar(0.88 + rng() * 0.2), delay: 0.45 + rng() * 0.15 });
+    const bloom = end === side || rng() < 0.3;
+    const tint = bloom ? bloomColor.clone().multiplyScalar(0.92 + rng() * 0.12) : new THREE.Color(1, 1, 1).multiplyScalar(0.88 + rng() * 0.2);
+    add(bloom ? 'bloom' : 'bush', x, z, { yaw: rng() * 6.28, sx: s, sy: s * (0.85 + rng() * 0.3), sz: s, sink: 0.04 * k, sway: 0.02, tint, delay: 0.45 + rng() * 0.15 });
   }
   if (rng() < 0.55) {
     const [x, z] = polar(rf + 0.55, Math.PI + (rng() - 0.5) * 0.7);
@@ -193,7 +204,13 @@ export function gardenCandidates(work: GardenWork): Item[] {
     add('signface', x, z, { ...common });
   }
 
-  // 7. 长椅：另一侧稍后方，朝着作品
+  // 7. 小旗：栅栏外侧、背后偏路牌那一侧，团队色的三角旗。远看是一根竖线挑着一块颜色，作品在哪一眼就找到
+  {
+    const [x, z] = polar(rf + 0.22, Math.PI - side * (0.35 + rng() * 0.2));
+    add('flag', x, z, { yaw: rng() * 6.28, sx: k, sy: k * (0.95 + rng() * 0.1), sz: k, sink: 0.03 * k, sway: 0.16, tint: accent.clone(), delay: 0.32 });
+  }
+
+  // 8. 长椅：另一侧稍后方，朝着作品
   if (rng() < 0.6) {
     const a = -side * (1.95 + rng() * 0.25);
     const [x, z] = polar(rp + 1.05, a);
@@ -229,7 +246,7 @@ export function filterGarden(items: Item[], work: GardenWork, ground: GardenGrou
     if (ground.sea > 0 && ground.height(d) < ground.sea + 0.04) ok = false;
     for (const o of others) {
       const near = d.angleTo(o.dir) * R;
-      const keep = id === 'post' || id === 'rail' || id === 'bush' || id === 'bench' ? o.plinth + 1.2 : o.plinth + 0.45;
+      const keep = id === 'post' || id === 'rail' || id === 'bush' || id === 'bloom' || id === 'bench' || id === 'flag' ? o.plinth + 1.2 : o.plinth + 0.45;
       if (near < keep) ok = false;
     }
     it.ok = ok;
