@@ -579,6 +579,7 @@ export function createWater(host: WaterHost): THREE.Object3D {
   const mesh = new THREE.Mesh(buildWaterGeometry(builtFrom, host.sea), waterMaterial(host.currentRecipe.preset));
   mesh.name = 'water';
   mesh.receiveShadow = true; // 作品、翠宝的影子落在水面上
+  const stream = createStream(host);
   mesh.onBeforeRender = () => {
     const g = host.terrain.geometry;
     if (g === builtFrom) return;
@@ -586,10 +587,10 @@ export function createWater(host: WaterHost): THREE.Object3D {
     const old = mesh.geometry;
     mesh.geometry = buildWaterGeometry(g, host.sea);
     old.dispose();
+    stream?.sync(); // 小溪只在聚焦的细分上建、画
   };
   group.add(mesh);
-  const stream = createStream(host);
-  if (stream) group.add(stream);
+  if (stream) group.add(stream.mesh);
   return group;
 }
 

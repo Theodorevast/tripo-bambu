@@ -31,6 +31,18 @@ export const STREAM = {
 
 const STEP = 0.2; // 路线每一步（米）
 const INTO_WATER = 1.2; // 入水口往水里伸多远（米）
+const FINE_TRIANGLES = 6000; // 地表超过这么多三角形才算「聚焦的细分」（星系里 2420，聚焦时 20480 起）
+
+// 一个面积为 0 的三角形：没有小溪时占位（不出片元）
+function emptyGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
+  geo.setAttribute('streamA', new THREE.BufferAttribute(new Float32Array([9, 0, 0, 0, 9, 0, 0, 0, 9, 0, 0, 0]), 4));
+  geo.setIndex([0, 1, 2]);
+  geo.computeBoundingSphere();
+  return geo;
+}
 
 export interface StreamHost {
   readonly terrain: THREE.Mesh;
@@ -308,18 +320,12 @@ export function buildStreamGeometry(terrain: THREE.BufferGeometry, path: StreamP
     }
     void base;
   }
+  if (indices.length === 0) return emptyGeometry();
   const geo = new THREE.BufferGeometry();
-  if (indices.length === 0) {
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
-    geo.setAttribute('streamA', new THREE.BufferAttribute(new Float32Array([9, 0, 0, 0, 9, 0, 0, 0, 9, 0, 0, 0]), 4));
-    geo.setIndex([0, 1, 2]);
-  } else {
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
-    geo.setAttribute('streamA', new THREE.BufferAttribute(new Float32Array(attrs), 4));
-    geo.setIndex(indices);
-  }
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geo.setAttribute('streamA', new THREE.BufferAttribute(new Float32Array(attrs), 4));
+  geo.setIndex(indices);
   geo.computeBoundingSphere();
   return geo;
 }
@@ -406,47 +412,52 @@ function sourceAt(host: StreamHost, path: StreamPath): THREE.Vector3 {
 }
 
 // 建一颗星球的小溪（water.ts 的 createWater 调）。找不到合适的路线时返回 null。
-// 地表换细分时跟着重建几何；摆放变了（遮罩重画）时重新找路线；草和石头通过 mask.extraExclude 让开
-export function createStream(host: StreamHost): THREE.Mesh | null {
+// 星系里（地表是粗的那一档）小溪不到一个像素：几何换成一个面积为 0 的三角形（不建真的几何、不出片元）；
+// 聚焦（地表换成细的）时才建。网格一直是可见的：开场预编译（compileAsync 跳过不可见的物体）要把它的管线编好，
+// 否则第一次聚焦时在主线程上同步编译，进星球那一帧卡 100–230 ms（实测）。
+// 换细分由水面那个网格的 onBeforeRender 发现（它一直在画），调这里返回的 sync()。
+// 摆放变了（遮罩重画）时重新找路线；草和石头通过 mask.extraExclude 让开（路线在建星球时就找好，草摆放时已经让开）
+export function createStream(host: StreamHost): { mesh: THREE.Mesh; sync(): void } | null {
   let path = findStreamPath(host);
   if (!path) return null;
   const R = host.radius;
-  let builtFrom = host.terrain.geometry;
   const material = streamMaterial(host.currentRecipe.preset, sourceAt(host, path));
-  const mesh = new THREE.Mesh(buildStreamGeometry(builtFrom, path, R, host.sea), material);
+  const mesh = new THREE.Mesh(emptyGeometry(), material);
   mesh.name = 'stream';
   mesh.receiveShadow = true;
   mesh.renderOrder = 1; // 入水口那一扇白沫叠在水面上面
-  let exclude = streamExclude(path, R);
-  host.mask.extraExclude = exclude;
-  const rebuild = () => {
+  let builtFrom: THREE.BufferGeometry | null = null; // 真的几何按哪个地表建的；null = 现在是占位的三角形
+  let ex = streamExclude(path, R);
+  host.mask.extraExclude = ex;
+  const fine = () => (host.terrain.geometry.index?.count ?? 0) / 3 > FINE_TRIANGLES;
+  const swap = (geo: THREE.BufferGeometry, from: THREE.BufferGeometry | null) => {
     const old = mesh.geometry;
-    mesh.geometry = buildStreamGeometry(builtFrom, path!, R, host.sea);
+    mesh.geometry = geo;
     old.dispose();
+    builtFrom = from;
   };
-  mesh.onBeforeRender = () => {
-    if (host.terrain.geometry === builtFrom) return;
-    builtFrom = host.terrain.geometry;
-    rebuild();
+  const sync = () => {
+    if (path && fine()) {
+      if (builtFrom !== host.terrain.geometry) swap(buildStreamGeometry(host.terrain.geometry, path, R, host.sea), host.terrain.geometry);
+    } else if (builtFrom !== null) swap(emptyGeometry(), null);
   };
-  // 摆放变了：先不让草让开（重新找路线时 exclude 不能挡住自己），再找一遍
+  // 摆放变了：先不让草让开（重新找路线时 extraExclude 不能挡住自己），再找一遍
   const unsubscribe = host.onMaskChange(() => {
-    if (host.mask.extraExclude === exclude) host.mask.extraExclude = null;
+    if (host.mask.extraExclude === ex) host.mask.extraExclude = null;
     const next = findStreamPath(host);
-    if (!next) {
-      mesh.visible = false;
-      return;
-    }
     path = next;
-    exclude = streamExclude(path, R);
-    host.mask.extraExclude = exclude;
-    (material.userData.source as THREE.Vector3).copy(sourceAt(host, path));
-    mesh.visible = true;
-    rebuild();
+    if (next) {
+      ex = streamExclude(next, R);
+      host.mask.extraExclude = ex;
+      (material.userData.source as THREE.Vector3).copy(sourceAt(host, next));
+    }
+    if (builtFrom !== null) swap(emptyGeometry(), null); // 路线变了：按新路线重建（或者没有路线了：换回占位）
+    sync();
   });
   material.addEventListener('dispose', () => {
     unsubscribe();
-    if (host.mask.extraExclude === exclude) host.mask.extraExclude = null;
+    if (host.mask.extraExclude === ex) host.mask.extraExclude = null;
   });
-  return mesh;
+  sync();
+  return { mesh, sync };
 }
