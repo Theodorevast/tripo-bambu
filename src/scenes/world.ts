@@ -3,6 +3,7 @@ import { setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { createAtmosphere, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
 import { createLife, type Life, type LifePlanet } from '../nature/life';
+import { updatePlanetLook } from '../nature/planetLook';
 import { decorInstances } from '../planet/decor';
 import { focusDetail, LOD_LOW, prewarmTerrain } from '../planet/generate';
 import { PlanetObject } from '../planet/planetObject';
@@ -330,14 +331,19 @@ export class World {
     this.setHover(null);
     this.atmosphere.setPlanet(e.home, PLANET_RADIUS);
     this.fadeRings(e);
-    await this.director.focus(e, prev !== null && prev !== e, planetFraming(e.home), () => {
-      if (prev && prev !== e) prev.planet.setDetail(LOD_LOW);
-      e.planet.setDetail(focusDetail());
-      this.dressing.enter(e);
-      this.life.setPlanet(this.lifePlanet(e));
-      this.life.object.visible = true;
-      cues.covered?.();
-    });
+    // 全遮住以后分三帧：先撤旧作品、摆新展台（App，作品最早开始准备）→ 换地表细分 → 草、石头、生机层
+    await this.director.focus(e, prev !== null && prev !== e, planetFraming(e.home), [
+      () => cues.covered?.(),
+      () => {
+        if (prev && prev !== e) prev.planet.setDetail(LOD_LOW);
+        e.planet.setDetail(focusDetail());
+      },
+      () => {
+        this.dressing.enter(e);
+        this.life.setPlanet(this.lifePlanet(e));
+        this.life.object.visible = true;
+      },
+    ]);
     return e;
   }
 
@@ -349,7 +355,7 @@ export class World {
     // 星系视图里云海压到所有星球下面（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）：马上开始（1.2 秒缓动，云散开时已经快到位）
     this.galaxySky();
     this.setWalker(null);
-    await this.director.unfocus(prev, this.galaxyView(), () => cues.covered?.());
+    await this.director.unfocus(prev, this.galaxyView(), [() => cues.covered?.()]);
     if (this.focused === null) {
       this.dressing.leave();
       this.life.object.visible = false;
@@ -507,6 +513,7 @@ export class World {
     light.sunColor.copy(sun.color);
     light.sunIntensity = sun.intensity;
     light.evening = WEATHER.evening ?? eveningFor(this.atmosphere.params.sunElevation);
+    updatePlanetLook(dt, light.sunDir, camera, this.focused?.planet.look ?? null); // planet：远看的大气、云层跟着太阳转，镜头近了、看别的星球时藏起来
     if (this.life.object.visible) {
       this.life.setWalker(this.walkerOn ? this.walkerPos : null, this.walkerVel, this.walkerGrounded);
       const w = this.weatherArgs;

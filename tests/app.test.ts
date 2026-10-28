@@ -33,7 +33,7 @@ function fakeWorld() {
     setHover: () => {},
     pickPlanet: () => null,
     intro: () => Promise.resolve(),
-    peekIntro: () => false,
+    director: { peekIntro: () => false },
     // 假世界不走转场的时间线：cues.covered 不调，App 落地后自己补上撤作品、摆作品
     focus: (id: string) => fly(`focus ${id}`),
     unfocus: () => fly('unfocus'),
@@ -181,34 +181,39 @@ describe('App 路由队列', () => {
     error.mockRestore();
   });
 
-  it('转场里的时机：从星系进来一开始就摆作品；跳到另一颗星球、回星系时在云层全遮住那一刻才撤旧作品、摆新作品', async () => {
+  it('转场里的时机：一开始只预取模型；进星球、跳到另一颗星球、回星系都在云层全遮住那一刻才摆新作品、撤旧作品', async () => {
     const { app, location } = setup('#/');
     // 这个假世界记下 App 给的 cues：测试自己决定什么时候「全遮住」、什么时候落地
     const world = app.world as unknown as { focus: unknown; unfocus: unknown };
     let cues: { covered?: () => void } = {};
     const pending: Array<() => void> = [];
     const flying = (): Promise<null> => new Promise((resolve) => pending.push(() => resolve(null)));
-    world.focus = (_id: string, c: { covered?: () => void } = {}) => { cues = c; return flying(); };
-    world.unfocus = (c: { covered?: () => void } = {}) => { cues = c; return flying(); };
+    world.focus = (_id: string, given: { covered?: () => void } = {}) => { cues = given; return flying(); };
+    world.unfocus = (given: { covered?: () => void } = {}) => { cues = given; return flying(); };
     const log: string[] = [];
-    app.planetLayer = { enter: (t) => { log.push(`enter ${t.id}`); }, leave: () => { log.push('leave'); } };
+    app.planetLayer = {
+      enter: (t) => { log.push(`enter ${t.id}`); },
+      leave: () => { log.push('leave'); },
+      prefetch: (t) => { log.push(`prefetch ${t.id}`); },
+    };
     const landAll = () => { for (const r of pending.splice(0)) r(); };
     await app.start();
     location.hash = '#/t/a';
     await settle();
-    expect(log).toEqual(['enter a']); // 起飞就摆（模型加载藏在转场里）
+    expect(log).toEqual(['prefetch a']); // 起飞就开始下载模型（加载藏在转场里），展台还没摆
     cues.covered?.();
-    expect(log).toEqual(['enter a']); // 全遮住时不再摆一次
+    expect(log).toEqual(['prefetch a', 'enter a']); // 全遮住时摆展台
     landAll();
     await settle();
+    expect(log).toEqual(['prefetch a', 'enter a']); // 落地后不重复
     location.hash = '#/t/b';
     await settle();
-    expect(log).toEqual(['enter a']); // 旧星球的作品还在
+    expect(log).toEqual(['prefetch a', 'enter a', 'prefetch b']); // 旧星球的作品还在
     cues.covered?.();
-    expect(log).toEqual(['enter a', 'leave', 'enter b']);
+    expect(log).toEqual(['prefetch a', 'enter a', 'prefetch b', 'leave', 'enter b']);
     landAll();
     await settle();
-    expect(log).toEqual(['enter a', 'leave', 'enter b']); // 落地后不重复
+    expect(log.length).toBe(5);
     location.hash = '#/';
     await settle();
     expect(log.at(-1)).toBe('enter b');

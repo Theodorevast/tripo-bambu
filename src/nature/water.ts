@@ -6,6 +6,7 @@ import {
   abs,
   attribute,
   cameraPosition,
+  color,
   cos,
   dot,
   exp,
@@ -70,6 +71,7 @@ export const WATER = {
   caustics: 1, // 水底光斑
   roughness: 0.07, // 水面的粗糙度：越小天空的倒影越清楚
   sheen: 2, // 天光反射的倍数（正对着看时；掠射时总是全反射）：物理上的水是 1，绘本里水面映的天光更明显
+  iceLat: 0.9, // 冰川预设：|y|（纬度的正弦）超过它的水面整片冻住。舞台在北纬约 56°（|y| ≈ 0.83），舞台前的水塘只结岸边那一圈
 };
 
 // 每个预设一组颜色（sRGB）：浅水、中间、深水、白沫。没有水的预设也给一组，类型完整
@@ -79,6 +81,9 @@ export interface WaterPalette {
   deep: string;
   foam: string;
 }
+
+// 海冰的多少（配方「海冰」）：只有冰川预设结冰
+export const WATER_ICE: Record<PresetId, number> = { verdant: 0, desert: 0, glacier: 1, volcanic: 0, coral: 0 };
 
 export const WATER_COLORS: Record<PresetId, WaterPalette> = {
   verdant: { shallow: '#7cc9b4', mid: '#3f9a9c', deep: '#1f5f78', foam: '#f4f0e2' },
@@ -97,7 +102,8 @@ export const RING = {
   wave: 24, // 波包里的波数（弧度/米）：约 26 厘米一道
   amp: 0.004, // 波高（米）
   step: 0.32, // 角色在水里每走这么远放一圈（米）
-  idle: 1.4, // 站着不动时每隔这么久放一圈（秒）
+  idle: 2.2, // 站着不动时每隔这么久放一圈（秒）
+  jitter: 0.09, // 每圈的圆心在脚下随机挪开多远（米）：两只脚轮流踩，圈不是同心的
 };
 
 // 所有水面材质共用的 uniform：放进 renderGroup（每次 render 刷新一次）
@@ -113,6 +119,7 @@ const U = {
   caustics: uniform(WATER.caustics).setGroup(renderGroup),
   roughness: uniform(WATER.roughness).setGroup(renderGroup),
   sheen: uniform(WATER.sheen).setGroup(renderGroup),
+  iceLat: uniform(WATER.iceLat).setGroup(renderGroup),
   rain: uniform(0).setGroup(renderGroup), // 平滑过的雨量 0..1（installWater 每帧从生机层取）
   walker: uniform(new THREE.Vector4(0, -1e5, 0, 0)).setGroup(renderGroup), // 角色在水里时：xyz = 水面上脚下那一点（世界坐标），w = 1
 };
@@ -133,6 +140,7 @@ export function applyWater(): void {
   U.caustics.value = WATER.caustics;
   U.roughness.value = WATER.roughness;
   U.sheen.value = WATER.sheen;
+  U.iceLat.value = WATER.iceLat;
 }
 
 type ColorUniform = THREE.UniformNode<'color', THREE.Color>;
@@ -149,11 +157,23 @@ function paletteOf(preset: PresetId): Record<keyof WaterPalette, ColorUniform> {
   return p;
 }
 
+const ices = new Map<PresetId, THREE.UniformNode<'float', number>>();
+
+function iceOf(preset: PresetId): THREE.UniformNode<'float', number> {
+  let u = ices.get(preset);
+  if (!u) {
+    u = uniform(WATER_ICE[preset]).setGroup(renderGroup);
+    ices.set(preset, u);
+  }
+  return u;
+}
+
 export function applyWaterPalette(): void {
   for (const [preset, p] of palettes) {
     const c = WATER_COLORS[preset];
     for (const k of Object.keys(p) as Array<keyof WaterPalette>) p[k].value.set(c[k]);
   }
+  for (const [preset, u] of ices) u.value = WATER_ICE[preset];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -199,7 +219,7 @@ const ringsNode = Fn(([p, pw]: [V3, V3]) => {
       const fade = float(1).sub(age.div(RING.life));
       const env = exp(x.mul(x).mul(invW2)).mul(fade.mul(fade));
       grad.addAssign(rel.div(max(r, 1e-3)).mul(packetSlope(x, env, RING.wave, RING.width).mul(RING.amp)));
-      crest.addAssign(env.mul(smoothstep(0.6, 1, cos(x.mul(RING.wave)))).mul(fade));
+      crest.addAssign(env.mul(smoothstep(0.72, 1, cos(x.mul(RING.wave)))).mul(fade).mul(0.6));
     });
   });
   // 雨点：两层格子（三维格子和水面相交），每格一个雨点，相位随时间循环；雨小时只有一部分格子有雨点
@@ -282,7 +302,7 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   const d = max(dq, 0);
   const t = time;
   // 防闪：一个像素覆盖多少米。频率 f（每米几个周期）的图案一个周期少于 2 个像素时淡掉
-  const perPixel = length(fwidth(p)).max(1e-5);
+  const perPixel = length(fwidth(p)).max(1e-5).toVar();
   const keep = (f: number | F) => smoothstep(1.2, 3, float(1).div(perPixel.mul(f)));
   const camLocal = modelWorldMatrixInverse.mul(vec4(cameraPosition, 1)).xyz;
   const V = normalize(camLocal.sub(p));
@@ -291,9 +311,11 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // ---- 小波纹（配方「波光粼粼」：两层噪声把法线推歪，频率换算成每米）。风大水面碎一点
   const rs = U.rippleScale;
   const windK = windUniforms.strength.mul(0.9).add(0.55);
+  // 再加一层大的（约 3 米一起伏，慢慢漂）：海面远看时天光的倒影有一条条明暗，不是一整片平的
+  const o0 = noise3v(p.mul(rs.mul(0.33)).add(vec3(t.mul(0.05), t.mul(0.03), t.mul(-0.04))).add(41.3)).sub(0.5);
   const o1 = noise3v(p.mul(rs.mul(1.1)).add(vec3(t.mul(0.23), t.mul(-0.17), t.mul(0.11)))).sub(0.5);
   const o2 = noise3v(p.mul(rs.mul(2.6)).add(vec3(t.mul(-0.31), t.mul(0.21), t.mul(-0.26))).add(19.7)).sub(0.5);
-  const shimmer = o1.mul(keep(rs.mul(1.1))).add(o2.mul(0.55).mul(keep(rs.mul(2.6)))).mul(U.ripple).mul(windK);
+  const shimmer = o0.mul(0.6).add(o1.mul(keep(rs.mul(1.1)))).add(o2.mul(0.55).mul(keep(rs.mul(2.6)))).mul(U.ripple).mul(windK);
   // 一圈圈的波纹：梯度（世界坐标；星球不转，方向和本地一样）
   const rings = ringsNode(p, positionWorld).toVar();
   const tilt = shimmer.sub(rings.xyz);
@@ -309,7 +331,8 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
 
   // ---- 深浅（配方「浅海透明」）：浅处青绿、看得见底，往深处变成蓝绿；大块的不匀，像手涂的
   const patch = valueNoise3(p.mul(0.33).add(5.3)).sub(0.5);
-  const tone = saturate(d.div(U.deep).add(patch.mul(0.22)));
+  const bigPatch = valueNoise3(p.mul(0.07).add(13.1)).sub(0.5); // 海上十几米一块的深浅（远看像水彩一笔一笔涂的）
+  const tone = saturate(d.div(U.deep).add(patch.mul(0.22)).add(bigPatch.mul(0.3)));
   const body = mix(mix(pal.shallow, pal.mid, smoothstep(0.0, 0.55, tone)), pal.deep, smoothstep(0.45, 1.0, tone));
   const pathLen = d.div(max(cosV, 0.35)); // 视线在水里走过的路程：斜着看更不透（掠射时封顶，近岸那一条斜着看也透底）
   const absorb = float(1).sub(exp(pathLen.mul(U.clarity).negate()));
@@ -330,37 +353,76 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // 角色站在水里：腿边一圈碎白沫
   const toWalker = length(positionWorld.sub(U.walker.xyz));
   const legs = exp(toWalker.sub(0.2).div(0.05).pow(2).negate()).mul(U.walker.w).mul(smoothstep(0.35, 0.6, fN2));
-  const foam = saturate(max(max(rim, lace.mul(0.85)), max(line.mul(0.5), legs.mul(0.8))).add(rings.w.mul(0.3))).mul(U.foam).mul(exists).toVar();
+  // ---- 海冰（配方「海冰」，只有冰川预设的 ice > 0）：岸边先结一圈不规则的薄冰，离岸两三米内漂着一块块冰（慢慢漂），
+  // 两极（|y| 超过 iceLat）整片冻住、边缘按噪声抖。冰上有细细的裂纹，冰的边上一道白边
+  const iceAmt = iceOf(preset);
+  const ice = Fn(() => {
+    const r = float(0).toVar();
+    If(iceAmt.greaterThan(0.001), () => {
+      const iN = valueNoise3(p.mul(0.25).add(31.7));
+      const iN2 = valueNoise3(p.mul(1.6).add(vec3(t.mul(0.012), 0, t.mul(-0.01))).add(9.2));
+      const rimIce = float(1).sub(smoothstep(0.1, 0.2, e.add(iN.sub(0.5).mul(0.3)).add(iN2.sub(0.5).mul(0.2))));
+      const floes = smoothstep(0.7, 0.73, iN2).mul(smoothstep(0.2, 0.5, e)).mul(float(1).sub(smoothstep(1.2, 2.2, e)));
+      const polar = smoothstep(U.iceLat.sub(0.02), U.iceLat.add(0.02), abs(n.y).add(iN.sub(0.5).mul(0.12)).add(iN2.sub(0.5).mul(0.03)));
+      r.assign(max(max(rimIce, floes), polar).mul(iceAmt));
+    });
+    return r;
+  })().mul(exists).toVar();
+  // 冰的颜色：薄冰（浅水上）透一点水的青色，厚冰发白；一块块冰有大块的明暗；裂纹是细的青线；边上一道白
+  const crack = float(1).sub(smoothstep(0.0, 0.035, abs(valueNoise3(p.mul(2.4).add(4.4)).sub(0.5)))).mul(keep(2.4));
+  const iceEdge = smoothstep(0.05, 0.45, ice).mul(float(1).sub(smoothstep(0.55, 0.95, ice)));
+  const iceBase = mix(mix(pal.shallow, color('#dcebf0'), 0.6), color('#e8f2f5'), smoothstep(0.0, 0.4, d).mul(0.7).add(patch.add(0.5).mul(0.3)));
+  const iceCol = mix(mix(iceBase, color('#9fc7d6'), crack.mul(0.6)), color('#fbfdfd'), iceEdge);
 
-  const alpha = mix(alphaBody, exists, foam);
-  m.colorNode = mix(body.mul(alphaBody), pal.foam.mul(exists), foam); // 预乘过透明度
+  const foam = saturate(max(max(rim, lace.mul(0.85)), max(line.mul(0.5), legs.mul(0.8))).add(rings.w.mul(0.3))).mul(U.foam).mul(exists.sub(ice).max(0)).toVar();
+
+  const alpha = mix(mix(alphaBody, exists, foam), exists, ice);
+  m.colorNode = mix(mix(body.mul(alphaBody), pal.foam.mul(exists), foam), iceCol.mul(exists), ice); // 预乘过透明度
   m.opacityNode = alpha;
-  m.roughnessNode = mix(U.roughness, float(0.85), foam);
-  m.normalNode = transformNormalToView(mix(nWater, n, foam));
+  m.roughnessNode = mix(mix(U.roughness, float(0.85), foam), float(0.3), ice);
+  m.normalNode = transformNormalToView(mix(nWater, n, max(foam, ice)));
   // 反光：F0 = 0.02（水的折射率 1.333）× sheen（绘本里水面的天光更明显），F90 = exists：画出来的水边外面不反光
   m.specularColorNode = vec3(U.sheen);
   m.specularIntensityNode = exists;
 
-  // ---- 闪光：更细的一层「小镜面」，只有正好把光反进镜头的那几个亮一下（随时间换位置，一闪一闪）；远处淡掉
-  const g1 = noise3v(p.mul(23).add(vec3(t.mul(1.3), t.mul(-0.9), t.mul(0.7)))).sub(0.5);
-  const g2 = noise3v(p.mul(37).add(vec3(t.mul(-1.5), t.mul(1.1), t.mul(1.2))).add(7.7)).sub(0.5);
-  const gTilt = g1.add(g2.mul(0.8)).mul(0.6);
-  const glintN = transformNormalToView(normalize(nWater.add(gTilt.sub(n.mul(dot(n, gTilt))))));
-  const glintAmt = U.sparkle.mul(keep(23)).mul(exists.sub(foam).max(0)).mul(5);
+  // ---- 闪光：更细的一层「小镜面」，只有正好把光反进镜头的那几个亮一下（随时间换位置，一闪一闪）；远处淡掉。
+  // 那两层细噪声只在太阳反光的大致范围里算（水面法线和半程向量夹角 37° 以内），别的像素直接跳过。
+  // 带导数的量（keep）都在分支外面先算好：WGSL 不许在非一致的分支里取导数
+  const glintAmt = U.sparkle.mul(keep(23)).mul(exists.sub(foam).max(0)).mul(5).toVar();
+  const nWaterView = transformNormalToView(nWater);
+  const glint = (L: V3): F => Fn(() => {
+    const out = float(0).toVar();
+    const H = normalize(L.add(positionViewDirection)).toVar();
+    If(glintAmt.greaterThan(0.001).and(dot(nWaterView, H).greaterThan(0.8)), () => {
+      const g1 = noise3v(p.mul(23).add(vec3(t.mul(1.3), t.mul(-0.9), t.mul(0.7)))).sub(0.5);
+      const g2 = noise3v(p.mul(37).add(vec3(t.mul(-1.5), t.mul(1.1), t.mul(1.2))).add(7.7)).sub(0.5);
+      const gTilt = g1.add(g2.mul(0.8)).mul(0.6);
+      const glintN = transformNormalToView(normalize(nWater.add(gTilt.sub(n.mul(dot(n, gTilt))))));
+      out.assign(smoothstep(0.9978, 0.9995, dot(glintN, H)).mul(glintAmt));
+    });
+    return out;
+  })() as unknown as F;
 
-  // ---- 水底光斑：沿折射后的视线落到水底的那一点上取两层「脊」噪声相乘，成一张网；浅水最亮，深了、浑了就淡
-  const refr = refract(V.negate(), n, 0.752);
-  const q = p.add(refr.mul(d.div(max(dot(refr.negate(), n), 0.25))));
-  const ridge = (v: F) => float(1).sub(abs(v.sub(0.5)).mul(2));
-  const c1 = valueNoise3(q.mul(2.3).add(vec3(t.mul(0.21), t.mul(-0.13), t.mul(0.17))));
-  const c2 = valueNoise3(q.mul(3.1).add(vec3(t.mul(-0.16), t.mul(0.19), t.mul(-0.11))).add(11.1));
-  const web = pow(ridge(c1).mul(ridge(c2)), 5);
-  const causticAmt = web.mul(U.caustics).mul(0.35).mul(smoothstep(0.01, 0.06, d)).mul(float(1).sub(smoothstep(0.12, 0.55, d)))
-    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(foam)).mul(keep(3.1));
+  // ---- 水底光斑：沿折射后的视线落到水底的那一点上取两层「脊」噪声相乘，成一张网；浅水最亮，深了、浑了就淡。
+  // 只在浅水、看得见底的地方算噪声
+  const causticK = U.caustics.mul(0.35).mul(smoothstep(0.01, 0.06, d)).mul(float(1).sub(smoothstep(0.12, 0.55, d)))
+    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(max(foam, ice))).mul(keep(12)).toVar(); // 远处就不画了：从星球视图看像撒了一层白点
+  const causticAmt = Fn(() => {
+    const out = float(0).toVar();
+    If(causticK.greaterThan(0.001), () => {
+      const refr = refract(V.negate(), n, 0.752);
+      const q = p.add(refr.mul(d.div(max(dot(refr.negate(), n), 0.25))));
+      const ridge = (v: F) => float(1).sub(abs(v.sub(0.5)).mul(2));
+      const c1 = valueNoise3(q.mul(2.3).add(vec3(t.mul(0.21), t.mul(-0.13), t.mul(0.17))));
+      const c2 = valueNoise3(q.mul(3.1).add(vec3(t.mul(-0.16), t.mul(0.19), t.mul(-0.11))).add(11.1));
+      out.assign(pow(ridge(c1).mul(ridge(c2)), 5).mul(causticK));
+    });
+    return out;
+  })() as unknown as F;
   const nView = transformNormalToView(n);
 
   m._extras = {
-    glint: (L) => smoothstep(0.9978, 0.9995, dot(glintN, normalize(L.add(positionViewDirection)))).mul(glintAmt),
+    glint,
     caustic: (L) => pal.shallow.mul(causticAmt.mul(saturate(dot(nView, L)))),
   };
   return m;
@@ -539,12 +601,17 @@ function stepWater(world: World): void {
       inWater = true;
       _at.copy(_dir).multiplyScalar(e.planet.sea).add(e.home);
       const now = time.value;
+      U.walker.value.set(_at.x, _at.y, _at.z, 1);
       if (!wade.inWater || _at.distanceTo(wade.last) > RING.step || now - wade.lastT > RING.idle) {
-        emitRipple(_at);
         wade.last.copy(_at);
         wade.lastT = now;
+        // 圆心在脚下随机挪开一点（挪完再按回水面半径）
+        _at.x += (Math.random() - 0.5) * 2 * RING.jitter;
+        _at.y += (Math.random() - 0.5) * 2 * RING.jitter;
+        _at.z += (Math.random() - 0.5) * 2 * RING.jitter;
+        _at.sub(e.home).setLength(e.planet.sea).add(e.home);
+        emitRipple(_at);
       }
-      U.walker.value.set(_at.x, _at.y, _at.z, 1);
     }
   }
   if (!inWater) U.walker.value.w = 0;
@@ -582,10 +649,12 @@ export function tuneWater(pane: TuneFolder): void {
   f.addBinding(WATER, 'caustics', { min: 0, max: 3, step: 0.01 });
   f.addBinding(WATER, 'roughness', { min: 0.02, max: 0.5, step: 0.005 });
   f.addBinding(WATER, 'sheen', { label: 'sky sheen ×', min: 0, max: 5, step: 0.05 });
+  f.addBinding(WATER, 'iceLat', { label: 'polar ice from |y|', min: 0.5, max: 1.05, step: 0.005 });
   f.on('change', () => applyWater());
   for (const preset of ['verdant', 'glacier', 'coral'] as const) {
     const c = f.addFolder({ title: `Colors · ${preset}`, expanded: false });
     for (const k of Object.keys(WATER_COLORS[preset]) as Array<keyof WaterPalette>) c.addBinding(WATER_COLORS[preset], k);
+    c.addBinding(WATER_ICE, preset, { label: 'sea ice', min: 0, max: 1, step: 0.01 });
     c.on('change', () => applyWaterPalette());
   }
 }

@@ -11,11 +11,11 @@ export const STAND_TOP = 0.15; // 顶面比地面高多少（米）：脚踝高�
 export const STAND_DEPTH = 0.65; // 从顶面往下延伸多深（米）：下坡一侧靠它补上
 
 // 颜色（线性空间以外的 sRGB 写法，?tune 不调：展台是固定的玩具配色）
-const CREAM = new THREE.Color('#f1e3c4');
-const CREAM_EDGE = new THREE.Color('#e6d3ad');
-const GROOVE = new THREE.Color('#a78a63');
-const SAND = new THREE.Color('#d5b98e');
-const SAND_LOW = new THREE.Color('#b99c74');
+const CREAM = new THREE.Color('#ecd9b2');
+const CREAM_EDGE = new THREE.Color('#dec59a');
+const GROOVE = new THREE.Color('#9c7c55');
+const SAND = new THREE.Color('#cba878');
+const SAND_LOW = new THREE.Color('#a98862');
 const ACCENT = new THREE.Color('#F2B705'); // 翠宝黄：顶面边上一圈细线
 
 // 截面：[半径比例, 高度（米，顶面 0）, 颜色]。相邻两点颜色不同时中间隔 1 毫米，颜色交界是清楚的一条线，法线照样平滑

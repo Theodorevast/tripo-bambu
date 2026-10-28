@@ -8,9 +8,11 @@ import { applyLights, LIGHTS } from './scenes/lights';
 import { applyLook, LOOK, TONE_MAPPINGS } from './scenes/look';
 import { addLookTune, LOOK_TUNE } from './scenes/postTune';
 import { SHOTS } from './scenes/shots';
+import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
+import { addTransitionTune, TRANSITION_TUNE } from './scenes/transitionTune';
 import { SKY, WEATHER, type World } from './scenes/world';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
-import { tuneWater, WATER, WATER_COLORS } from './nature/water';
+import { tuneWater, WATER, WATER_COLORS, WATER_ICE } from './nature/water';
 import { toast } from './ui/toast';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
@@ -61,7 +63,9 @@ export function tuneJson(world?: World): string {
       museumLook: LOOK,
       museumLights: LIGHTS,
       look: LOOK_TUNE,
-      water: { ...WATER, colors: WATER_COLORS },
+      water: { ...WATER, colors: WATER_COLORS, ice: WATER_ICE },
+      stage: STAGE_TUNE,
+      ...TRANSITION_TUNE,
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
     2,
@@ -113,6 +117,7 @@ export function installTune(world: World): void {
   }
 
   tuneWater(pane); // —— Water ——（nature/water.ts）
+  addStageTune(pane); // —— Works & gardens ——（scenes/stageTune.ts：地标放大、间距、花园、摆放反馈）
 
   // —— Grass ——
   const grass = pane.addFolder({ title: 'Grass', expanded: false });
@@ -162,6 +167,8 @@ export function installTune(world: World): void {
   lf.addBinding(life, 'quality', { options: { High: 'high', Low: 'low' } }).on('change', () => world.life.setQuality(life.quality));
   const fx = lf.addFolder({ title: 'Effects', expanded: false });
   for (const k of LIFE_EFFECTS) fx.addBinding(effects, k).on('change', () => world.life.setEnabled(k, effects[k]));
+
+  addTransitionTune(pane, world); // —— Transitions ——（scenes/transitionTune.ts：转场的分镜表、开场探头、演示按钮）
 
   // —— Camera ——
   const cam = pane.addFolder({ title: 'Camera', expanded: false });
