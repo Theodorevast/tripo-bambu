@@ -3,6 +3,8 @@
 // → 别人的星球、建设中的星球也能走，漫游中回星系 → 页面没有报错。
 // 同时量：进入漫游时的最长帧间隔、走路时的帧间隔；用 CDP 采样堆分配，看走路时 src/play/ 的代码有没有新建对象。
 // WEBGL2=1：藏起 navigator.gpu，走 WebGL2 后备。截图存到 shots/w1-*.png
+// V5 起星球半径（PLANET_RADIUS，默认 30）和走路速度（2.4 米/秒）都变了：半径从页面里读，
+// 「走到背面」「翻过北极」的起点挪近（按速度 × 时间能走到的弧长算），点地面的位置按角色前方的地面点投影到屏幕上算（低机位下固定像素会点到天上）
 import { mkdirSync, readFileSync } from 'node:fs';
 import { launch, startServer, watchErrors } from './lib/browser.mjs';
 
@@ -10,7 +12,8 @@ const seed = JSON.parse(readFileSync('src/data/seed.json', 'utf8'));
 const team = seed.teams.find((t) => t.id === seed.you.teamId);
 const other = seed.teams.find((t) => t.id !== team.id && t.works.length > 0);
 const building = seed.teams.find((t) => t.status === 'under-construction');
-const R = 10; // 星球基础半径
+let R = 30; // 星球半径：打开页面后从 src/planet/presets.ts 读
+let SPEED = 2.4; // 走路速度：同上，从 src/play/params.ts 读
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const scale = (a, s) => a.map((x) => x * s);
@@ -90,11 +93,27 @@ const openPlanet = async (id) => {
   await until((t) => window.__app.routeIdle() && document.querySelector('#app')?.dataset.planetReady === t, id, 60000);
 };
 
-await page.goto(`${base}/#/t/${team.id}`);
+// ?nolocal：不换成本机的私有模型，按仓库里的种子数据（占位作品）核对作品名
+await page.goto(`${base}/?nolocal#/t/${team.id}`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
 await until((t) => document.querySelector('#app')?.dataset.planetReady === t, team.id, 60000);
 const charReady = await until(() => window.__walk?.state().ready === true, null, 30000);
 const backend = await page.evaluate(() => window.__app.backend());
+[R, SPEED] = await page.evaluate(async () => [(await import('/src/planet/presets.ts')).PLANET_RADIUS, (await import('/src/play/params.ts')).WALK.speed]);
+// 角色前方 ahead 米、右边 right 米的地面点在屏幕上的位置（点地面用）
+const groundAhead = (p, ahead, right) => p.evaluate(([a, r]) => {
+  const s = window.__walk.state();
+  const cam = window.__world.rig.camera;
+  const up = s.dir;
+  const fwd = s.heading;
+  const side = [fwd[1] * up[2] - fwd[2] * up[1], fwd[2] * up[0] - fwd[0] * up[2], fwd[0] * up[1] - fwd[1] * up[0]];
+  const d = [0, 1, 2].map((k) => up[k] * s.radius + fwd[k] * a + side[k] * r);
+  const len = Math.hypot(...d);
+  const g = s.radius;
+  const at = [0, 1, 2].map((k) => (d[k] / len) * g + s.home[k]);
+  cam.updateMatrixWorld();
+  return window.__world.toScreen(new cam.position.constructor(...at));
+}, [ahead, right]);
 // 飞到星球后 OrbitControls 的阻尼还会让镜头慢慢漂一两秒（星系自转留下的余量）：等它停稳，像真人看一会儿再点 Walk
 await page.waitForTimeout(2500);
 const s0 = await state();
@@ -156,15 +175,21 @@ check('斜着撞上去：贴着圆柱滑过去，到了作品另一边', slideSt
 
 // —— 4. 走到星球背面、翻过北极：镜头的上方向逐帧连续 ——
 await startFrames();
-// 背面：沿赤道从正面（+Z，进入时镜头那一侧）往 +X 走，走过 -Z
-await page.evaluate(() => window.__walk.teleport([0, 0, 1], [1, 0, 0]));
+// 11 秒能走多远（球心角）：按速度曲线 v(t) = V(1 − e^(−10 t)) 积分，再留 15% 余量
+const arc11 = (SPEED * (11 - 0.1) * 0.85) / R;
+// 背面：沿赤道从正面（+Z，进入时镜头那一侧）往 +X 走，走过 -Z（球心角超过 120°）。星球大了、角色慢了，11 秒走不了 120°：
+// 起点放在离 120° 还差 arc11 的地方（不早于 +Z），走的还是同一条赤道
+const backStart = Math.max(0, (2 * Math.PI) / 3 - arc11 + 0.05);
+await page.evaluate(([a]) => window.__walk.teleport([Math.sin(a), 0, Math.cos(a)], [Math.cos(a), 0, -Math.sin(a)]), [backStart]);
 const backTrace = await walkTrace('w', 11000);
 const backStats = traceStats(backTrace);
 const reachedBack = backTrace.some((s) => s.dir[2] < -0.5);
 check('沿赤道走到星球背面：镜头上方向逐帧连续（< 1°/帧），从不倒过来', reachedBack && backStats.maxTurn < (1 * Math.PI) / 180 && backStats.minUpDot > 0.3,
-  `最大 ${deg(backStats.maxTurn).toFixed(3)}°/帧，上·法线最小 ${backStats.minUpDot.toFixed(3)}，${backStats.frames} 帧`);
-// 两极：沿 z = 0 的经线从 +X 往北走，翻过北极到 -X
-await page.evaluate(() => window.__walk.teleport([1, 0, 0], [0, 1, 0]));
+  `从赤道上离 +Z ${deg(backStart).toFixed(0)}° 处出发；最大 ${deg(backStats.maxTurn).toFixed(3)}°/帧，上·法线最小 ${backStats.minUpDot.toFixed(3)}，${backStats.frames} 帧`);
+// 两极：沿 z = 0 的经线从 +X 一侧往北走，翻过北极到 -X（到终点时离北极超过 30°，x < -0.5）。起点按 11 秒能走的弧长往北挪
+// 起点纬度：离北极 arc11 − 35°（走完离北极还有 35° 以上），最近也离北极 3°；半径 10 时（arc11 很大）就从赤道出发
+const lat = Math.max(0, Math.PI / 2 - Math.max((3 * Math.PI) / 180, arc11 - (35 * Math.PI) / 180));
+await page.evaluate(([la]) => window.__walk.teleport([Math.cos(la), Math.sin(la), 0], [-Math.sin(la), Math.cos(la), 0]), [lat]);
 const poleTrace = await walkTrace('w', 11000);
 const walkFrames = await stopFrames();
 const poleStats = traceStats(poleTrace);
@@ -242,7 +267,9 @@ await page.locator('.work-card .wc-close').click();
 await page.evaluate(() => window.__walk.teleport([0, 0, -1], [1, 0, 0]));
 await page.waitForTimeout(400);
 const c0 = await state();
-await page.mouse.click(1010, 560);
+// 角色前方 3 米、右边 1.5 米的地面（低机位下画面里地平线的位置跟着半径变，不用固定像素）
+const clickAt = await groundAhead(page, 3, 1.5);
+await page.mouse.click(clickAt.x, clickAt.y);
 await page.waitForTimeout(100);
 const c1 = await state();
 const stopped = await until(() => !window.__walk.state().moving && window.__walk.state().speed < 0.05, null, 8000);
@@ -325,7 +352,7 @@ const touch = await browser.newContext({ viewport: { width: 1024, height: 768 },
 const tp = await touch.newPage();
 const touchErrors = watchErrors(tp); // 触屏页的错误最后并进 errors
 if (process.env.WEBGL2 === '1') await tp.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
-await tp.goto(`${base}/#/t/${other.id}`);
+await tp.goto(`${base}/?nolocal#/t/${other.id}`);
 await tp.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
 await tp.waitForFunction(() => window.__walk?.state().ready === true, null, { timeout: 30000 });
 await tp.waitForTimeout(1500);
@@ -335,7 +362,8 @@ const tWalk = await tp.waitForFunction(() => window.__walk.state().phase === 'wa
 await tp.evaluate(() => window.__walk.teleport([0, 0, -1], [1, 0, 0]));
 await tp.waitForTimeout(400);
 const t0 = await tp.evaluate(() => window.__walk.state());
-await tp.touchscreen.tap(760, 650); // 角色右前方的地面（这个视角下地平线在 y ≈ 490）
+const tapAt = await groundAhead(tp, 3, 1.2); // 角色右前方的地面
+await tp.touchscreen.tap(tapAt.x, tapAt.y);
 await tp.waitForTimeout(100);
 const t1 = await tp.evaluate(() => window.__walk.state());
 await tp.waitForTimeout(1200);

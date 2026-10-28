@@ -5,6 +5,7 @@ import '@fontsource/nunito/700.css';
 import '@fontsource/nunito/800.css';
 import './ui/styles.css';
 import { App, type Sheet } from './app';
+import { applyLocalWorks } from './assets/localWorks';
 import seedJson from './data/seed.json';
 import { browserStorage, LocalStore } from './data/store';
 import type { Seed } from './data/types';
@@ -18,7 +19,8 @@ import { installWalkDebug } from './play/debug';
 import { WalkMode } from './play/walkMode';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
-const seed = seedJson as unknown as Seed;
+// 本机有私有的真实模型时（开发环境，.tmp/local-models/），「你的星球」上的占位作品换成它们（assets/localWorks.ts）
+const seed = await applyLocalWorks(seedJson as unknown as Seed);
 const store = new LocalStore(seed, browserStorage());
 const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!);
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());

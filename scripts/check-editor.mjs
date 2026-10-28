@@ -81,7 +81,8 @@ const dropGlb = (name) => page.evaluate(([n, data]) => {
 }, [name, glb]);
 const stageAt = (p) => page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id === 'stage', p);
 
-await page.goto(`${base}/#/t/${team.id}`);
+// ?nolocal：按仓库里的种子数据（占位作品）核对，不换成本机的私有模型（src/assets/localWorks.ts）
+await page.goto(`${base}/?nolocal#/t/${team.id}`);
 await ready();
 await page.evaluate((key) => localStorage.removeItem(key), KEY);
 await page.reload();
@@ -121,9 +122,11 @@ check('Delete 删除作品', !(await placedIds()).includes(target.id));
 
 await page.locator('.tray-item', { hasText: target.title }).click();
 await page.waitForTimeout(400);
-// 近景取景下星球中心落在作品栏底下：往上 250 px 点在星球表面上，先确认那一点没有界面挡着
+// 摆在画面下半部分（后面要查下半部分的作品的编辑条）。V5 的星球视图从斜上方看、星球更大：星球中心投在画面中下部
+// （1440×900 下约 y = 575），星球表面上下各有四百多像素；取中心往上 60 px，夹在画面中线以下、作品栏以上。先确认那一点没有界面挡着
 const center = await page.evaluate((id) => window.__app.planetScreenPos(id), team.id);
-const spot = { x: center.x, y: center.y - 250 };
+const trayTop0 = await page.evaluate(() => document.querySelector('.tray').getBoundingClientRect().top);
+const spot = { x: center.x, y: Math.min(Math.max(center.y - 60, 480), trayTop0 - 40) };
 check('摆放点上没有界面遮挡', await stageAt(spot));
 await page.mouse.move(spot.x, spot.y);
 await page.waitForTimeout(100);

@@ -55,6 +55,11 @@ export class CameraRig {
     // 飞行时放开距离限制，否则 update() 会把镜头夹回去
     this.controls.minDistance = 0;
     this.controls.maxDistance = Infinity;
+    // 扔掉 OrbitControls 阻尼里剩下的转动（星系自转、手拖留下的）：不然飞到以后镜头还会慢慢漂一两秒
+    const momentum = this.controls as unknown as { _sphericalDelta?: THREE.Spherical; _panOffset?: THREE.Vector3; _scale?: number };
+    momentum._sphericalDelta?.set(0, 0, 0);
+    momentum._panOffset?.set(0, 0, 0);
+    if (momentum._scale !== undefined) momentum._scale = 1;
     return new Promise((done) => {
       this.flight = { fromPos: this.camera.position.clone(), fromTarget: this.controls.target.clone(), fromLift: this.lift, fromFov: this.camera.fov, to: f, elapsed: 0, seconds: duration, done };
     });

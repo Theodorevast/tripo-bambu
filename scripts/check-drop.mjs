@@ -9,7 +9,8 @@ const { server, base } = await startServer();
 const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = watchErrors(page);
-await page.goto(`${base}/#/t/${seed.you.teamId}`);
+// ?nolocal：用仓库里的种子数据（占位作品），不换成本机的私有模型
+await page.goto(`${base}/?nolocal#/t/${seed.you.teamId}`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
 await page.locator('.topbar button.primary').click();
 
