@@ -9,9 +9,9 @@
   --line: rgba(236, 230, 218, 0.14);
   --accent: #d9b77e;
   --danger: #e07a5f;
-  --font-display: 'Cormorant Garamond', Georgia, serif;
-  --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-display: 'Nunito', ui-rounded, system-ui, sans-serif; /* 圆体字 Nunito（OFL，Fontsource 自托管），和「小王子」方向的柔和画面搭 */
+  --font-ui: 'Nunito', ui-rounded, system-ui, sans-serif;
+  --font-mono: 'Nunito', ui-rounded, system-ui, sans-serif;
   --radius: 3px;
   color-scheme: dark;
 }

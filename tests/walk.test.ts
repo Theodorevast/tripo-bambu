@@ -286,11 +286,12 @@ describe('跟随镜头：基向量连续', () => {
   }
 
   it('沿经线翻过北极、走到背面、再过南极：镜头每帧最多转约 0.4°，上方向始终朝着角色的「上」', () => {
-    // 21 秒约 67 个单位：超过一整圈（62.8），两极都经过
-    const { maxStep, minUpDot, poles, walker } = track(21, () => {});
+    // 走一整圈（半径 10 的平地上 62.8）再多走 4 个单位的时间：两极都经过。秒数按走路速度算（角色变成 1 米高以后速度从 3.2 改成 2.4）
+    const seconds = Math.ceil((2 * Math.PI * R + 4) / WALK.speed + 0.5);
+    const { maxStep, minUpDot, poles, walker } = track(seconds, () => {});
     expect(poles).toBeGreaterThan(0);
     expect(walker.distance).toBeGreaterThan(2 * Math.PI * R);
-    // 速度 3.2 / 半径 10 = 每秒 0.32 弧度 ≈ 每帧 0.31°
+    // 速度 / 半径 10 = 每秒 0.24 弧度 ≈ 每帧 0.23°（速度 3.2 时 0.31°）
     expect(maxStep).toBeLessThan(THREE.MathUtils.degToRad(0.4));
     expect(minUpDot).toBeGreaterThan(Math.cos(FOLLOW.maxPitch) - 1e-6);
   });

@@ -4,6 +4,7 @@ import type { Placement, PlanetRecipe, Team, Work } from '../data/types';
 import { footprintGroundRadius } from '../planet/footprint';
 import { clampScale, faceYaw, PLINTH_HEIGHT, placementTransform, YAW_STEP } from '../planet/placement';
 import { plinthRadius, type PlacedWork, type PlanetView } from '../scenes/planetView';
+import { workFraming } from '../scenes/shots';
 import { EditPanel, type ScreenRect } from '../ui/editPanel';
 import type { PlanetScreen } from '../ui/planetScreen';
 import { toast } from '../ui/toast';
@@ -193,7 +194,7 @@ export class Editor {
       const entry = this.view.planet;
       if (entry) {
         const dir = new THREE.Vector3(...pw.placement.dir).normalize();
-        await this.app.world.rig.fly({ target: entry.home.clone(), position: entry.home.clone().addScaledVector(dir, 30), minDistance: 15, maxDistance: 70, autoRotate: false }, 0.8);
+        await this.app.world.rig.fly(workFraming(entry.home, dir), 0.8);
       }
       return;
     }

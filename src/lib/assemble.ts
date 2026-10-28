@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import type { Member, PresetId, Seed, Team, Work } from '../data/types';
 import { faceYaw, SHOWCASE_POLE, SHOWCASE_UP } from '../planet/placement.ts';
-import { BASE_RADIUS } from '../planet/presets.ts';
+import { LAYOUT_RADIUS } from '../planet/presets.ts';
 import { hashString } from '../planet/rng.ts';
 
 export interface WorkInput {
@@ -99,7 +99,7 @@ export function showcaseDirs(n: number): Array<[number, number, number]> {
   const up = new THREE.Vector3(...SHOWCASE_UP);
   const right = pole.clone().negate().cross(up); // 镜头朝 -pole 看、头顶朝 up 时的屏幕右方
   const row = (count: number, polar: number): Array<[number, number, number]> => {
-    const ring = BASE_RADIUS * Math.sin(polar); // 这一排所在小圆的半径
+    const ring = LAYOUT_RADIUS * Math.sin(polar); // 这一排所在小圆的半径（按旧版的半径 10 量：摆放方向和种子数据保持不变，星球变大后作品间距按比例变大）
     const stepFor = (gap: number) => 2 * Math.asin(Math.min(1, gap / (2 * ring))); // 小圆上弦长为 gap 的圆心角
     let step = stepFor(ARC_GAP);
     if (count > 1) step = Math.max(Math.min(step, (2 * ARC_FAN_MAX) / (count - 1)), stepFor(ARC_MIN_GAP));

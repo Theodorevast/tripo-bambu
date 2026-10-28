@@ -1,12 +1,11 @@
 import * as THREE from 'three/webgpu';
 import { afterEach, describe, expect, it } from 'vitest';
 import { addStudioLights, applyLights, LIGHTS, lightDirection, StudioLights } from '../src/scenes/lights';
-import { applyLook, LOOK, useLook } from '../src/scenes/look';
+import { applyLook, LOOK, LOOK_DEFAULTS, TONE_MAPPINGS, useLook } from '../src/scenes/look';
 
 const lightDefaults = structuredClone(LIGHTS);
 afterEach(() => {
-  LOOK.toneMapping = 'Neutral';
-  LOOK.exposure = 1;
+  Object.assign(LOOK, LOOK_DEFAULTS);
   for (const k of ['sky', 'key', 'rim'] as const) Object.assign(LIGHTS[k], lightDefaults[k]);
 });
 
@@ -47,8 +46,8 @@ describe('色调映射和曝光', () => {
     const b = { toneMapping: 0, toneMappingExposure: 0 } as unknown as THREE.WebGPURenderer;
     useLook(a);
     useLook(b);
-    expect(a.toneMapping).toBe(THREE.NeutralToneMapping);
-    expect(a.toneMappingExposure).toBe(1);
+    expect(a.toneMapping).toBe(TONE_MAPPINGS[LOOK_DEFAULTS.toneMapping]);
+    expect(a.toneMappingExposure).toBe(LOOK_DEFAULTS.exposure);
     LOOK.toneMapping = 'AgX';
     LOOK.exposure = 1.4;
     applyLook();

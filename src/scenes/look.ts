@@ -14,7 +14,9 @@ export const TONE_MAPPINGS = {
 
 export type ToneMappingName = keyof typeof TONE_MAPPINGS;
 
-export const LOOK: { toneMapping: ToneMappingName; exposure: number } = { toneMapping: 'Neutral', exposure: 1 };
+// 「小王子」方向回到真实光照：ACES 电影感的色调映射（暖色的高光不发灰，暗部有层次），曝光 1
+export const LOOK_DEFAULTS: { toneMapping: ToneMappingName; exposure: number } = { toneMapping: 'ACESFilmic', exposure: 1 };
+export const LOOK: { toneMapping: ToneMappingName; exposure: number } = { ...LOOK_DEFAULTS };
 
 // 还在用的渲染器（弱引用）
 const renderers = new Set<WeakRef<THREE.WebGPURenderer>>();

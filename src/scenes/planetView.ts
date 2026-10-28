@@ -2,9 +2,12 @@ import * as THREE from 'three/webgpu';
 import { ModelLibrary, type LoadedModel } from '../assets/models';
 import type { Placement, Team, Work } from '../data/types';
 import { footprintGroundRadius } from '../planet/footprint';
-import { PLINTH_HEIGHT, placementTransform } from '../planet/placement';
-import { BASE_RADIUS, PRESETS } from '../planet/presets';
+import { PLINTH_HEIGHT, placementTransform, plinthRadius } from '../planet/placement';
+import { onPlanetRadius, PRESETS } from '../planet/presets';
+import { plinthMaterial, slabGeometry } from './plinth';
 import type { PlanetEntry, World } from './world';
+
+export { plinthRadius };
 
 export interface PlacedWork {
   work: Work;
@@ -16,25 +19,14 @@ export interface PlacedWork {
   model: LoadedModel | null;
 }
 
-const PLINTH_DEPTH = 2.0; // 展台往地下延伸，坡地上也不露缝：作品按展台下最高的地面贴地，下坡一侧靠这一段补上
-
-// 展台顶面半径（缩放前）：比模型的水平半径略收一点，再保底。编辑器的摆放预览也用它，和摆上去的作品贴地方式一致
-export function plinthRadius(footprint: number): number {
-  return Math.max(0.55, footprint * 0.95);
-}
-
-const plinthGeometry = () => new THREE.CylinderGeometry(1, 1.06, PLINTH_DEPTH, 40);
-
-// 展台材质：模型挂上之前半透明（spec 2.2），挂上后不透明。emissiveIntensity 从 0 开始（自发光颜色是黑的，看不出区别）：
-// three 把数值属性按「是不是 0」算进着色器的缓存键，从 0 开始，换成不透明时才对得上预热过的那份（见构造函数）
-function plinthMaterial(color: THREE.ColorRepresentation, loading: boolean, glow = 0): THREE.MeshStandardNodeMaterial {
-  return new THREE.MeshStandardNodeMaterial({ color, roughness: 0.55, metalness: 0.15, transparent: loading, opacity: loading ? 0.4 : 1, emissiveIntensity: glow });
-}
+// 所有展台共用一份石板几何（按展台半径缩放）
+let slab: THREE.BufferGeometry | null = null;
+const plinthGeometry = () => (slab ??= slabGeometry());
 
 // 射线从起点到进入星球遮挡球的距离，打不中为 Infinity。遮挡球以星球中心为心、半径取最低可能的地形，
 // 比这个距离更远的东西一定在地表背后
 function occluderDistance(ray: THREE.Ray, entry: PlanetEntry): number {
-  const sphere = new THREE.Sphere(entry.home, BASE_RADIUS * (1 - PRESETS[entry.planet.currentRecipe.preset].amp));
+  const sphere = new THREE.Sphere(entry.home, entry.planet.radius * (1 - PRESETS[entry.planet.currentRecipe.preset].amp));
   const p = ray.intersectSphere(sphere, new THREE.Vector3());
   return p ? p.distanceTo(ray.origin) : Infinity;
 }
@@ -55,9 +47,11 @@ export class PlanetView {
   constructor(world: World) {
     this.world = world;
     for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
-      this.warmPlinths.add(new THREE.Mesh(plinthGeometry(), plinthMaterial('#d9b77e', loading, glow)));
+      this.warmPlinths.add(new THREE.Mesh(plinthGeometry(), plinthMaterial(loading, glow)));
     }
     world.stage.precompile(this.warmPlinths).catch((err: unknown) => console.error(err));
+    // 星球半径变了：地形已经重建（World 先收到通知），作品按新地面重新贴地
+    onPlanetRadius(() => this.refreshAll());
   }
 
   get planet(): PlanetEntry | null {
@@ -97,8 +91,10 @@ export class PlanetView {
     const root = new THREE.Group();
     const scaler = new THREE.Group();
     // 模型加载完之前展台是半透明的（spec 2.2）
-    const plinth = new THREE.Mesh(plinthGeometry(), plinthMaterial(this.team?.color ?? '#d9b77e', true));
-    plinth.position.y = PLINTH_HEIGHT - PLINTH_DEPTH / 2;
+    const plinth = new THREE.Mesh(plinthGeometry(), plinthMaterial(true));
+    plinth.position.y = PLINTH_HEIGHT; // 石板顶面在几何的 y = 0，往下延伸 PLINTH_DEPTH
+    plinth.castShadow = true;
+    plinth.receiveShadow = true;
     const proxy = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicNodeMaterial());
     proxy.visible = false;
     proxy.userData.workId = work.id;
@@ -114,6 +110,8 @@ export class PlanetView {
     // 迟到的模型就不会挂到别的团队或者同一件作品的新展台上
     const current = () => this.placed.get(work.id) === pw;
     if (!current()) return null;
+    // 投影、接受阴影要在预编译之前设好：接受阴影的着色器不一样，挂上以后再改就要在那一帧同步编译
+    model.object.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
     // 挂上之前：贴图逐帧上传、着色器在后台编译好，再排队（每帧最多挂一个）。准备期间被移除了就到此为止
     const entrance = await this.world.stage.prepare(model.object, current);
     if (!entrance) return null;
@@ -138,7 +136,6 @@ export class PlanetView {
     const pw = this.placed.get(workId);
     if (!pw) return;
     pw.root.removeFromParent();
-    pw.plinth.geometry.dispose();
     (pw.plinth.material as THREE.Material).dispose();
     pw.proxy.geometry.dispose();
     (pw.proxy.material as THREE.Material).dispose();

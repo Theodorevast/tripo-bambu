@@ -9,6 +9,8 @@ export interface Framing {
   autoRotate: boolean;
   lift?: number; // 画面中心比环绕中心高出多少（世界单位，沿屏幕上方）；不写就是 0，正对环绕中心
   fov?: number; // 竖直视角（度）；不写就保持当前的
+  minPolar?: number; // OrbitControls 的极角限制（弧度，从正上方量）：星球视图里镜头不压到云海以下；不写就是 0..π
+  maxPolar?: number;
 }
 
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -115,5 +117,7 @@ export class CameraRig {
     this.controls.minDistance = f.minDistance;
     this.controls.maxDistance = f.maxDistance;
     this.controls.autoRotate = f.autoRotate;
+    this.controls.minPolarAngle = f.minPolar ?? 0;
+    this.controls.maxPolarAngle = f.maxPolar ?? Math.PI;
   }
 }

@@ -2,8 +2,19 @@ import * as THREE from 'three/webgpu';
 import type { Placement } from '../data/types';
 import type { HeightFn } from './noise';
 
-export const WORK_SIZE = 2.6; // 所有作品统一的最长边（spec 4.3 的 2.0 可调；小王子式近景里 2.6 才压得住星球）
-export const PLINTH_HEIGHT = 0.18; // 展台露出地面的高度
+// 所有作品统一的最长边（米）。「小王子」方向：角色约 1 米高，作品约是角色的 1.6 倍，站在半径 30 的大星球上。
+// V2 起是 2.6（星球半径 10、角色 1.82）；尺度换成米以后改成 1.6，所有按它算的东西（展台、碰撞、标签距离、Museum 取景）跟着缩
+export const WORK_SIZE = 1.6;
+export const PLINTH_HEIGHT = 0.07; // 展台（低矮的石板）露出地面的高度：比草矮，作品脚下不被草盖住
+// 展台顶面半径（缩放前，米）：比模型的水平半径略收一点，再保底。编辑器的摆放预览也用它，和摆上去的作品贴地方式一致
+export function plinthRadius(footprint: number): number {
+  return Math.max(0.42, footprint * 0.92);
+}
+
+// 展台最大的半径（缩放前）：归一化后的模型水平半径不超过 WORK_SIZE·√2/2（最坏是正方形底面）。
+// 星球遮罩按它留空地（mask.ts）：模型加载完之前就知道草和石头该避开多大一块，加载完不用重画遮罩
+export const MAX_PLINTH_RADIUS = plinthRadius((WORK_SIZE * Math.SQRT2) / 2);
+
 export const SCALE_MIN = 0.5;
 export const SCALE_MAX = 2;
 export const YAW_STEP = Math.PI / 12; // 15°

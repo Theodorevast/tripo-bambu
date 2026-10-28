@@ -1,12 +1,12 @@
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import type { PresetId } from '../data/types';
-import { BASE_RADIUS, PRESETS } from './presets';
+import { PLANET_RADIUS, PRESETS } from './presets';
 import { mulberry32 } from './rng';
 
 // 输入单位向量，返回该方向上地面到球心的距离
 export type HeightFn = (x: number, y: number, z: number) => number;
 
-// fBm：4 层 simplex 噪声叠加，归一化后夹到 [-1, 1]
+// fBm：4 层 simplex 噪声叠加，归一化后夹到 [-1, 1]。半径每次调用时现读 PLANET_RADIUS：滑块拖动后高度跟着变
 export function makeHeightFn(seed: number, preset: PresetId): HeightFn {
   const p = PRESETS[preset];
   const noise = new SimplexNoise({ random: mulberry32(seed) });
@@ -22,17 +22,17 @@ export function makeHeightFn(seed: number, preset: PresetId): HeightFn {
       freq *= 2;
     }
     const n = Math.max(-1, Math.min(1, sum / norm));
-    return BASE_RADIUS * (1 + p.amp * n);
+    return PLANET_RADIUS * (1 + p.amp * n);
   };
 }
 
-// 海平面半径；没有海时返回 0
+// 水面半径；没有水时返回 0
 export function seaRadius(preset: PresetId): number {
   const p = PRESETS[preset];
-  return p.sea === null ? 0 : BASE_RADIUS * (1 + p.amp * p.sea);
+  return p.sea === null ? 0 : PLANET_RADIUS * (1 + p.amp * p.sea);
 }
 
-// 半径换算回 [-1, 1]，给配色分段用
+// 半径换算回 [-1, 1]
 export function normalizedHeight(r: number, preset: PresetId): number {
-  return (r / BASE_RADIUS - 1) / PRESETS[preset].amp;
+  return (r / PLANET_RADIUS - 1) / PRESETS[preset].amp;
 }

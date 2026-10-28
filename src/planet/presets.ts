@@ -1,47 +1,78 @@
 import type { PresetId } from '../data/types';
 
-export const BASE_RADIUS = 10;
+// 星球半径（世界单位 = 米）：全局常量，?tune 面板可以实时拖（15–60）。导出的是活绑定：别的模块 import 进去的值跟着变。
+// 角色身高约 1 米、作品最长边约 1.6 米（placement.ts），这里定星球多大：默认 30，角色 ÷ 星球直径 ≈ 1/60。
+// 地形起伏、展台贴地、碰撞、镜头距离都按它换算；改了以后由 setPlanetRadius 通知各处重建
+export let PLANET_RADIUS = 30;
+export const PLANET_RADIUS_MIN = 15;
+export const PLANET_RADIUS_MAX = 60;
+// 旧版的星球半径：摆放方向（单位向量）当初按它排的，展示位的间距（assemble.ts）还按它算，种子数据不用重新生成
+export const LAYOUT_RADIUS = 10;
+
+const radiusListeners = new Set<(r: number) => void>();
+
+// 半径变了要重建的东西在这里登记（星球地形、草、石头、作品贴地、星系布局、镜头）；返回取消登记的函数
+export function onPlanetRadius(fn: (r: number) => void): () => void {
+  radiusListeners.add(fn);
+  return () => radiusListeners.delete(fn);
+}
+
+export function setPlanetRadius(r: number): void {
+  const next = Math.min(PLANET_RADIUS_MAX, Math.max(PLANET_RADIUS_MIN, r));
+  if (next === PLANET_RADIUS) return;
+  PLANET_RADIUS = next;
+  for (const fn of radiusListeners) fn(next);
+}
+
+// 地面配色：地表着色器按噪声遮罩在这几种颜色之间平滑混合（草地、干草、苔藓、泥土、土路），石头用 rock
+export interface GroundPalette {
+  grass: string; // 主草色
+  dry: string; // 偏黄的干草：大块噪声混进来，草地不是一个颜色
+  moss: string; // 苔藓斑块：低洼、背阴处多
+  soil: string; // 泥土：草稀的地方露出来
+  path: string; // 土路
+  rock: string; // 石头
+}
 
 export interface Preset {
   id: PresetId;
   label: string;
-  amp: number; // 地形起伏幅度（相对基础半径）
+  amp: number; // 地形起伏幅度（相对星球半径）
   freq: number; // 噪声基础频率
-  sea: number | null; // 海平面在起伏范围里的位置（-1..1）；null = 没有海
-  bands: Array<[number, string]>; // [归一化高度上限, 颜色]，从低到高；最后一档上限 > 1
+  sea: number | null; // 水面在起伏范围里的位置（-1..1）；null = 没有水。「小王子」方向只留低洼处的小水塘
+  ground: GroundPalette;
   water: string;
   atmosphere: string;
   ring: string;
 }
 
-// 配色整体压低饱和度：星球是展台，作品才是主角。
-// 分段上限按实际高度分布来定：按面平均后的归一化高度大约只到 ±0.8，p95 ≈ 0.42、p99 ≈ 0.55，
-// 所以 Verdant 的雪顶、Coral 的奶白山顶分别从 0.5、0.45 起；Verdant 的沙滩只比海平面高 0.03，是一条细海岸线
+// 「小王子」方向：缓坡草甸，起伏只占半径的 4–6%（半径 30 时 ±1.2–1.8 米，角色 1 米高走起来有起伏，星球轮廓仍是圆的）。
+// 水面压得很低，只在最低的洼地里留几个小水塘（星球外面的「海」是云海）
 export const PRESETS: Record<PresetId, Preset> = {
   verdant: {
-    id: 'verdant', label: 'Verdant', amp: 0.09, freq: 1.4, sea: -0.05,
-    bands: [[-0.02, '#a89a76'], [0.22, '#5f7a4e'], [0.38, '#4e6340'], [0.5, '#7a6a55'], [1.01, '#e8e4dc']],
-    water: '#2f5d7c', atmosphere: '#9cc7e8', ring: '#c9bfa8',
+    id: 'verdant', label: 'Verdant', amp: 0.05, freq: 1.4, sea: -0.5,
+    ground: { grass: '#5b8a35', dry: '#a3a24c', moss: '#3f6b2a', soil: '#6e5236', path: '#b08f63', rock: '#8c857b' },
+    water: '#3c7f8c', atmosphere: '#bfe0f0', ring: '#e8dcc0',
   },
   desert: {
-    id: 'desert', label: 'Desert', amp: 0.08, freq: 1.8, sea: null,
-    bands: [[-0.4, '#a0603f'], [0.1, '#c08a5a'], [0.5, '#d4a974'], [1.01, '#e3c69a']],
-    water: '#000000', atmosphere: '#f0b27a', ring: '#d9b28a',
+    id: 'desert', label: 'Desert', amp: 0.05, freq: 1.8, sea: null,
+    ground: { grass: '#9a9447', dry: '#cdb06c', moss: '#77763d', soil: '#a3714a', path: '#d6b98d', rock: '#a8866a' },
+    water: '#000000', atmosphere: '#f6cfa0', ring: '#e6c49c',
   },
   glacier: {
-    id: 'glacier', label: 'Glacier', amp: 0.07, freq: 1.2, sea: -0.35,
-    bands: [[-0.2, '#9fb7c4'], [0.12, '#c9dbe3'], [1.01, '#f2f5f6']],
-    water: '#1f3f5a', atmosphere: '#d8f0f5', ring: '#b8c8d0',
+    id: 'glacier', label: 'Glacier', amp: 0.045, freq: 1.2, sea: -0.45,
+    ground: { grass: '#8fae9c', dry: '#d6e2df', moss: '#6f9283', soil: '#8a8f93', path: '#d2dadc', rock: '#9ba4aa' },
+    water: '#5d9db3', atmosphere: '#dff2f6', ring: '#c8d6dc',
   },
   volcanic: {
-    id: 'volcanic', label: 'Volcanic', amp: 0.11, freq: 1.6, sea: null,
-    bands: [[-0.45, '#c4552b'], [-0.2, '#3a3433'], [0.4, '#2b2727'], [1.01, '#4a4241']],
-    water: '#000000', atmosphere: '#b0533c', ring: '#7d6a62',
+    id: 'volcanic', label: 'Volcanic', amp: 0.06, freq: 1.6, sea: null,
+    ground: { grass: '#5d6a37', dry: '#80724a', moss: '#3d4a27', soil: '#3c312c', path: '#6e5c50', rock: '#4c4643' },
+    water: '#000000', atmosphere: '#e7b39c', ring: '#9d8478',
   },
   coral: {
-    id: 'coral', label: 'Coral', amp: 0.08, freq: 1.5, sea: -0.15,
-    bands: [[-0.06, '#e8b4a0'], [0.24, '#f0c9a8'], [0.45, '#a8d5ba'], [1.01, '#f4e1d2']],
-    water: '#3f8f8a', atmosphere: '#f3c4cf', ring: '#e9cfc4',
+    id: 'coral', label: 'Coral', amp: 0.05, freq: 1.5, sea: -0.4,
+    ground: { grass: '#76a463', dry: '#cbb388', moss: '#58875a', soil: '#9c6c5a', path: '#e2bba2', rock: '#b59689' },
+    water: '#4fa3a0', atmosphere: '#f8d6dc', ring: '#efd6cb',
   },
 };
 

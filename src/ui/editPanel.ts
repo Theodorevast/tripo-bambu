@@ -79,7 +79,7 @@ export class EditPanel {
     );
     for (const id of PRESET_IDS) {
       const b = el('button', { textContent: PRESETS[id].label, onclick: () => act.appearance({ preset: id }) });
-      b.style.setProperty('--swatch', PRESETS[id].bands[1][1]);
+      b.style.setProperty('--swatch', PRESETS[id].ground.grass);
       this.presetButtons.set(id, b);
     }
     this.ringButton = el('button', { textContent: 'Ring', onclick: () => { if (this.current) act.appearance({ ring: !this.current.ring }); } });

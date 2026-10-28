@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LoadedModel } from '../src/assets/models';
 import type { Team } from '../src/data/types';
 import { PlanetObject } from '../src/planet/planetObject';
-import { BASE_RADIUS, PRESETS } from '../src/planet/presets';
+import { PLANET_RADIUS, PRESETS } from '../src/planet/presets';
 import { PlanetView, plinthRadius } from '../src/scenes/planetView';
 import type { Entrance, Stage } from '../src/scenes/stager';
 import type { World } from '../src/scenes/world';
+
+const R = PLANET_RADIUS; // 坐标都按星球半径写（原来按半径 10：30 就是 3R）
 
 const team: Team = {
   id: 't', name: 'T', motto: '', color: '#d9b77e', status: 'active', foundedDaysAgo: 1,
@@ -38,7 +40,7 @@ const instantStage: Stage = { precompile: async () => {}, prepare: async () => (
 function fakeWorld(home = new THREE.Vector3(), stage: Stage = instantStage): World {
   const entries = [team, other].map((t, i) => {
     const planet = new PlanetObject(t.planet);
-    const at = i === 0 ? home : new THREE.Vector3(60, 0, 0);
+    const at = i === 0 ? home : new THREE.Vector3(6 * R, 0, 0);
     planet.group.position.copy(at);
     return [t.id, { team: t, planet, hit: new THREE.Mesh(), home: at }] as const;
   });
@@ -88,7 +90,7 @@ describe('PlanetView', () => {
     const w1 = view.placed.get('w1')!;
     expect(w1.root.parent).toBe(entry.planet.works);
     expect(w1.root.position.length()).toBeGreaterThanOrEqual(entry.planet.height(0, 1, 0) - 1e-9);
-    expect(w1.root.position.length()).toBeLessThanOrEqual(BASE_RADIUS * (1 + PRESETS.desert.amp) + 1e-9);
+    expect(w1.root.position.length()).toBeLessThanOrEqual(PLANET_RADIUS * (1 + PRESETS.desert.amp) + 1e-9);
     expect(view.placed.get('w2')!.scaler.scale.x).toBe(1.5);
     expect(w1.model).not.toBeNull();
   });
@@ -113,23 +115,29 @@ describe('PlanetView', () => {
     await enterLoaded(view, team);
     world.planets.get('t')!.planet.group.updateMatrixWorld(true); // 真实页面里每帧渲染时更新
     // w1 在北极：从上往下打，拾取盒在星球前面；从下往上打，射线要先穿过整颗星球
-    raycaster.ray.set(new THREE.Vector3(0, 30, 0), new THREE.Vector3(0, -1, 0));
+    raycaster.ray.set(new THREE.Vector3(0, 3 * R, 0), new THREE.Vector3(0, -1, 0));
     expect(view.pick(0, 0)?.work.id).toBe('w1');
-    raycaster.ray.set(new THREE.Vector3(0, -30, 0), new THREE.Vector3(0, 1, 0));
+    raycaster.ray.set(new THREE.Vector3(0, -3 * R, 0), new THREE.Vector3(0, 1, 0));
     expect(view.pick(0, 0)).toBeNull();
   });
   it('pick：擦着地平线的射线仍然拾取到地平线上的作品（遮挡球取最低的地形，不能取最高的）', async () => {
     const raycaster = new THREE.Raycaster();
     const world = Object.assign(fakeWorld(), { rayFrom: () => raycaster });
     const view = new PlanetView(world);
-    // 作品都换成窄而高的（水平半径 0.5、高 2.6）：w1 的拾取盒只有 1 宽，射线在 x = 0.5 处才打到它。
-    // 占位体 w1 的水平半径有 1.53，比最高地形的球在 y = 10.7 处的半宽（√(10.8² − 10.7²) ≈ 1.47）还宽，测不出遮挡球取错了半径
+    // 作品都换成窄而高的（水平半径 0.5、高 2.6）：w1 的拾取盒只有 1 宽，射线在 x = 0.5 处才打到它
     vi.spyOn(view.library, 'load').mockImplementation(async () => ({ object: new THREE.Group(), height: 2.6, footprint: 0.5, failed: false }));
     await enterLoaded(view, team);
-    world.planets.get('t')!.planet.group.updateMatrixWorld(true);
-    // w1 立在北极。y = 10.7 的水平射线从侧面擦过北极上空：比最低的地形（9.2）高，比最高的地形（10.8）低。
+    const planet = world.planets.get('t')!.planet;
+    planet.group.updateMatrixWorld(true);
+    // w1 立在北极。高度 y 的水平射线从侧面擦过北极上空：比最低的地形高，比最高的地形低，而且打在拾取盒的高度范围里。
     // 遮挡球要是取了最高的地形，射线在打到拾取盒之前就先「进了星球」，地平线上的作品就点不到了
-    raycaster.ray.set(new THREE.Vector3(30, 10.7, 0), new THREE.Vector3(-1, 0, 0));
+    const amp = PRESETS.desert.amp;
+    const ground = planet.height(0, 1, 0);
+    const y = Math.min(ground + 1.3, R * (1 + amp) - 0.3);
+    expect(y).toBeGreaterThan(R * (1 - amp)); // 前提：不碰最低地形的球
+    expect(y).toBeGreaterThan(ground + 0.2); // 前提：在拾取盒的高度范围里
+    expect(Math.sqrt((R * (1 + amp)) ** 2 - y * y)).toBeGreaterThan(0.5); // 前提：取错成最高地形的球就会先打进星球
+    raycaster.ray.set(new THREE.Vector3(3 * R, y, 0), new THREE.Vector3(-1, 0, 0));
     expect(view.pick(0, 0)?.work.id).toBe('w1');
   });
   it('星球不在原点：遮挡球跟着 entry.home 走（pick 和 occluded 都是）', async () => {
@@ -139,8 +147,8 @@ describe('PlanetView', () => {
     const view = new PlanetView(world);
     await enterLoaded(view, team);
     world.planets.get('t')!.planet.group.updateMatrixWorld(true);
-    const above = home.clone().add(new THREE.Vector3(0, 30, 0));
-    const below = home.clone().add(new THREE.Vector3(0, -30, 0));
+    const above = home.clone().add(new THREE.Vector3(0, 3 * R, 0));
+    const below = home.clone().add(new THREE.Vector3(0, -3 * R, 0));
     raycaster.ray.set(above, new THREE.Vector3(0, -1, 0));
     expect(view.pick(0, 0)?.work.id).toBe('w1');
     // 从星球底下往上打：射线先穿过这颗星球（不是原点那里）才到 w1
@@ -156,16 +164,16 @@ describe('PlanetView', () => {
     await enterLoaded(view, team);
     world.planets.get('t')!.planet.group.updateMatrixWorld(true);
     const top = view.topOf(view.placed.get('w1')!);
-    expect(view.occluded(new THREE.Vector3(0, 30, 0), top)).toBe(false);
-    expect(view.occluded(new THREE.Vector3(0, -30, 0), top)).toBe(true);
-    expect(view.occluded(new THREE.Vector3(30, 0, 0), top)).toBe(false); // 从侧面斜看，视线擦过星球上方
+    expect(view.occluded(new THREE.Vector3(0, 3 * R, 0), top)).toBe(false);
+    expect(view.occluded(new THREE.Vector3(0, -3 * R, 0), top)).toBe(true);
+    expect(view.occluded(new THREE.Vector3(3 * R, 0, 0), top)).toBe(false); // 从侧面斜看，视线擦过星球上方
   });
   it('plinthRadius 就是展台实际用的半径', async () => {
     const view = new PlanetView(fakeWorld());
     await enterLoaded(view, team);
     const w1 = view.placed.get('w1')!;
     expect(w1.plinth.scale.x).toBe(plinthRadius(w1.model!.footprint));
-    expect(plinthRadius(0.1)).toBe(0.55);
+    expect(plinthRadius(0.1)).toBe(0.42);
   });
 });
 

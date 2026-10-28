@@ -27,6 +27,7 @@ export function installDebugHooks(app: App, screen: PlanetScreen): void {
     flights++;
     return fly(f, duration);
   };
+  window.__world = app.world;
   window.__app = {
     planetScreenPos: (teamId) => {
       const e = app.world.planets.get(teamId);

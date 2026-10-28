@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanetRecipe } from '../src/data/types';
-import { LOD_HIGH } from '../src/planet/generate';
+import { LOD_HIGH, triangleCount } from '../src/planet/generate';
 import { PlanetObject } from '../src/planet/planetObject';
 
 const base: PlanetRecipe = { seed: 7, preset: 'verdant', ring: true, atmosphere: true, placements: [] };
@@ -47,9 +47,9 @@ describe('PlanetObject', () => {
   it('setDetail 切换细分；换配方后细分保持不变；作品组一直在', () => {
     const p = new PlanetObject(base);
     p.setDetail(LOD_HIGH);
-    expect(p.terrain.geometry.getAttribute('position').count / 3).toBe(20480);
+    expect(triangleCount(p.terrain.geometry)).toBe(20480);
     p.setRecipe({ ...base, seed: 8 });
-    expect(p.terrain.geometry.getAttribute('position').count / 3).toBe(20480);
+    expect(triangleCount(p.terrain.geometry)).toBe(20480);
     expect(p.works.parent).toBe(p.group);
   });
 });

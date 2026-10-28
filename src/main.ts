@@ -1,8 +1,8 @@
-import '@fontsource/cormorant-garamond/500.css';
-import '@fontsource/cormorant-garamond/500-italic.css';
-import '@fontsource/ibm-plex-sans/400.css';
-import '@fontsource/ibm-plex-sans/500.css';
-import '@fontsource/ibm-plex-mono/400.css';
+// 圆体字 Nunito（OFL，Fontsource 自托管；卡通版分支挑过来的）：顶栏、卡片、按钮都用它
+import '@fontsource/nunito/500.css';
+import '@fontsource/nunito/600.css';
+import '@fontsource/nunito/700.css';
+import '@fontsource/nunito/800.css';
 import './ui/styles.css';
 import { App, type Sheet } from './app';
 import seedJson from './data/seed.json';
