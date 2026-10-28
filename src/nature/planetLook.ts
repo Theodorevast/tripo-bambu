@@ -78,7 +78,7 @@ export const cloudCover = (dir: V3, offset: V3): F => cloudCoverFn(dir, offset, 
 // 大气光晕：背面渲染的薄外壳。按视线离星球中心最近的距离 b 算：b = 星球半径时最浓，到外壳边缘淡到 0（没有硬边）。
 // 颜色按那一处的受光：白天是预设的天色，晨昏线附近偏暖，夜面淡掉；厚度沿轮廓按噪声起伏一点，像一笔一笔刷出来的。
 // 普通混合（不是叠加）：是一层淡淡的颜色，不会在亮天空前面变成发光的边
-export function atmosphereRimMaterial(tint: THREE.ColorRepresentation, planetRadius: number, shellRadius: number, strength: THREE.UniformNode<'float', number>, seed: number): THREE.MeshBasicNodeMaterial {
+export function atmosphereRimMaterial(tint: THREE.ColorRepresentation, planetRadius: number, shellRadius: number, strength: THREE.UniformNode<'float', number>, seed: number, fade: F): THREE.MeshBasicNodeMaterial {
   const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, transparent: true, depthWrite: false, fog: false });
   m.name = 'planet-atmosphere';
   const scale = modelScale.x;
@@ -95,13 +95,13 @@ export function atmosphereRimMaterial(tint: THREE.ColorRepresentation, planetRad
   const brush = valueNoise3(limb.mul(3.1).add(seed % 97)).mul(0.5).add(valueNoise3(limb.mul(7.3).add(17.7)).mul(0.25)).add(0.62);
   const profile = pow(saturate(float(1).sub(t.div(brush))), 2.2);
   m.colorNode = mix(color(new THREE.Color(tint)), U.warm, dusk.mul(0.75));
-  m.opacityNode = profile.mul(day.mul(0.85).add(0.15)).mul(strength).mul(U.atmosphere).mul(0.5);
+  m.opacityNode = profile.mul(day.mul(0.85).add(0.15)).mul(strength).mul(U.atmosphere).mul(fade).mul(0.5);
   return m;
 }
 
 // 云层：一个略大的球壳，用标准材质（按场景里真实的太阳和天光打光：白天、日落、下雨都跟着变），颜色压暗。
 // 云团朝太阳的一侧亮、背面偏暗（沿太阳方向再取一次覆盖率，前面挡着的越多越暗）
-export function cloudLayerMaterial(offset: THREE.UniformNode<'vec3', THREE.Vector3>): THREE.MeshStandardNodeMaterial {
+export function cloudLayerMaterial(offset: THREE.UniformNode<'vec3', THREE.Vector3>, fade: F): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial({ transparent: true, depthWrite: false, roughness: 1, metalness: 0 });
   m.name = 'planet-clouds';
   const dir = normalize(positionWorld.sub(modelPosition));
@@ -109,15 +109,15 @@ export function cloudLayerMaterial(offset: THREE.UniformNode<'vec3', THREE.Vecto
   const toward = cloudCover(normalize(dir.add(U.sun.mul(0.035))), offset);
   const selfShade = float(1).sub(toward.mul(0.4)).mul(cov.mul(0.2).add(0.8));
   m.colorNode = vec3(1, 0.98, 0.95).mul(U.cloudBrightness).mul(selfShade);
-  m.opacityNode = cov.mul(U.cloudOpacity);
+  m.opacityNode = cov.mul(U.cloudOpacity).mul(fade);
   return m;
 }
 
 // 地表着色器里用：云影（按太阳方向偏一点采样同一个云层）和边缘的空气。远看才有：
 // 镜头离星球近（星球视图、漫游）时 far = 0，云影那一段在一个分支里整个跳过（同一次绘制里条件处处一样，GPU 不会两边都算）。
 // 返回 { shade: 乘在地面颜色上（云影）, haze: 加在自发光上（边缘的空气，按受光） }
-export function planetSurfaceLook(radius: number | F, offset: THREE.UniformNode<'vec3', THREE.Vector3>, tint: THREE.Node<'color'>): { shade: F; haze: THREE.Node<'vec3'> } {
-  const far = smoothstep(NEAR_HIDE, FAR_FULL, camDistanceInRadii(radius)).toVar();
+export function planetSurfaceLook(radius: number | F, offset: THREE.UniformNode<'vec3', THREE.Vector3>, fade: F, tint: THREE.Node<'color'>): { shade: F; haze: THREE.Node<'vec3'> } {
+  const far = smoothstep(NEAR_HIDE, FAR_FULL, camDistanceInRadii(radius)).mul(fade).toVar();
   const n = normalize(positionWorld.sub(modelPosition));
   const shade = Fn(() => {
     const s = float(1).toVar();
@@ -167,6 +167,8 @@ export interface PlanetLookOptions {
 export class PlanetLookParts {
   readonly group = new THREE.Group();
   readonly cloudOffset = uniform(new THREE.Vector3());
+  // 0..1：别的星球被聚焦时淡出（云层、大气、地面上的云影一起），回星系淡回来。updatePlanetLook 逐帧逼近
+  readonly fade = uniform(1);
   radius = 1;
   private atmosphere: THREE.Mesh | null = null;
   private clouds: THREE.Mesh | null = null;
@@ -182,7 +184,7 @@ export class PlanetLookParts {
     const rng = Math.sin(o.seed * 12.9898) * 43758.5453;
     this.cloudOffset.value.set((rng - Math.floor(rng)) * 40, (o.seed % 53) * 0.71, (o.seed % 31) * 1.37);
     if (!this.clouds) {
-      this.clouds = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 8), cloudLayerMaterial(this.cloudOffset));
+      this.clouds = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 8), cloudLayerMaterial(this.cloudOffset, this.fade));
       this.clouds.name = 'planet-clouds';
       this.clouds.renderOrder = 2; // 在大气外壳之后画
       this.group.add(this.clouds);
@@ -196,18 +198,17 @@ export class PlanetLookParts {
     }
     if (o.atmosphere) {
       const shell = o.top + o.radius * 0.11;
-      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(shell, 8), atmosphereRimMaterial(o.tint, o.radius, shell, o.haloStrength, o.seed));
+      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(shell, 8), atmosphereRimMaterial(o.tint, o.radius, shell, o.haloStrength, o.seed, this.fade));
       this.atmosphere.name = 'planet-atmosphere';
       this.atmosphere.renderOrder = 1;
       this.group.add(this.atmosphere);
     }
   }
 
-  // 镜头近了就整个藏起来（漫游时大气外壳会盖满整个屏幕）
-  updateVisibility(camPos: THREE.Vector3): void {
+  // 镜头离这颗星球多远（× 星球半径，按星球组的缩放）
+  distanceInRadii(camPos: THREE.Vector3): number {
     this.group.getWorldPosition(_p);
-    const k = _p.distanceTo(camPos) / (this.radius * this.group.getWorldScale(_s).x);
-    this.group.visible = k > NEAR_HIDE;
+    return _p.distanceTo(camPos) / (this.radius * this.group.getWorldScale(_s).x);
   }
 
   dispose(): void {
@@ -224,9 +225,19 @@ export class PlanetLookParts {
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
 
-// World 每帧调：太阳方向、云层转动、各星球远看部件的开关
-export function updatePlanetLook(dt: number, sunDir: THREE.Vector3, camera: THREE.Camera): void {
+// World 每帧调：太阳方向、云层转动、各星球远看部件的开关。focused：聚焦的那颗星球的远看部件（星系视图里是 null）。
+// 镜头离星球近（星球视图、漫游）：这颗的远看部件藏起来（大气外壳会盖满整个屏幕）。
+// 有星球被聚焦时，别的星球的云层、大气、云影约 0.5 秒淡出：星球视图里邻居缩小后沉在云海的雾里，
+// 星球本身被雾吃掉了，不受雾影响的大气外壳会剩下一个个透明的泡泡
+export function updatePlanetLook(dt: number, sunDir: THREE.Vector3, camera: THREE.Camera, focused: PlanetLookParts | null = null): void {
   U.sun.value.copy(sunDir);
   U.drift.value = (U.drift.value + dt * 0.012 * PLANET_LOOK.cloudSpeed) % (Math.PI * 2);
-  for (const p of parts) p.updateVisibility(camera.position);
+  const k = 1 - Math.exp(-6 * dt);
+  for (const p of parts) {
+    if (!p.group.parent?.parent) continue; // 不在场景里的星球（换团队列表时摘掉的）：不管
+    const goal = focused && focused !== p ? 0 : 1;
+    const now = p.fade.value;
+    p.fade.value = Math.abs(goal - now) < 0.01 ? goal : now + (goal - now) * k;
+    p.group.visible = p.fade.value > 0 && p.distanceInRadii(camera.position) > NEAR_HIDE;
+  }
 }

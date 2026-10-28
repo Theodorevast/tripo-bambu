@@ -142,7 +142,7 @@ export class PlanetObject {
       this.group.remove(this.terrain);
       disposeTree(this.terrain);
     }
-    this.terrain = new THREE.Mesh(geometry, groundMaterial(preset, this.mask.node, this.look.cloudOffset));
+    this.terrain = new THREE.Mesh(geometry, groundMaterial(preset, this.mask.node, this.look));
     this.terrainPreset = preset;
     this.terrain.name = 'terrain';
     this.terrain.receiveShadow = true;

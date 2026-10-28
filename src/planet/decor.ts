@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { dot, float, mix, normalize, normalWorld, positionLocal, positionWorld, renderGroup, smoothstep, uniform } from 'three/tsl';
-import { perturbNormal, RIM } from './ground';
+import { perturbNormal, RIM, RIM_RING, STAGE_VIEW_DIR } from './ground';
 import { mulberry32, type Rng } from './rng';
 import { valueNoise3 } from './tslNoise';
 
@@ -227,6 +227,29 @@ export function decorItems(kit: DecorKit, planet: DecorPlanet): Array<{ dir: THR
     const dir = new THREE.Vector3(Math.cos(lon) * cl, s, Math.sin(lon) * cl);
     if (rng() < 0.18) continue; // 留几个缺口
     const lead = 0.85 + rng() ** 1.5 * 1.7;
+    if (!ok(dir, lead)) continue;
+    rock(dir, lead);
+    const n = 1 + Math.floor(rng() * 3);
+    for (let j = 0; j < n; j++) {
+      const d2 = around(rng, dir, (lead * 1.6 + 0.5) / R, new THREE.Vector3());
+      const size = lead * (0.25 + rng() * 0.35);
+      if (!ok(d2, size)) continue;
+      if (size < 0.18) pebble(d2, size);
+      else rock(d2, size);
+    }
+  }
+  // 舞台的边（ground.ts 的 RIM_RING）：星球视图里轮廓的左右两边和上沿，沿那一圈再摆一圈大石头，和上面赤道那一圈连成一个圈
+  const c0 = new THREE.Vector3(...STAGE_VIEW_DIR);
+  const r1 = new THREE.Vector3(Math.abs(c0.y) < 0.9 ? 0 : 1, Math.abs(c0.y) < 0.9 ? 1 : 0, 0).cross(c0).normalize();
+  const r2 = new THREE.Vector3().crossVectors(c0, r1);
+  const ringA = (RIM_RING.angle * Math.PI) / 180;
+  const ringN = Math.round(((2 * Math.PI * R * Math.sin(ringA)) / 2.5) * DECOR.rimWall);
+  for (let k = 0; k < ringN; k++) {
+    const phi = ((k + rng() * 0.8) / ringN) * Math.PI * 2;
+    const a = ringA + ((rng() * 2 - 1) * RIM_RING.width * 0.7 * Math.PI) / 180;
+    const dir = c0.clone().multiplyScalar(Math.cos(a)).addScaledVector(r1, Math.sin(a) * Math.cos(phi)).addScaledVector(r2, Math.sin(a) * Math.sin(phi)).normalize();
+    if (rng() < 0.15) continue;
+    const lead = 0.8 + rng() ** 1.5 * 1.6;
     if (!ok(dir, lead)) continue;
     rock(dir, lead);
     const n = 1 + Math.floor(rng() * 3);
