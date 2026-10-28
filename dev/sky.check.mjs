@@ -5,6 +5,7 @@
 //   Chrome 加 --enable-webgpu-developer-features：WebGPU 的时间戳默认量化到 100 µs，开了才是原始精度。
 // 截图：1440×900、DPR 1，存到 shots/：n2-overview、n2-ground、n2-sunset、n2-webgl2，和参考图并排的 n2-compare
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { chromium } from 'playwright-core';
 import { CHROME, startServer } from '../scripts/lib/browser.mjs';
@@ -13,7 +14,7 @@ const args = process.argv.slice(2);
 const doShots = args.includes('--shots') || !args.includes('--perf');
 const doPerf = args.includes('--perf') || !args.includes('--shots');
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
-const REF = '<项目目录>/.tmp/refs';
+const REF = fileURLToPath(new URL('../.tmp/refs', import.meta.url)); // 参考图在仓库的 .tmp/refs（不入库）
 
 mkdirSync('shots', { recursive: true });
 const { server, base } = await startServer();
