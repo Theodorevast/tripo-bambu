@@ -82,14 +82,57 @@ const findPond = (page) => page.evaluate((t) => {
         if (wet[nk] > 0 && !seen[nk]) { seen[nk] = 1; stack.push(nk); }
       }
     }
-    if (!best || area > best.area) best = { area, deep, c };
+    if (!best || area > best.area) best = { area, deep, c, k };
   }
   if (!best) return null;
+  // 这一块里最深的那一格：漫游的样张从这里往岸边走（大海的重心可能落在陆地上）
+  let deepest = best.k;
+  {
+    const stack = [best.k];
+    const seen2 = new Uint8Array(W * H);
+    seen2[best.k] = 1;
+    while (stack.length) {
+      const q = stack.pop();
+      if (wet[q] > wet[deepest]) deepest = q;
+      const i = q % W;
+      const j = (q - i) / W;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ni = (i + di + W) % W;
+        const nj = j + dj;
+        if (nj < 0 || nj >= H) continue;
+        const nk = nj * W + ni;
+        if (wet[nk] > 0 && !seen2[nk]) { seen2[nk] = 1; stack.push(nk); }
+      }
+    }
+  }
+  const di = deepest % W;
+  const dj = (deepest - di) / W;
+  const dlat = ((dj + 0.5) / H - 0.5) * Math.PI;
+  const dlon = ((di + 0.5) / W - 0.5) * 2 * Math.PI;
   const l = Math.hypot(...best.c);
   const R = p.radius;
   const cell = (2 * Math.PI / W) * (Math.PI / H) * R * R; // 赤道处一个格子的面积（乘过 cos 纬度了）
-  return { dir: best.c.map((v) => v / l), radius: Math.sqrt((best.area * cell) / Math.PI), deep: best.deep, sea: p.sea };
+  return {
+    dir: best.c.map((v) => v / l),
+    deepDir: [Math.cos(dlat) * Math.cos(dlon), Math.sin(dlat), Math.cos(dlat) * Math.sin(dlon)],
+    radius: Math.sqrt((best.area * cell) / Math.PI),
+    deep: best.deep,
+    sea: p.sea,
+  };
 }, team);
+
+// 从水塘最深处沿 -heading 往外走，走到岸上（地面比水面高 3 厘米）为止，返回离最深处多少米；走 60 米还没上岸就返回 null
+const shoreDistance = (page, pond, heading) => page.evaluate(([t, pd, h]) => {
+  const p = window.__world.planets.get(t).planet;
+  const R = p.radius;
+  for (let s = 0; s < 60; s += 0.1) {
+    const a = s / R;
+    const q = pd.deepDir.map((x, k) => x * Math.cos(a) - h[k] * Math.sin(a));
+    const l = Math.hypot(...q);
+    if (p.height(q[0] / l, q[1] / l, q[2] / l) > p.sea + 0.03) return s;
+  }
+  return null;
+}, [team, pond, heading]);
 
 // 切平面基底：dir 处的「北」和「东」
 function basis(d) {
@@ -129,14 +172,14 @@ const sunHeading = (page, d) => page.evaluate((dir) => {
   return t.map((v) => v / l);
 }, d);
 
-// 漫游：角色站在水塘中心沿 -heading 方向 back 米处（负数就是走进水里），面朝 heading
+// 漫游：角色站在水塘最深处沿 -heading 方向 back 米处（比岸边近就是站在水里），面朝 heading
 async function walkAt(page, pond, back, heading, wait = 2200) {
   await page.locator('.topbar button.walk').click();
   await page.waitForFunction(() => window.__walk.state().phase === 'walk', null, { timeout: 8000 });
   await page.evaluate(([pd, b, h]) => {
     const R = window.__walk.state().radius;
     const a = b / R;
-    const p = pd.dir.map((x, k) => x * Math.cos(a) - h[k] * Math.sin(a));
+    const p = pd.deepDir.map((x, k) => x * Math.cos(a) - h[k] * Math.sin(a));
     const l = Math.hypot(...p);
     window.__walk.teleport(p.map((x) => x / l), h);
   }, [pond, back, heading]);
@@ -167,32 +210,52 @@ async function shot(name, setup) {
 
 try {
   await shot('water-planet', async () => {});
+  // 大水面（等效半径超过 8 米，是海）：镜头对着一段海岸，不看整个海（那样整颗星球都进画面了）
+  const coast = async (page, pond, heading) => {
+    const s = (await shoreDistance(page, pond, heading)) ?? 0;
+    return { ...pond, dir: await page.evaluate(([pd, h, sm, t]) => {
+      const R = window.__world.planets.get(t).planet.radius;
+      const a = sm / R;
+      const q = pd.deepDir.map((x, k) => x * Math.cos(a) - h[k] * Math.sin(a));
+      const l = Math.hypot(...q);
+      return q.map((v) => v / l);
+    }, [pond, heading, Math.max(0, s - 2.5), team]) };
+  };
   await shot('water-orbit', async (page, pond) => {
     const sun = await sunHeading(page, pond.dir);
     // 顺光斜看：太阳在镜头背后偏一点，水色和浪花看得清
     const { east } = basis(pond.dir);
     const h = sun.map((v, k) => -v * 0.8 + east[k] * 0.6);
     const l = Math.hypot(...h);
-    await orbitAt(page, pond, Math.max(6, pond.radius * 2.2), Math.max(3.5, pond.radius * 1.2), h.map((v) => v / l));
+    const hn = h.map((v) => v / l);
+    if (pond.radius > 8) await orbitAt(page, await coast(page, pond, hn.map((v) => -v)), 9, 5, hn);
+    else await orbitAt(page, pond, Math.max(6, pond.radius * 2.2), Math.max(3.5, pond.radius * 1.2), hn);
   });
   await shot('water-low', async (page, pond) => {
     // 逆光贴着水面：太阳在水塘对面，看天空的反光和闪光
     const sun = await sunHeading(page, pond.dir);
-    await orbitAt(page, pond, Math.max(4, pond.radius * 1.6), 1.1, sun);
+    if (pond.radius > 8) await orbitAt(page, await coast(page, pond, sun), 5, 1.1, sun);
+    else await orbitAt(page, pond, Math.max(4, pond.radius * 1.6), 1.1, sun);
   });
   await shot('water-walk', async (page, pond) => {
-    const sun = await sunHeading(page, pond.dir);
-    const { east } = basis(pond.dir);
+    // 站在岸上、离水边 1.2 米，面朝水：太阳在斜前方（看得到闪光）
+    const sun = await sunHeading(page, pond.deepDir);
+    const { east } = basis(pond.deepDir);
     const h = sun.map((v, k) => v * 0.7 + east[k] * 0.7);
     const l = Math.hypot(...h);
-    await walkAt(page, pond, pond.radius + 1.6, h.map((v) => v / l));
+    const hn = h.map((v) => v / l);
+    const s = (await shoreDistance(page, pond, hn)) ?? pond.radius;
+    await walkAt(page, pond, s + 1.2, hn);
   });
   await shot('water-wade', async (page, pond) => {
-    const sun = await sunHeading(page, pond.dir);
-    const { east } = basis(pond.dir);
+    // 从岸上往水里走：站在离水边 1 米的水里
+    const sun = await sunHeading(page, pond.deepDir);
+    const { east } = basis(pond.deepDir);
     const h = sun.map((v, k) => v * 0.5 + east[k] * 0.85);
     const l = Math.hypot(...h);
-    await walkAt(page, pond, pond.radius * 0.25, h.map((v) => v / l), 1200);
+    const hn = h.map((v) => v / l);
+    const s = (await shoreDistance(page, pond, hn)) ?? pond.radius;
+    await walkAt(page, pond, Math.max(0, s - 1.0), hn, 1200);
     await page.keyboard.down('w');
     await page.waitForTimeout(700);
     await page.keyboard.up('w');
