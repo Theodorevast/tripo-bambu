@@ -6,7 +6,7 @@ import { DECOR, decorInstances, rockGeometry } from '../planet/decor';
 import { applyGround, GROUND, RIM, RIM_RING } from '../planet/ground';
 import { STAGE_DIR } from '../planet/noise';
 import { mulberry32 } from '../planet/rng';
-import { cellPuffs, valueNoise3 } from '../planet/tslNoise';
+import { valueNoise3 } from '../planet/tslNoise';
 import { PLANET_RADIUS } from '../planet/presets';
 import type { Atmosphere } from './atmosphere';
 
@@ -17,11 +17,11 @@ import type { Atmosphere } from './atmosphere';
 
 // 可调参数（?tune → Planet → Look from afar）。改了以后调 applyPlanetLook()
 export const PLANET_LOOK = {
-  atmosphere: 1, // 大气光晕的浓度倍数
+  atmosphere: 0.55, // 大气光晕的浓度倍数（星系里大了像一层奶白的雾）
   atmosphereWarm: '#ffb28a', // 晨昏线附近的暖色
-  limbHaze: 0.5, // 星球表面靠边缘的那层空气（远看才有）
-  clouds: 0.18, // 云量 0..1（有云团的格子占多少）
-  cloudOpacity: 0.82,
+  limbHaze: 0.2, // 星球表面靠边缘的那层空气（远看才有）
+  clouds: 0.2, // 云量 0..1
+  cloudOpacity: 0.36,
   cloudBrightness: 0.72, // 云的反照率：压暗，不然在亮天空下是一片死白
   cloudSpeed: 1, // 云层转动的速度倍数
   cloudShadow: 0.3, // 云影的深度
@@ -66,8 +66,8 @@ type F = THREE.Node<'float'>;
 // 镜头离这颗星球中心多远，按星球半径算（星球组可能被缩放：星球视图里的邻居缩到 0.45）
 const camDistanceInRadii = (radius: number | F): F => length(cameraPosition.sub(modelPosition)).div(modelScale.x.mul(radius));
 
-// 云的覆盖率（0..1）：星球本地方向 dir 先绕竖轴转过 drift。绘本里小星球上的云是一团一团圆滚滚的（不是一片片碎絮：
-// 碎絮远看像发霉），所以是几团圆的：一格一个（3D 格子，被球面切开就是大小不一的圆），每团再叠两三个小圆鼓出来，边缘清楚。
+// 云的覆盖率（0..1）：星球本地方向 dir 先绕竖轴转过 drift。一缕一缕的薄云：沿经度方向拉长的低频噪声（横着的云带），
+// 阈值高、边缘柔和，只在中低纬度；又薄又少，星球的颜色透得出来（白色的大团、碎絮远看像发霉、像贴了胶布，lead 看过两轮）。
 // offset 让每颗星球的云不一样（按种子）。
 // 写成带 layout 的函数（着色器里只生成一份）；uniform 不能在函数体里直接引用（函数体各材质共用，uniform 的名字对不上），
 // 转动角度和云量当参数传进去
@@ -75,14 +75,10 @@ const cloudCoverFn = Fn(([dir, offset, drift, amount]: [V3, V3, F, F]) => {
   const c = drift.cos();
   const s = drift.sin();
   const d = vec3(dir.x.mul(c).sub(dir.z.mul(s)), dir.y, dir.x.mul(s).add(dir.z.mul(c)));
-  const q = d.mul(1.7).add(offset);
-  // 一团 = 一个大圆团 + 旁边两层错开的小圆团（格子更小、和大团交叠时才鼓出来），像绘本里一朵朵的云
-  const big = cellPuffs(q, amount);
-  const bump1 = cellPuffs(q.mul(2.1).add(vec3(0.31, 0.17, 0.43)), amount.mul(1.6));
-  const bump2 = cellPuffs(q.mul(2.6).add(vec3(0.62, 0.49, 0.11)), amount.mul(1.6));
-  const blob = max(big, max(bump1, bump2).mul(smoothstep(0.0, 0.3, cellPuffs(q.mul(0.999), amount.mul(1.0)).add(big))));
-  // 边上一点点起伏，不是死圆
-  return smoothstep(0.25, 0.55, blob.mul(valueNoise3(q.mul(7.3).add(2.2)).mul(0.35).add(0.8)));
+  const q = d.mul(vec3(2.2, 6.5, 2.2)).add(offset);
+  const n = valueNoise3(q).mul(0.6).add(valueNoise3(q.mul(2.3).add(3.3)).mul(0.28)).add(valueNoise3(q.mul(5.2).add(9.1)).mul(0.12));
+  const th = float(0.74).sub(amount.mul(0.5));
+  return smoothstep(th, th.add(0.16), n).mul(smoothstep(0.75, 0.35, d.y.abs()));
 }).setLayout({
   name: 'planetCloudCover',
   type: 'float',
@@ -151,7 +147,7 @@ export function planetSurfaceLook(radius: number | F, offset: THREE.UniformNode<
   // 轮廓光（星系里）：朝阳一侧贴着轮廓一道窄窄的暖白光，星球从下面亮白的云海里跳出来；背光一侧的轮廓压暗一点（下面 shade 里）
   const rimEdge = pow(float(1).sub(saturate(dot(n, view))), 5);
   const rimSide = smoothstep(-0.1, 0.6, mu);
-  const rim = vec3(1, 0.86, 0.66).mul(rimEdge.mul(rimSide).mul(far).mul(U.rimLight).mul(0.22));
+  const rim = vec3(1, 0.78, 0.5).mul(rimEdge.mul(rimSide).mul(far).mul(U.rimLight).mul(0.12));
   const haze = hazeCol.add(rim);
   const darkLimb = float(1).sub(rimEdge.mul(float(1).sub(rimSide)).mul(far).mul(U.rimLight).mul(0.35));
   return { shade: shade.mul(darkLimb), haze };

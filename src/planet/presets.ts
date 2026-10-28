@@ -73,7 +73,7 @@ export const PRESETS: Record<PresetId, Preset> = {
   },
   glacier: {
     id: 'glacier', label: 'Glacier', amp: 0.055, freq: 1.2, sea: -0.1, continentFreq: 1.0, land: -0.02, basin: 0,
-    ground: { grass: '#597464', fresh: '#6b8274', dry: '#8f9a97', tip: '#98a29d', root: '#26362f', moss: '#426054', soil: '#595d61', path: '#8d9496', rock: '#686e72', sand: '#a7b3b2', deep: '#173f52', far: '#6f9a88', field: '#dfe9e6' },
+    ground: { grass: '#597464', fresh: '#6b8274', dry: '#8f9a97', tip: '#98a29d', root: '#26362f', moss: '#426054', soil: '#595d61', path: '#8d9496', rock: '#686e72', sand: '#a7b3b2', deep: '#173f52', far: '#6f9a88', field: '#a9d4e2' },
     water: '#5d9db3', atmosphere: '#dff2f6', ring: '#c8d6dc',
   },
   volcanic: {
