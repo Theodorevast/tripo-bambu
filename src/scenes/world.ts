@@ -513,7 +513,7 @@ export class World {
     light.sunColor.copy(sun.color);
     light.sunIntensity = sun.intensity;
     light.evening = WEATHER.evening ?? eveningFor(this.atmosphere.params.sunElevation);
-    updatePlanetLook(dt, light.sunDir, camera); // planet：远看的大气、云层跟着太阳转，镜头近了藏起来
+    updatePlanetLook(dt, light.sunDir, camera, this.focused?.planet.look ?? null); // planet：远看的大气、云层跟着太阳转，镜头近了、看别的星球时藏起来
     if (this.life.object.visible) {
       this.life.setWalker(this.walkerOn ? this.walkerPos : null, this.walkerVel, this.walkerGrounded);
       const w = this.weatherArgs;
