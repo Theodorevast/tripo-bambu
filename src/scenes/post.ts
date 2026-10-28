@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import {
+  Break,
   Fn,
   If,
   Loop,
@@ -28,11 +29,12 @@ import type { PlanetObject } from '../planet/planetObject';
 import type { World } from './world';
 
 // 主画面的后处理（绘本感的统一画面）：场景先画进一张离屏缓冲（半浮点、和画布一样的多采样、带深度），再用一个全屏三角形一次做完：
-// 1. 接触阴影：作品和翠宝脚下一圈柔和的暗（按深度还原世界坐标，离「脚下那块地」近的像素压暗、偏冷紫）。草、地面、石头一起暗，
-//    东西不再像浮在草上。只压作品底部贴地的一小截，作品本身的贴图不动
-// 2. 日落光束：太阳低、在画面里或附近时，天空亮处（深度是远平面的像素）沿着朝太阳的方向径向累积，在四分之一分辨率下做两遍，
+// 1. 阳光的冷暖（WASH）：按每颗星球的球面法线和太阳方向，迎光一面亮一点、带一点暖，背光一面偏青紫、暗一点，远看知道太阳在哪边
+// 2. 接触阴影（CONTACT）：作品和翠宝周围一圈柔和的暗（按深度还原世界坐标），草、地面、石头一起暗，东西不再像浮在草上；
+//    中间留空：作品本身、翠宝的鞋不压
+// 3. 日落光束（RAYS）：太阳低、在画面里或附近时，从太阳放射出来的一条条柔和的光，被挡住的地方切出影子；四分之一分辨率两遍，
 //    叠回去时是柔和的光（不影响清晰度）。白天、太阳在背后时整段跳过
-// 3. 调色（style/grade.ts）：线性空间的白平衡和饱和度 → 色调映射（AgX，曝光归 atmosphere）→ 显示空间的 S 曲线、分离色调、黑位、暗角、抖动
+// 4. 调色（style/grade.ts）：线性空间的白平衡和饱和度 → 色调映射（AgX，曝光归 atmosphere）→ 显示空间的 S 曲线、中间调、分离色调、黑位、暗角、抖动
 // 不缩小、不模糊画面：场景缓冲和画布一样大，按像素中心原样取（最近邻），没有 FXAA、没有全屏泛光，作品的贴图保持清楚。
 //
 // 预编译：three 自己画画布时也是先画进一张中间缓冲（半浮点、同样的多采样、24 位深度）再做色调映射。场景缓冲用一模一样的格式，
@@ -141,7 +143,7 @@ export class MainPost {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
   private on = POST.enabled;
-  // 日落光束：四分之一分辨率的两张缓冲（发光的天空 → 径向累积）
+  // 日落光束：四分之一分辨率的两张缓冲（透光图 → 光束）
   private readonly maskTarget: THREE.RenderTarget;
   private readonly raysTarget: THREE.RenderTarget;
   private readonly maskQuad: THREE.QuadMesh;
@@ -429,14 +431,16 @@ export class MainPost {
     this.contactStrength.value = CONTACT.strength * this.unveiled;
   }
 
-  // 阳光的冷暖：所有星球的中心和半径（星球只平移、缩放），太阳方向；强度按镜头离聚焦星球地面的高度（星系视图里满强度）
+  // 阳光的冷暖：所有星球的中心和半径（星球只平移、缩放；聚焦的那颗排第一个），太阳方向；强度按镜头离聚焦星球地面的高度（星系视图里满强度）
   private gatherPlanets(world: World): void {
     let n = 0;
-    for (const e of world.planets.values()) {
-      if (n >= MAX_PLANETS) break;
+    const put = (e: { planet: PlanetObject }) => {
+      if (n >= MAX_PLANETS) return;
       const g = e.planet.group;
       this.planetList[n++].set(g.position.x, g.position.y, g.position.z, e.planet.radius * g.scale.x);
-    }
+    };
+    if (world.focused) put(world.focused);
+    for (const e of world.planets.values()) if (e !== world.focused) put(e);
     this.planetCount.value = n;
     this.sunDir.value.copy(world.light.sunDir);
     let k = 1;
@@ -466,7 +470,7 @@ export class MainPost {
       }
     }
     this.rayStrength.value = base * k * this.unveiled;
-    this.raysOn = base * k > 0.001;
+    this.raysOn = this.rayStrength.value > 0.001;
   }
 
   // 透光的地方（四分之一分辨率）：取 4 个全分辨率的点（最近邻），深度是远平面（天空、云海）而且够亮的算透光，
@@ -549,6 +553,7 @@ export class MainPost {
           If(r.lessThan(p.w.mul(1.1)), () => {
             lit.assign(smoothstep(this.washFrom, this.washTo, dot(rel.div(r), this.sunDir)));
             on.assign(float(1).sub(smoothstep(p.w.mul(1.075), p.w.mul(1.1), r)));
+            Break(); // 星球之间不重叠：找到就停（聚焦的那颗排在第一个，星球视图里几乎每个像素一次就找到）
           });
         });
         If(on.greaterThan(0), () => {
