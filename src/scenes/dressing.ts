@@ -67,7 +67,9 @@ export class Dressing {
   private grassReady = false; // 草的着色器编译好了（编好之前不挂上场景）
   private readonly host: DressingHost;
   private readonly start = performance.now();
-  private shadowKey = '';
+  private shadowEvening = -1; // 上次算背光色时的 evening（× 1000 取整）和两头的颜色：变了才重算
+  private shadowDay = '';
+  private shadowDusk = '';
 
   constructor(host: DressingHost) {
     this.host = host;
@@ -154,10 +156,12 @@ export class Dressing {
       c.dry = pal.dry;
       c.tip = pal.tip;
     }
-    // 背光色：白天偏蓝灰，日落往紫里偏（按 evening 插值；只在变了时拼字符串）
-    const key = `${GRASS.shadowDay}|${GRASS.shadowDusk}|${light.evening.toFixed(3)}`;
-    if (key !== this.shadowKey) {
-      this.shadowKey = key;
+    // 背光色：白天偏蓝灰，日落往紫里偏（按 evening 插值；只在变了时才拼颜色字符串，平时不分配）
+    const ev = Math.round(light.evening * 1000);
+    if (ev !== this.shadowEvening || GRASS.shadowDay !== this.shadowDay || GRASS.shadowDusk !== this.shadowDusk) {
+      this.shadowEvening = ev;
+      this.shadowDay = GRASS.shadowDay;
+      this.shadowDusk = GRASS.shadowDusk;
       _shadow.set(GRASS.shadowDay).lerp(_dusk.set(GRASS.shadowDusk), THREE.MathUtils.clamp(light.evening / 0.6, 0, 1));
       s.colors.shadow = `#${_shadow.getHexString()}`;
     }

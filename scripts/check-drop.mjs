@@ -1,4 +1,5 @@
 // 拖放自查：编辑模式下拖入 GLB → 作品栏出现临时作品 → 摆上星球 → 存档里没有它；拖入 .txt 被拒绝
+// WEBGL2=1：藏起 navigator.gpu，走 WebGL2 后备（I1 加的，和 check-walk、check-editor 一样）
 import { readFileSync } from 'node:fs';
 import { launch, startServer, watchErrors } from './lib/browser.mjs';
 import { makeBoxGlb } from './lib/fixture.mjs';
@@ -9,9 +10,11 @@ const { server, base } = await startServer();
 const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = watchErrors(page);
+if (process.env.WEBGL2 === '1') await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
 // ?nolocal：用仓库里的种子数据（占位作品），不换成本机的私有模型
 await page.goto(`${base}/?nolocal#/t/${seed.you.teamId}`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
+console.log(`backend: ${await page.evaluate(() => window.__app.backend())}`);
 await page.locator('.topbar button.primary').click();
 
 // 在页面里造一个 File，派发 drop 事件

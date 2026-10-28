@@ -72,21 +72,30 @@ try {
   await page.waitForFunction((t) => document.querySelector('#app')?.dataset.planetReady === t, team, { timeout: 120000 });
   await page.waitForFunction(() => window.__walk?.state().ready === true, null, { timeout: 30000 });
   const backend = await page.evaluate(() => window.__app.backend());
-  const grass = await page.evaluate(() => {
-    const g = window.__world.dressing;
-    let blades = 0;
-    g.grass?.object.traverse((o) => { if (o.isInstancedMesh) blades += o.count; });
-    return { instances: blades, rocks: g.rocks };
+  // 草（I1 起是正式的草：一个 Mesh + InstancedBufferGeometry 一档，数量在 grass.stats 里）、石头、生机层
+  const dressing = () => page.evaluate(() => {
+    const w = window.__world;
+    const g = w.dressing.grass?.stats;
+    const l = w.life.stats();
+    return {
+      grass: g ? `草 ${g.instances.toLocaleString('en-US')} 根 + 花 ${g.flowerInstances.toLocaleString('en-US')} 朵 / ${g.drawCalls} 次绘制 / ${g.triangles.toLocaleString('en-US')} 三角形（${g.tiles} 块瓦片）` : '草：没有',
+      rocks: w.dressing.rocks,
+      life: `生机层 ${l.drawCalls} 次绘制，CPU ${l.cpuMs.toFixed(2)} ms`,
+    };
   });
   await page.waitForTimeout(2500);
-  console.log(`backend ${backend}，像素比 ${dpr}，${local ? '本机真实模型' : '占位作品'}；草（实例）${grass.instances}，石头 ${grass.rocks.instances} 块 / ${grass.rocks.drawCalls} 次绘制 / ${grass.rocks.triangles.toLocaleString('en-US')} 三角形`);
+  const d0 = await dressing();
+  console.log(`backend ${backend}，像素比 ${dpr}，${local ? '本机真实模型' : '占位作品'}；石头 ${d0.rocks.instances} 块 / ${d0.rocks.drawCalls} 次绘制 / ${d0.rocks.triangles.toLocaleString('en-US')} 三角形`);
   console.log(`星球视图：${fmt(await measure(frames))}`);
+  console.log(`  ${d0.grass}；${d0.life}`);
   await page.locator('.topbar button.walk').click();
   await page.waitForFunction(() => window.__walk.state().phase === 'walk', null, { timeout: 8000 });
   await page.waitForTimeout(500);
   await page.keyboard.down('w');
   await page.waitForTimeout(300);
   console.log(`漫游（按住 W）：${fmt(await measure(frames))}`);
+  const d1 = await dressing();
+  console.log(`  ${d1.grass}；${d1.life}`);
   await page.keyboard.up('w');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.__walk.state().phase === 'off', null, { timeout: 8000 });

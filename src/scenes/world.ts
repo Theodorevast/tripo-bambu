@@ -97,6 +97,7 @@ export class World {
   private walkerOn = false;
   private walkerGrounded = true;
   readonly light = { sunDir: new THREE.Vector3(0, 1, 0), sunColor: new THREE.Color(), sunIntensity: 1, evening: 0 }; // 每帧从 atmosphere 取：给草、生机层
+  private readonly weatherArgs = { rain: 0, wind: 0.35, evening: 0, sunDir: this.light.sunDir }; // 每帧传给生机层（复用，不新建对象）
 
   private constructor(renderer: THREE.WebGPURenderer) {
     this.renderer = renderer;
@@ -494,7 +495,11 @@ export class World {
     light.evening = WEATHER.evening ?? eveningFor(this.atmosphere.params.sunElevation);
     if (this.life.object.visible) {
       this.life.setWalker(this.walkerOn ? this.walkerPos : null, this.walkerVel, this.walkerGrounded);
-      this.life.setWeather({ rain: WEATHER.rain, wind: WEATHER.wind, evening: light.evening, sunDir: light.sunDir });
+      const w = this.weatherArgs;
+      w.rain = WEATHER.rain;
+      w.wind = WEATHER.wind;
+      w.evening = light.evening;
+      this.life.setWeather(w);
       this.life.update(dt, camera);
     }
     this.dressing.update(camera, light);
