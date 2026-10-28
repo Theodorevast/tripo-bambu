@@ -9,6 +9,7 @@ import { applyLook, LOOK, TONE_MAPPINGS } from './scenes/look';
 import { addLookTune, LOOK_TUNE } from './scenes/postTune';
 import { SHOTS } from './scenes/shots';
 import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
+import { addTransitionTune, TRANSITION_TUNE } from './scenes/transitionTune';
 import { SKY, WEATHER, type World } from './scenes/world';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
 import { tuneWater, WATER, WATER_COLORS } from './nature/water';
@@ -64,6 +65,7 @@ export function tuneJson(world?: World): string {
       look: LOOK_TUNE,
       water: { ...WATER, colors: WATER_COLORS },
       stage: STAGE_TUNE,
+      ...TRANSITION_TUNE,
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
     2,
@@ -165,6 +167,8 @@ export function installTune(world: World): void {
   lf.addBinding(life, 'quality', { options: { High: 'high', Low: 'low' } }).on('change', () => world.life.setQuality(life.quality));
   const fx = lf.addFolder({ title: 'Effects', expanded: false });
   for (const k of LIFE_EFFECTS) fx.addBinding(effects, k).on('change', () => world.life.setEnabled(k, effects[k]));
+
+  addTransitionTune(pane, world); // —— Transitions ——（scenes/transitionTune.ts：转场的分镜表、开场探头、演示按钮）
 
   // —— Camera ——
   const cam = pane.addFolder({ title: 'Camera', expanded: false });
