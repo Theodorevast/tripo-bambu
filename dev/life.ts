@@ -24,8 +24,12 @@ const PATH_W = 0.62; // 土路半宽（米）
 function height(d: THREE.Vector3): number {
   return R + 0.18 * Math.sin(d.x * 7.1 + 1.3) * Math.sin(d.z * 6.3 + 0.4) + 0.12 * Math.sin(d.y * 9.7 + d.x * 4.1);
 }
+// 到土路中线的有符号距离（米）
+function pathOffset(d: THREE.Vector3): number {
+  return (d.x + 0.05 * Math.sin(5 * Math.atan2(d.z, d.y))) * R;
+}
 function pathDist(d: THREE.Vector3): number {
-  return Math.abs(d.x + 0.05 * Math.sin(5 * Math.atan2(d.z, d.y))) * R;
+  return Math.abs(pathOffset(d));
 }
 function bare(d: THREE.Vector3): number {
   return 1 - THREE.MathUtils.smoothstep(pathDist(d), PATH_W * 0.7, PATH_W);
@@ -284,7 +288,7 @@ const walk = {
 };
 const cam = { fwd: new THREE.Vector3(0, 0, 1), pitch: 0.3, dist: 5.4 };
 const keys = new Set<string>();
-const opts = { auto: params.has('auto'), autoTurn: 0.22 };
+const opts = { auto: params.has('auto'), autoTurn: 0.22, autoPath: false }; // 自动走：绕圈，或者沿土路走
 addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'Space') e.preventDefault();
@@ -306,6 +310,7 @@ canvas.addEventListener('wheel', (e) => {
   cam.dist = THREE.MathUtils.clamp(cam.dist * Math.exp(e.deltaY * 0.001), 2, 70);
 }, { passive: true });
 
+let lastPathE = 0;
 const _wish = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _prev = new THREE.Vector3();
@@ -328,7 +333,17 @@ function stepWalker(dt: number): void {
   if (keys.has('KeyA') || keys.has('ArrowLeft')) fx -= 1;
   if (opts.auto) {
     fz = 1;
-    cam.fwd.applyAxisAngle(up, opts.autoTurn * dt);
+    let turn = opts.autoTurn;
+    if (opts.autoPath) {
+      // 沿土路走：对「离中线的距离」做 PD 控制，往左挪一点看距离怎么变，决定往哪边拐
+      const e = pathOffset(up);
+      _x.copy(up).multiplyScalar(R).addScaledVector(_right, -0.05).normalize();
+      const dLeft = (pathOffset(_x) - e) / 0.05;
+      const de = dt > 0 ? (e - lastPathE) / dt : 0;
+      lastPathE = e;
+      turn = THREE.MathUtils.clamp(-(2.2 * e + 1.6 * de) * Math.sign(dLeft || 1), -1.5, 1.5);
+    }
+    cam.fwd.applyAxisAngle(up, turn * dt);
   }
   const run = keys.has('ShiftLeft') || keys.has('ShiftRight');
   _wish.copy(cam.fwd).multiplyScalar(fz).addScaledVector(_right, fx);
@@ -515,6 +530,7 @@ if (params.get('ui') !== '0') {
   }
   e.addBinding(ui, 'quality', { options: { high: 'high', low: 'low' } }).on('change', applyEffects);
   e.addBinding(opts, 'auto', { label: 'auto walk' });
+  e.addBinding(opts, 'autoPath', { label: 'auto: follow path' });
   const s = pane.addFolder({ title: 'Stats' });
   s.addBinding(stats, 'backend', { readonly: true });
   s.addBinding(stats, 'fps', { readonly: true, format: (v: number) => v.toFixed(0) });
@@ -530,6 +546,11 @@ if (params.get('ui') !== '0') {
 
 // ---------- 主循环 ----------
 
+// 测量用的「放大」：主画面画完后，把生机层（或一个空组，作对照）在同一帧里再画 amp 遍。
+// 生机层在这块显卡上只占零点几毫秒，比显卡频率的抖动还小；画 K 遍再相减、除以 K，才量得准
+const bench = { amp: 0, target: 'life' as 'life' | 'empty' };
+const lifeRoot = scene.getObjectByName('life')!;
+const emptyRoot = new THREE.Group();
 const timer = new THREE.Timer();
 let frames = 0;
 let fpsAcc = 0;
@@ -553,6 +574,13 @@ function frame(time: number): void {
     hudSize.value.set(200 / innerWidth, 200 / innerHeight);
   }
   renderer.render(scene, camera);
+  if (bench.amp > 0) {
+    const prev = renderer.autoClear;
+    renderer.autoClear = false;
+    const target = bench.target === 'life' ? lifeRoot : emptyRoot;
+    for (let i = 0; i < bench.amp; i++) renderer.render(target, camera);
+    renderer.autoClear = prev;
+  }
 
   // 统计
   frames++;
@@ -608,10 +636,14 @@ declare global {
     __life?: {
       ready: boolean;
       backend: string;
-      set(p: { rain?: number; wind?: number; evening?: number; auto?: boolean; effects?: Partial<typeof fx>; quality?: LifeQuality; camera?: { pitch?: number; dist?: number; yaw?: number } }): void;
+      set(p: { bench?: { amp: number; target: 'life' | 'empty' }; rain?: number; wind?: number; evening?: number; auto?: boolean; autoTurn?: number; autoPath?: boolean; effects?: Partial<typeof fx>; quality?: LifeQuality; camera?: { pitch?: number; dist?: number; yaw?: number } }): void;
       gpu(frames: number): Promise<{ mean: number; median: number; p90: number; n: number }>;
-      stats(): ReturnType<typeof life3.stats> & { fps: number; frameMs: number; gpuMs: number };
+      stats(): ReturnType<typeof life3.stats> & { fps: number; frameMs: number; gpuMs: number; rainLight: number; rain: number };
       key(code: string, down: boolean): void;
+      teleport(dir: [number, number, number]): void;
+      butterfly(i: number): [number, number, number];
+      walker(): [number, number, number];
+      trample(): Promise<{ trampled: number; maxR: number; atWalker: number }>;
     };
   }
 }
@@ -620,10 +652,13 @@ window.__life = {
   ready: false,
   backend: stats.backend,
   set(p) {
+    if (p.bench) Object.assign(bench, p.bench);
     if (p.rain !== undefined) look.rain = p.rain;
     if (p.wind !== undefined) look.wind = p.wind;
     if (p.evening !== undefined) look.evening = p.evening;
     if (p.auto !== undefined) opts.auto = p.auto;
+    if (p.autoTurn !== undefined) opts.autoTurn = p.autoTurn;
+    if (p.autoPath !== undefined) opts.autoPath = p.autoPath;
     if (p.effects) Object.assign(fx, p.effects);
     if (p.quality) ui.quality = p.quality;
     if (p.camera?.pitch !== undefined) cam.pitch = p.camera.pitch;
@@ -651,11 +686,42 @@ window.__life = {
     });
   },
   stats() {
-    return { ...life3.stats(), fps: stats.fps, frameMs: stats.frameMs, gpuMs: stats.gpuMs };
+    return { ...life3.stats(), fps: stats.fps, frameMs: stats.frameMs, gpuMs: stats.gpuMs, rainLight: look.rainLight, rain: life3.rain };
   },
   key(code, down) {
     if (down) keys.add(code);
     else keys.delete(code);
+  },
+  teleport(d) {
+    walk.dir.set(d[0], d[1], d[2]).normalize();
+    walk.vel.set(0, 0, 0);
+    walk.facing.addScaledVector(walk.dir, -walk.facing.dot(walk.dir));
+    if (walk.facing.lengthSq() < 1e-6) walk.facing.set(1, 0, 0).addScaledVector(walk.dir, -walk.dir.x);
+    walk.facing.normalize();
+    cam.fwd.copy(walk.facing);
+  },
+  butterfly(i) {
+    const p = life3.debug.butterflies;
+    return [p[i * 3], p[i * 3 + 1], p[i * 3 + 2]];
+  },
+  walker() {
+    return [walkerGroup.position.x, walkerGroup.position.y, walkerGroup.position.z];
+  },
+  // 读回整张踩踏图：被踩过的像素数、最大值、角色脚下的值（两种 y 方向都试，取大的）
+  async trample() {
+    const rt = life3.debug.trampleTarget;
+    const px = (await renderer.readRenderTargetPixelsAsync(rt, 0, 0, rt.width, rt.height)) as Uint8Array;
+    let trampled = 0;
+    let maxR = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i] > 25) trampled++;
+      if (px[i] > maxR) maxR = px[i];
+    }
+    const uvw = life3.trample!.uvOf(walk.dir);
+    const x = Math.min(rt.width - 1, Math.floor(uvw.x * rt.width));
+    const y = Math.min(rt.height - 1, Math.floor(uvw.y * rt.height));
+    const atWalker = Math.max(px[(y * rt.width + x) * 4], px[((rt.height - 1 - y) * rt.width + x) * 4]);
+    return { trampled, maxR: maxR / 255, atWalker: atWalker / 255 };
   },
 };
 requestAnimationFrame(() => requestAnimationFrame(() => {

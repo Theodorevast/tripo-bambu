@@ -58,6 +58,13 @@ export interface LifeStats {
   trampleSize: number;
   tramplePasses: number; // 累计的踩踏图离屏 pass 次数
   cpuMs: number; // 上一次 update() 的 CPU 耗时
+  // 以下给自查脚本用
+  dustAlive: number; // 正在播放的尘土粒子
+  splashesAlive: number; // 正在播放的水花
+  butterflyModes: [number, number, number, number]; // 游荡、飞向花、停着、受惊逃开 各几只
+  startles: number; // 累计受惊次数
+  fireflies: number; // 萤火虫亮度系数 0..1
+  pollen: number; // 花粉光点系数 0..1
 }
 
 export interface Life {
@@ -76,6 +83,7 @@ export interface Life {
   isEnabled(effect: LifeEffect): boolean;
   setQuality(q: LifeQuality): void;
   stats(): LifeStats;
+  readonly debug: { trampleTarget: THREE.RenderTarget; butterflies: Float32Array }; // 自查脚本用：读回踩踏图、蝴蝶位置（世界坐标 xyz × N）
 }
 
 // ---------- 八面体映射（踩踏图的坐标） ----------
@@ -205,6 +213,7 @@ export class ButterflySim {
   readonly target: Float32Array; // 要落的花 / 受惊时逃开的方向
   readonly mode: Uint8Array;
   readonly timer: Float32Array;
+  startles = 0; // 累计受惊次数
   readonly phase: Float32Array; // 扇翅相位（弧度）
   readonly rest: Float32Array; // 0 飞，1 停着（平滑过渡）
   readonly seed: Float32Array;
@@ -280,7 +289,10 @@ export class ButterflySim {
       if (walker) {
         const d = _bp.distanceTo(walker);
         if (d < BUTTERFLY.startle + walkerSpeed * 0.3) {
-          if (m !== B_FLEE) tm = 1.3 + rng() * 0.8;
+          if (m !== B_FLEE) {
+            tm = 1.3 + rng() * 0.8;
+            this.startles++;
+          }
           else tm = Math.max(tm, 0.8);
           m = B_FLEE;
           _bd.copy(_bp).sub(walker);
@@ -588,6 +600,15 @@ function makeDust(U: Uniforms) {
   const mesh = makeMesh('life.dust', g, m, 10);
 
   let head = 0;
+  // 正在播放的粒子数（统计用，不在热路径）
+  const aliveCount = (time: number): number => {
+    let n = 0;
+    for (let i = 0; i < DUST_SLOTS; i++) {
+      const age = time - a.array[i * 4 + 3];
+      if (age >= 0 && age < d.array[i * 4]) n++;
+    }
+    return n;
+  };
   // 发射一粒；pos 是出生点（世界坐标）
   function emit(t: number, pos: THREE.Vector3, vel: THREE.Vector3, col: THREE.Color, kind: number, life: number, s0: number, s1: number, opacity: number, rnd: number): void {
     const i = head;
@@ -598,7 +619,7 @@ function makeDust(U: Uniforms) {
     d.setXYZW(i, life, s0, s1, opacity);
     a.needsUpdate = b.needsUpdate = c.needsUpdate = d.needsUpdate = true;
   }
-  return { mesh, emit, dispose: () => { g.dispose(); m.dispose(); } };
+  return { mesh, emit, aliveCount, dispose: () => { g.dispose(); m.dispose(); } };
 }
 
 // ---------- 水花：CPU 发射（贴着真实地面），GPU 演化 ----------
@@ -645,7 +666,15 @@ function makeSplashes(U: Uniforms, rng: Rng) {
     head = (head + 1) % SPLASH_SLOTS;
     a.needsUpdate = true;
   }
-  return { mesh, emit, dispose: () => { g.dispose(); m.dispose(); } };
+  const aliveCount = (time: number): number => {
+    let n = 0;
+    for (let i = 0; i < SPLASH_SLOTS; i++) {
+      const age = time - a.array[i * 4 + 3];
+      if (age >= 0 && age < SPLASH_LIFE) n++;
+    }
+    return n;
+  };
+  return { mesh, emit, aliveCount, dispose: () => { g.dispose(); m.dispose(); } };
 }
 
 // ---------- 雨丝：无状态 ----------
@@ -1116,8 +1145,11 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
       if (!big) _v.addScaledVector(_sf, -speed * 0.12);
       _v.addScaledVector(_upv, 0.15 + rng() * 0.25);
       _w.copy(_sp).addScaledVector(_upv, 0.03);
-      const op = (bare > 0.5 || big ? 0.5 : 0.22) * (0.8 + rng() * 0.4);
-      dust.emit(t, _w, _v, _col, 0, 0.55 + rng() * 0.35, 0.07 * s, (0.26 + rng() * 0.16) * s, op, rng());
+      // 土路上是一团团黄土；草地上只有一小团很淡的花粉灰，主要是草屑
+      const dirt = bare > 0.5 || big;
+      const op = (dirt ? 0.5 : 0.16) * (0.8 + rng() * 0.4);
+      const s1 = (dirt ? 0.26 + rng() * 0.16 : 0.14 + rng() * 0.08) * s;
+      dust.emit(t, _w, _v, _col, 0, 0.55 + rng() * 0.35, 0.06 * s, s1, op, rng());
     }
     for (let i = 0; i < flecks; i++) {
       const a = (rng() - 0.5) * 2.6 + Math.PI;
@@ -1270,6 +1302,8 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
       if (walker.has && walker.grounded) {
         _localB.copy(walker.pos).sub(planet.center);
         _localA.copy(hasLastStamp ? lastStamp : _localB);
+        // 一帧挪了 2 米以上是传送（换星球、重生），不把两点连起来
+        if (_localA.distanceToSquared(_localB) > 4) _localA.copy(_localB);
         const moved = _localA.distanceToSquared(_localB) > 1e-4;
         if (moved || sinceStamp > 0.5) {
           trample.stamp(_localA, _localB, _localB.length(), 1);
@@ -1327,6 +1361,12 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
     if (w.sunDir) sunDir.copy(w.sunDir).normalize();
   }
 
+  function modes(): [number, number, number, number] {
+    const out: [number, number, number, number] = [0, 0, 0, 0];
+    for (let i = 0; i < BUTTERFLY_MAX[quality]; i++) out[sim.mode[i]]++;
+    return out;
+  }
+
   return {
     update,
     setWalker,
@@ -1368,8 +1408,15 @@ export function createLife(scene: THREE.Scene, renderer: THREE.WebGPURenderer, p
         trampleSize,
         tramplePasses: trample.passes,
         cpuMs,
+        dustAlive: dust.aliveCount(U.time.value),
+        splashesAlive: splashes.aliveCount(U.time.value),
+        butterflyModes: modes(),
+        startles: sim.startles,
+        fireflies: U.fireAmt.value,
+        pollen: U.pollenAmt.value,
       };
     },
+    debug: { trampleTarget: trample.rt, butterflies: sim.pos },
     dispose() {
       scene.remove(root);
       for (const d of [dust, splashes, rain, petals, fluff, fireflies, butterflies, trample]) d.dispose();
