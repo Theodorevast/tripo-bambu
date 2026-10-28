@@ -1,7 +1,7 @@
 // 天空、云海和光照的自查：GPU 计时 + 截图。用法：node dev/sky.check.mjs [--shots] [--perf] [--only webgpu|webgl2]
 // 计时：1440×900、DPR 2（画布 2880×1800），页面带 ?timing，渲染器开 trackTimestamp，每帧读回整帧所有渲染通道的 GPU 时间。
 //   同一个镜头量两次：天空 + 云海 + 远处积云 + 雾都开着（on），再把它们关掉、背景换成纯色（off），差值就是这几样的开销。
-//   每次先等 90 帧（着色器编译、环境贴图烘焙都在这之前做完），再取 240 帧的中位数。
+//   每次先等 150 帧（着色器编译、环境贴图烘焙都在这之前做完），再取 240 帧的中位数。
 //   Chrome 加 --enable-webgpu-developer-features：WebGPU 的时间戳默认量化到 100 µs，开了才是原始精度。
 // 截图：1440×900、DPR 1，存到 shots/：n2-overview、n2-ground、n2-sunset、n2-webgl2，和参考图并排的 n2-compare
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -47,18 +47,20 @@ async function perf(backend, view, preset) {
   const page = await open(q, 2);
   const actual = await page.evaluate(() => window.__sky.backend);
   const canvas = await page.evaluate(() => `${document.querySelector('#c').width}x${document.querySelector('#c').height}`);
-  await page.evaluate(() => window.__sky.waitFrames(90));
+  await page.evaluate(() => window.__sky.waitFrames(150));
   const burst = backend === 'webgl2' ? 8 : 1;
+  const bakes0 = await page.evaluate(() => window.__sky.atmosphere.envBakes);
   const on = await page.evaluate((k) => window.__sky.measure(240, k), burst);
+  const bakes = (await page.evaluate(() => window.__sky.atmosphere.envBakes)) - bakes0; // 静止镜头下应该是 0：环境贴图不会每帧重烘
   await page.evaluate(() => window.__sky.showAtmosphere(false));
-  await page.evaluate(() => window.__sky.waitFrames(90));
+  await page.evaluate(() => window.__sky.waitFrames(150));
   const off = await page.evaluate((k) => window.__sky.measure(240, k), burst);
   await page.evaluate(() => window.__sky.showAtmosphere(true));
   const a = stats(on.gpu);
   const b = stats(off.gpu);
   const row = { backend: actual, view, preset, canvas, burst, on: a.median, off: b.median, delta: a.median - b.median, onP90: a.p90, offP90: b.p90, samples: [a.n, b.n] };
   results.push(row);
-  console.log(`${actual.padEnd(7)} ${view.padEnd(6)} ${preset.padEnd(6)} ${canvas}  on ${a.median.toFixed(3)} ms (p90 ${a.p90.toFixed(3)})  off ${b.median.toFixed(3)} ms  → sky+sea ${(a.median - b.median).toFixed(3)} ms  [${a.n}/${b.n} samples, burst ${burst}]`);
+  console.log(`${actual.padEnd(7)} ${view.padEnd(6)} ${preset.padEnd(6)} ${canvas}  on ${a.median.toFixed(3)} ms (p90 ${a.p90.toFixed(3)})  off ${b.median.toFixed(3)} ms  → sky+sea ${(a.median - b.median).toFixed(3)} ms  [${a.n}/${b.n} samples, burst ${burst}, env bakes while measuring ${bakes}]`);
   await page.close();
 }
 

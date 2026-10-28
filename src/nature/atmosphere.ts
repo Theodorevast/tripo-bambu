@@ -11,6 +11,7 @@ import {
   exp,
   float,
   fog,
+  fract,
   length,
   log2,
   max,
@@ -21,6 +22,8 @@ import {
   positionLocal,
   positionWorld,
   pow,
+  renderGroup,
+  screenCoordinate,
   saturate,
   select,
   smoothstep,
@@ -477,7 +480,10 @@ export function layoutPuffs(clusters = 9, seed = 5): Puff[] {
 type V3 = THREE.Node<'vec3'>;
 type F = THREE.Node<'float'>;
 // 颜色 uniform 用 vec3 存（线性 RGB），和其他向量运算类型一致
-const colorUniform = (c: THREE.Color) => uniform(new THREE.Vector3(c.r, c.g, c.b));
+// 所有 uniform 都放进 renderGroup（每次 render 更新一次）。雾节点会编进场景里每个开着 fog 的材质，而 three 默认的 objectGroup
+// 在「没有节点属性」的材质（比如普通的 MeshStandardNodeMaterial、glTF 作品）上只在物体或材质变了时才刷新——
+// 那样切预设时作品上的雾色、标架转动时雾的高度方向都会停在旧值（实测：走到南极时地面被旧的高度雾盖成奶白）
+const colorUniform = (c: THREE.Color) => uniform(new THREE.Vector3(c.r, c.g, c.b)).setGroup(renderGroup);
 
 export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURenderer, opts: AtmosphereOptions): Atmosphere {
   const presetName0: AtmospherePreset = opts.preset ?? 'day';
@@ -515,42 +521,42 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   let shown = true;
 
   // ---- uniform（世界坐标）
-  const uUp = uniform(new THREE.Vector3(0, 1, 0));
-  const uE1 = uniform(new THREE.Vector3(1, 0, 0));
-  const uE2 = uniform(new THREE.Vector3(0, 0, 1));
-  const uSun = uniform(new THREE.Vector3(0, 0.4, 0.9).normalize());
-  const uCenter = uniform(new THREE.Vector3());
-  const uRadius = uniform(radius);
-  const uSeaBase = uniform(0); // 云底（凹处）相对星球中心的高度
-  const uSeaThick = uniform(1);
-  const uCollar = uniform(0); // 星球周围云堆起来的高度
-  const uCollarR = uniform(1); // 堆云的范围（离星球竖轴的水平距离）
-  const uScale1 = uniform(1 / 420); // 世界米 → 贴图坐标
-  const uScale2 = uniform(1 / 270);
-  const uFlow1 = uniform(new THREE.Vector2());
-  const uFlow2 = uniform(new THREE.Vector2());
-  const uLodK = uniform(1); // 像素张角 / 贴图单个像素的世界尺寸
-  const uHaze = uniform(1 / 2600); // 云海、远处积云的空气透视（每米）
-  const uFogDensity = uniform(palette.fogDensity);
-  const uCamRight = uniform(new THREE.Vector3(1, 0, 0));
-  const uCamUp = uniform(new THREE.Vector3(0, 1, 0));
+  const uUp = uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup);
+  const uE1 = uniform(new THREE.Vector3(1, 0, 0)).setGroup(renderGroup);
+  const uE2 = uniform(new THREE.Vector3(0, 0, 1)).setGroup(renderGroup);
+  const uSun = uniform(new THREE.Vector3(0, 0.4, 0.9).normalize()).setGroup(renderGroup);
+  const uCenter = uniform(new THREE.Vector3()).setGroup(renderGroup);
+  const uRadius = uniform(radius).setGroup(renderGroup);
+  const uSeaBase = uniform(0).setGroup(renderGroup); // 云底（凹处）相对星球中心的高度
+  const uSeaThick = uniform(1).setGroup(renderGroup);
+  const uCollar = uniform(0).setGroup(renderGroup); // 星球周围云堆起来的高度
+  const uCollarR = uniform(1).setGroup(renderGroup); // 堆云的范围（离星球竖轴的水平距离）
+  const uScale1 = uniform(1 / 420).setGroup(renderGroup); // 世界米 → 贴图坐标
+  const uScale2 = uniform(1 / 270).setGroup(renderGroup);
+  const uFlow1 = uniform(new THREE.Vector2()).setGroup(renderGroup);
+  const uFlow2 = uniform(new THREE.Vector2()).setGroup(renderGroup);
+  const uLodK = uniform(1).setGroup(renderGroup); // 像素张角 / 贴图单个像素的世界尺寸
+  const uHaze = uniform(1 / 2600).setGroup(renderGroup); // 云海、远处积云的空气透视（每米）
+  const uFogDensity = uniform(palette.fogDensity).setGroup(renderGroup);
+  const uCamRight = uniform(new THREE.Vector3(1, 0, 0)).setGroup(renderGroup);
+  const uCamUp = uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup);
 
   const uZenith = colorUniform(palette.zenith);
   const uUpper = colorUniform(palette.upper);
   const uHorizon = colorUniform(palette.horizon);
   const uHorizonSun = colorUniform(palette.horizonSun);
   const uGlow = colorUniform(palette.glow);
-  const uGlowStrength = uniform(palette.glowStrength);
-  const uStreaks = uniform(palette.streaks);
+  const uGlowStrength = uniform(palette.glowStrength).setGroup(renderGroup);
+  const uStreaks = uniform(palette.streaks).setGroup(renderGroup);
   const uSunDisc = colorUniform(palette.sunDisc);
   const uCloudLit = colorUniform(palette.cloudLit);
   const uCloudMid = colorUniform(palette.cloudMid);
   const uCloudShade = colorUniform(palette.cloudShade);
   const uCloudDeep = colorUniform(palette.cloudDeep);
   const uGround = colorUniform(palette.ground);
-  const uGradUpper = uniform(palette.gradUpper);
-  const uGradZenith = uniform(palette.gradZenith);
-  const uBelow = uniform(palette.envBelow); // 环境贴图里地平线以下（云海）的亮度倍数
+  const uGradUpper = uniform(palette.gradUpper).setGroup(renderGroup);
+  const uGradZenith = uniform(palette.gradZenith).setGroup(renderGroup);
+  const uBelow = uniform(palette.envBelow).setGroup(renderGroup); // 环境贴图里地平线以下（云海）的亮度倍数
 
   // ---- 噪声贴图
   const noiseTex = new THREE.DataTexture(bakeCloudNoise(NOISE_SIZE), NOISE_SIZE, NOISE_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
@@ -624,7 +630,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
 
   // ---- 云海
   // 高度场（相对星球中心，沿「上」）：云底 + 厚度 × H（两层贴图交叉淡化）+ 星球周围堆起来的一圈
-  const STEPS = 18;
+  const STEPS = 24;
   // 星球周围堆云的权重：贴着星球最高，离星球竖轴 uCollarR 以外为 0
   const collarWeight = (rho: F) => float(1).sub(smoothstep(uRadius.mul(0.85), uCollarR, rho));
   const surface = (p: V3, lod: F) => {
@@ -661,7 +667,9 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const tSph = select(disc.greaterThan(0).and(tS.greaterThan(0)), tS, float(1e9)).toVar();
     const tEnd = min(tBot, tSph).toVar();
     const dt = max(tEnd.sub(tStart), 0).div(STEPS).toVar();
-    const t = tStart.toVar();
+    // 起点按像素错开一点（交错梯度噪声）：步长不够时云团轮廓上的台阶变成很细的抖动，DPR 2 下看不出来
+    const ign = fract(fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189));
+    const t = tStart.add(dt.mul(ign).mul(0.5)).sub(dt).toVar();
     const tPrev = tStart.toVar();
     const hit = float(0).toVar();
     Loop(STEPS, () => {
@@ -755,7 +763,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   const indexAttr = new THREE.BufferAttribute(puffIndex, 1);
   cloudGeo.setIndex(indexAttr);
 
-  const uSeaTopNow = uniform(0); // 云海平均顶面（远处积云的底面从这里量）
+  const uSeaTopNow = uniform(0).setGroup(renderGroup); // 云海平均顶面（远处积云的底面从这里量）
   const cloudMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
   {
     const cLocal = attribute('aCenter', 'vec3');
@@ -810,7 +818,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const dir = rel.div(max(d, 1e-4));
     const distK = float(1).sub(exp(d.mul(uFogDensity).negate()));
     const above = dot(positionWorld.sub(uCenter), uUp).sub(uSeaTopNow);
-    const heightK = saturate(exp(above.div(uRadius.mul(0.07)).negate())).mul(0.6);
+    const heightK = smoothstep(uRadius.mul(0.35), uRadius.mul(-0.05), above).mul(0.55);
     // 高度雾的颜色按云的配色走：用星球表面的球面法线和太阳算受光量，雾里的星球底部和旁边的云一样有亮面和背光面
     const nrm = normalize(positionWorld.sub(uCenter));
     const cloudish = cloudRamp(saturate(dot(nrm, uSun).add(0.22).div(1.22)).mul(0.9), float(0.75));

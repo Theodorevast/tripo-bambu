@@ -14,6 +14,7 @@ import {
   sunDirection,
   targetUp,
 } from '../src/nature/atmosphere';
+import atmosphereSource from '../src/nature/atmosphere.ts?raw';
 
 const R = 30;
 const ORIGIN = new THREE.Vector3();
@@ -308,5 +309,15 @@ describe('createAtmosphere', () => {
     atmo.update(1 / 60, cam);
     expect(atmo.objects.sea.visible).toBe(true);
     atmo.dispose();
+  });
+});
+
+describe('uniform 分组', () => {
+  it('模块里的 uniform 都放在 renderGroup：雾会编进所有材质，objectGroup 在静态物体上不会逐帧刷新', () => {
+    const src: string = atmosphereSource;
+    // 代码里每一处 uniform(...) 调用（不算注释）
+    const calls = src.split('\n').filter((l: string) => /\buniform\(/.test(l) && !/^\s*\/\//.test(l));
+    expect(calls.length).toBeGreaterThan(20);
+    for (const line of calls) expect(line).toContain('.setGroup(renderGroup)');
   });
 });

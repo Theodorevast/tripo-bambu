@@ -96,6 +96,8 @@ controls.dampingFactor = 0.08;
 controls.enablePan = false;
 type View = 'orbit' | 'ground';
 const view = { mode: (q.get('view') === 'ground' ? 'ground' : 'orbit') as View };
+// 自查脚本手动摆镜头时不让 OrbitControls 接管（它按世界 +Y 当上方向）
+const manual = { on: false };
 const head = new THREE.Vector3(0, R + 0.9, 0);
 function setView(mode: View): void {
   view.mode = mode;
@@ -145,7 +147,7 @@ const timer = new THREE.Timer();
 renderer.setAnimationLoop((t) => {
   timer.update(t);
   const dt = Math.min(timer.getDelta(), 0.1);
-  controls.update(dt);
+  if (!manual.on) controls.update(dt);
   atmosphere.update(dt, camera);
   // 量开销时一帧画 burst 次（同一帧的时间戳会加在一起，读回来再除以 burst）：把每个渲染通道固定的空转摊薄
   for (let i = 0; i < bench.burst; i++) renderer.render(scene, camera);
@@ -252,6 +254,14 @@ window.__sky = {
   camera,
   controls,
   renderer,
+  // 手动摆镜头：位置、注视点、镜头的上方向（例如站在星球侧面，上方向是径向）
+  placeCamera(pos: [number, number, number], target: [number, number, number], camUp: [number, number, number] = [0, 1, 0]) {
+    manual.on = true;
+    camera.up.set(...camUp).normalize();
+    camera.position.set(...pos);
+    camera.lookAt(...target);
+    camera.updateMatrixWorld();
+  },
 };
 await waitFrames(4);
 window.__ready = true;
