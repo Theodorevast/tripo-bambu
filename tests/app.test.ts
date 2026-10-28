@@ -33,6 +33,8 @@ function fakeWorld() {
     setHover: () => {},
     pickPlanet: () => null,
     intro: () => Promise.resolve(),
+    peekIntro: () => false,
+    // 假世界不走转场的时间线：cues.covered 不调，App 落地后自己补上撤作品、摆作品
     focus: (id: string) => fly(`focus ${id}`),
     unfocus: () => fly('unfocus'),
   } as unknown as World;
@@ -177,6 +179,44 @@ describe('App 路由队列', () => {
     await settle();
     expect(entered).toEqual(['b']);
     error.mockRestore();
+  });
+
+  it('转场里的时机：从星系进来一开始就摆作品；跳到另一颗星球、回星系时在云层全遮住那一刻才撤旧作品、摆新作品', async () => {
+    const { app, location } = setup('#/');
+    // 这个假世界记下 App 给的 cues：测试自己决定什么时候「全遮住」、什么时候落地
+    const world = app.world as unknown as { focus: unknown; unfocus: unknown };
+    let cues: { covered?: () => void } = {};
+    const pending: Array<() => void> = [];
+    const flying = (): Promise<null> => new Promise((resolve) => pending.push(() => resolve(null)));
+    world.focus = (_id: string, c: { covered?: () => void } = {}) => { cues = c; return flying(); };
+    world.unfocus = (c: { covered?: () => void } = {}) => { cues = c; return flying(); };
+    const log: string[] = [];
+    app.planetLayer = { enter: (t) => { log.push(`enter ${t.id}`); }, leave: () => { log.push('leave'); } };
+    const landAll = () => { for (const r of pending.splice(0)) r(); };
+    await app.start();
+    location.hash = '#/t/a';
+    await settle();
+    expect(log).toEqual(['enter a']); // 起飞就摆（模型加载藏在转场里）
+    cues.covered?.();
+    expect(log).toEqual(['enter a']); // 全遮住时不再摆一次
+    landAll();
+    await settle();
+    location.hash = '#/t/b';
+    await settle();
+    expect(log).toEqual(['enter a']); // 旧星球的作品还在
+    cues.covered?.();
+    expect(log).toEqual(['enter a', 'leave', 'enter b']);
+    landAll();
+    await settle();
+    expect(log).toEqual(['enter a', 'leave', 'enter b']); // 落地后不重复
+    location.hash = '#/';
+    await settle();
+    expect(log.at(-1)).toBe('enter b');
+    cues.covered?.();
+    expect(log.at(-1)).toBe('leave');
+    landAll();
+    await settle();
+    expect(log.filter((x) => x === 'leave').length).toBe(2);
   });
 
   it('routing：有跳转在处理时为 true，处理完为 false', async () => {

@@ -8,11 +8,13 @@ import { focusDetail, LOD_LOW, prewarmTerrain } from '../planet/generate';
 import { PlanetObject } from '../planet/planetObject';
 import { onPlanetRadius, PLANET_RADIUS } from '../planet/presets';
 import { CameraRig, type Framing } from './camera';
+import { Director, type TransitionCues } from './director';
+import { GatedStager } from './gatedStager';
 import { Dressing } from './dressing';
 import { galaxyPositions } from './layout';
 import { MainPost } from './post';
-import { galaxyFraming, planetFraming } from './shots';
-import { compileShadow, compileUnculled, Stager } from './stager';
+import { galaxyFraming, INTRO, planetFraming } from './shots';
+import { compileShadow, compileUnculled } from './stager';
 
 export interface PlanetEntry {
   team: Team;
@@ -67,7 +69,8 @@ export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
   readonly rig: CameraRig;
-  readonly stage: Stager; // 新模型上场：贴图逐帧上传、着色器后台编译、每帧最多挂一个、缩放加淡入
+  readonly stage: GatedStager; // 新模型上场：贴图逐帧上传、着色器后台编译、每帧最多挂一个、缩放加淡入；转场里先排着，云散开时依次弹出来
+  readonly director: Director; // 转场：云层、镜头按分镜表飞、作品依次出场（director.ts）
   readonly planets = new Map<string, PlanetEntry>();
   readonly frameHooks = new Set<(dt: number) => void>();
   readonly renderHooks = new Set<() => void>(); // 画完这一帧之后调（读这一帧的绘制统计：renderer.info 在下一帧开始时清零）
@@ -106,7 +109,8 @@ export class World {
     this.warm = new Promise((resolve) => { this.warmed = resolve; });
     this.rig = new CameraRig(renderer.domElement);
     this.post = new MainPost(renderer, this.scene, this.rig.camera);
-    this.stage = new Stager(renderer, this.scene, this.rig.camera);
+    this.stage = new GatedStager(renderer, this.scene, this.rig.camera);
+    this.director = new Director(this);
     this.stage.shadowLight = () => (SHADOW.enabled ? this.atmosphere.sun : null);
     // 天空、云海、光：色调映射（AgX）和曝光由它设，World 不再调 useLook（Museum、查看器的渲染器照旧用 look.ts）。
     // 阴影相机 World 自己摆（placeSun：跟着镜头看的地方）
@@ -311,36 +315,41 @@ export class World {
   // 打开页面时从远处缓缓推进到星系全景
   intro(): Promise<void> {
     const view = this.galaxyView();
-    this.rig.jump({ ...view, position: view.position.clone().multiplyScalar(2.6), maxDistance: Infinity });
-    return this.rig.fly(view, 2.4);
+    this.rig.jump({ ...view, position: view.position.clone().multiplyScalar(INTRO.distance), maxDistance: Infinity });
+    return this.rig.fly(view, INTRO.seconds);
   }
 
-  async focus(teamId: string): Promise<PlanetEntry | null> {
+  // 星系 → 星球（穿云）、星球 → 另一颗星球（甩镜跳过去）：转场见 director.ts。
+  // 云海马上开始跟着聚焦的星球升上来（1.2 秒缓动）；换地表细分、草和石头、生机层在云层全遮住的那一刻做（看不见，
+  // 跳星球时旧星球的东西一直留到那时），cues.covered 同时撤旧作品、摆新作品（App）
+  async focus(teamId: string, cues: TransitionCues = {}): Promise<PlanetEntry | null> {
     const e = this.planets.get(teamId);
     if (!e) return null;
-    if (this.focused && this.focused !== e) this.focused.planet.setDetail(LOD_LOW);
+    const prev = this.focused;
     this.focused = e;
     this.setHover(null);
-    e.planet.setDetail(focusDetail());
-    // 草和石头在飞过去之前就摆好（草场开场就编译好了，这里只换星球数据）
-    this.dressing.enter(e);
-    // 云海跟着聚焦的星球，从星系视图里压在下面的位置升上来（1.2 秒缓动，和镜头飞行一样长）；生机层搬到这颗星球
     this.atmosphere.setPlanet(e.home, PLANET_RADIUS);
-    this.life.setPlanet(this.lifePlanet(e));
-    this.life.object.visible = true;
     this.fadeRings(e);
-    await this.rig.fly(planetFraming(e.home));
+    await this.director.focus(e, prev !== null && prev !== e, planetFraming(e.home), () => {
+      if (prev && prev !== e) prev.planet.setDetail(LOD_LOW);
+      e.planet.setDetail(focusDetail());
+      this.dressing.enter(e);
+      this.life.setPlanet(this.lifePlanet(e));
+      this.life.object.visible = true;
+      cues.covered?.();
+    });
     return e;
   }
 
-  async unfocus(): Promise<void> {
+  // 星球 → 星系：云「噗」地合拢，全遮住时撤作品（cues.covered），镜头才往后拉
+  async unfocus(cues: TransitionCues = {}): Promise<void> {
     const prev = this.focused;
     this.focused = null;
     this.fadeRings(null);
-    // 星系视图里云海压到所有星球下面（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）
+    // 星系视图里云海压到所有星球下面（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）：马上开始（1.2 秒缓动，云散开时已经快到位）
     this.galaxySky();
     this.setWalker(null);
-    await this.rig.fly(this.galaxyView());
+    await this.director.unfocus(prev, this.galaxyView(), () => cues.covered?.());
     if (this.focused === null) {
       this.dressing.leave();
       this.life.object.visible = false;
@@ -474,8 +483,9 @@ export class World {
   private frame(time: number): void {
     this.timer.update(time);
     // 夹到 0–0.1 秒：卡了一下也不让动画一步跳太远。切回标签页时计时器已经重置，第一帧的 dt 很小（偶尔是负的，夹成 0）
-    const dt = THREE.MathUtils.clamp(this.timer.getDelta(), 0, 0.1);
+    const dt = this.director.dt(THREE.MathUtils.clamp(this.timer.getDelta(), 0, 0.1));
     this.rig.update(dt);
+    this.director.tick(dt); // 转场：按分镜表摆镜头、画云层、到点换场景
     this.stepRings(dt);
     this.stage.tick(dt);
     if (this.hovered) {
