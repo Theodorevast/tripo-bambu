@@ -61,8 +61,9 @@ const along = (dir: THREE.Vector3, tangent: THREE.Vector3, meters: number, out =
 
 // 演示用的「不长草」：一条小路和一个展台
 const plinthDir = along(along(home, north, 7.5), east, 2.2);
+const personDir = along(home, north, 3.2); // 胶囊人站的地方
 const PLINTH_R = 1.0;
-const demo = { exclusion: true, sea: false, trample: false };
+const demo = { exclusion: true, sea: false, trample: params.has('trample') };
 function exclusion(d: THREE.Vector3): number {
   if (!demo.exclusion) return 0;
   // 小路：离主视点东边 2.5 m 的一条南北向的小圆，带一点弯
@@ -106,7 +107,7 @@ groundMat.colorNode = Fn(() => {
   const q = positionWorld.sub(uCenter);
   const n = mx_noise_float(q.mul(0.9)).mul(0.5).add(mx_noise_float(q.mul(3.7)).mul(0.25)).add(0.5);
   const soil = mix(color('#3f3022'), color('#6a5238'), saturate(n));
-  const under = mix(soil, color('#1c2a10'), 0.82); // 草底下：偏暗的绿土，从草缝里看下去不是一片褐色
+  const under = mix(soil, color('#223218'), 0.82); // 草底下：偏暗的绿土，从草缝里看下去不是一片褐色
   const d = length(cameraPosition.sub(positionWorld));
   const far = grass.groundTint(positionWorld);
   const toFar = smoothstep(uFull.mul(1.2), uRadius.mul(0.95), d);
@@ -126,7 +127,6 @@ const standOn = (obj: THREE.Object3D, dir: THREE.Vector3, lift: number) => {
   obj.position.copy(dir).multiplyScalar(terrain(dir.x, dir.y, dir.z) + lift);
   obj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
 };
-const personDir = along(home, north, 3.2);
 const person = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.6, 6, 16), new THREE.MeshStandardNodeMaterial({ color: '#e9dcc0', roughness: 0.7 }));
 standOn(person, personDir, 0.48);
 const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.05, 8, 20), new THREE.MeshStandardNodeMaterial({ color: '#d9692a', roughness: 0.8 }));

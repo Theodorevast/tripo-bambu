@@ -107,6 +107,15 @@ export interface GrassStats {
   generated: number; // 本帧新算的瓦片
 }
 
+// inspect() 的一项：绘制列表里的一块瓦片（band = -1 表示花的列表）
+export interface GrassListEntry {
+  band: number;
+  tile: number;
+  slot: number;
+  frame: number[]; // P0、Ex、Ey（星球局部坐标，瓦片固定的）
+  scale: number; // 密度倍数（面积 × 淡入）
+}
+
 export interface GrassField {
   object: THREE.Object3D;
   update(camera: THREE.Camera, timeSec: number): void;
@@ -119,6 +128,7 @@ export interface GrassField {
   readonly stats: GrassStats;
   windAt: GrassWind; // 实际在用的风（外面传进来的，或者模块自己的）
   groundTint(posWorld: N<'vec3'>): N<'vec3'>; // 这里的草从远处看是什么颜色：给地面着色器用，草淡出的地方地面接得上
+  inspect(): GrassListEntry[]; // 调试用（测试、自查）：本帧各档画了哪些瓦片。会新建数组，不要每帧调
 }
 
 // —— 常量 ——
@@ -154,7 +164,7 @@ export function defaultSettings(): GrassSettings {
     flowerRadius: 26,
     translucency: 1,
     dryness: 0.35,
-    colors: { root: '#18240e', lush: '#3a6a20', fresh: '#6f9a2c', dry: '#a39350', tip: '#c9d46e', shadow: '#5f6aa8' },
+    colors: { root: '#1e2d12', lush: '#3a6a20', fresh: '#6f9a2c', dry: '#a39350', tip: '#c9d46e', shadow: '#5f6aa8' },
   };
 }
 
@@ -166,6 +176,16 @@ export function densityAt(d: number, fullRadius: number, radius: number): number
 }
 
 // 一块瓦片要画几根才够：给最近距离处的密度，返回档位（0..3），一根都不用画时返回 -1
+// 最大那块瓦片的面积（m²）：(弧长)²，留 2% 余量
+export function tileAreaM2(radius: number, n = SphereTiles.sizeFor(radius)): number {
+  return ((radius * Math.PI) / 2 / n) ** 2 * 1.02;
+}
+
+// 密度 1 时每块瓦片满密度的根数要乘的系数：让近处每平方米约 TARGET_DENSITY 根（不同星球半径的瓦片大小不同）
+export function densityScaleFor(radius: number): number {
+  return Math.min(1, (TARGET_DENSITY * tileAreaM2(radius)) / BLADES_PER_TILE);
+}
+
 export function bandFor(needed: number): number {
   if (needed < 0.5) return -1;
   if (needed > BAND_SIZES[1]) return 0;
@@ -440,8 +460,8 @@ export function createGrassField(opts: GrassOptions): GrassField {
   const tiles = new SphereTiles(SphereTiles.sizeFor(planet.radius));
   const tileCount = tiles.count;
   // 每块瓦片的实际面积（m²）：最大那块是 (弧长)²；密度 1 时每平方米 TARGET_DENSITY 根
-  const maxTileM2 = ((planet.radius * Math.PI) / 2 / tiles.n) ** 2 * 1.02;
-  const densityScale = Math.min(1, (TARGET_DENSITY * maxTileM2) / BLADES_PER_TILE);
+  const maxTileM2 = tileAreaM2(planet.radius, tiles.n);
+  const densityScale = densityScaleFor(planet.radius);
   let density = THREE.MathUtils.clamp(opts.density ?? 1, 0.05, 1);
 
   // 槽位：最多同时缓存多少块瓦片的地面网格。按最远半径 60 m 的球冠估算，留余量，封顶 1024
@@ -808,7 +828,9 @@ export function createGrassField(opts: GrassOptions): GrassField {
         const spikeLen = mix(0.08, 0.15, s(7)).mul(scale);
         const spikeW = max(mix(0.014, 0.02, s(8)), pixel.mul(1.2));
         const crossAxis = select(part.greaterThan(1.5), facing, across);
-        const spikePos = top.add(stemDir.mul(gy.add(1).mul(0.5).mul(spikeLen))).add(crossAxis.mul(gx.mul(spikeW)));
+        // 穗子比茎更直：往径向上方掰回来一些，不会被风吹成横躺的一串
+        const spikeDir = normalize(mix(stemDir, up, 0.6)).toVar();
+        const spikePos = top.add(spikeDir.mul(gy.add(1).mul(0.5).mul(spikeLen))).add(crossAxis.mul(gx.mul(spikeW)));
         const headPos = select(isSpike, spikePos, select(part.lessThan(1.5), discPos, top));
         out.assign(select(part.lessThan(0.5), stemPos, headPos));
         vN.assign(select(part.lessThan(0.5).or(isSpike), normalize(cross(across, stemDir)), hn));
@@ -831,13 +853,13 @@ export function createGrassField(opts: GrassOptions): GrassField {
       const white = vec3(0.92, 0.9, 0.84);
       const yellow = vec3(0.98, 0.72, 0.08);
       const centre = vec3(0.95, 0.62, 0.05);
-      const lilac = vec3(0.42, 0.3, 0.75);
+      const lilac = vec3(0.36, 0.22, 0.72);
       // 雏菊：13 片花瓣，花心黄；毛茛：5 片圆花瓣；薰衣草：一串小花苞
       const daisyEdge = mix(0.55, 1.0, pow(abs(cos(a.mul(6.5))), 0.5));
       const butterEdge = mix(0.68, 1.0, pow(abs(cos(a.mul(2.5))), 0.7));
       const along = uv.y.mul(0.5).add(0.5);
-      const bud = abs(along.mul(7).fract().sub(0.5)).mul(2);
-      const spikeW = mix(0.85, 0.35, along).mul(float(1).sub(bud.pow(2).mul(0.45)));
+      const bud = abs(along.mul(11).add(uv.x.mul(0.6)).fract().sub(0.5)).mul(2); // 一串错开的小花苞
+      const spikeW = mix(0.8, 0.3, along).mul(float(1).sub(bud.pow(3).mul(0.3)));
       const keep = select(
         part.lessThan(0.5),
         float(1),
@@ -917,7 +939,8 @@ export function createGrassField(opts: GrassOptions): GrassField {
     tileOfSlot[slot] = tile;
     slotOfTile[tile] = slot;
     slotSeen[slot] = frame;
-    slotBirth[slot] = clock;
+    // 第一帧算的瓦片直接长满（没有可以「跳出来」的东西）；之后进来的瓦片用 BIRTH_FADE 秒按名次长出来
+    slotBirth[slot] = frame === 1 ? clock - BIRTH_FADE : clock;
     const layer = slot >> 2;
     const qx = (slot & 1) * GRID;
     const qy = ((slot >> 1) & 1) * GRID;
@@ -1189,6 +1212,27 @@ export function createGrassField(opts: GrassOptions): GrassField {
     if (intensity !== undefined) U.sunColor.value.multiplyScalar(intensity);
   }
 
+  function inspect(): GrassListEntry[] {
+    const out: GrassListEntry[] = [];
+    const read = (list: (typeof lists)[number], band: number) => {
+      const row = MAX_LIST * 4;
+      for (let e = 0; e < list.len; e++) {
+        const d = list.data;
+        const i = e * 4;
+        out.push({
+          band,
+          tile: d[row + i + 3],
+          slot: d[i + 3],
+          frame: [d[i], d[i + 1], d[i + 2], d[row + i], d[row + i + 1], d[row + i + 2], d[2 * row + i], d[2 * row + i + 1], d[2 * row + i + 2]],
+          scale: d[2 * row + i + 3],
+        });
+      }
+    };
+    lists.forEach(read);
+    read(flowerList, -1);
+    return out;
+  }
+
   function refresh(): void {
     slotOfTile.fill(-1);
     tileOfSlot.fill(-1);
@@ -1221,6 +1265,7 @@ export function createGrassField(opts: GrassOptions): GrassField {
     stats,
     windAt,
     groundTint,
+    inspect,
   };
 }
 
