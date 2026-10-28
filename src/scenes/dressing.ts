@@ -1,6 +1,8 @@
 import * as THREE from 'three/webgpu';
 import { createGrassField, type GrassField } from '../nature/grass';
 import { DECOR_CENTER, proceduralDecorKit, scatterDecor, type DecorKit, type DecorStats } from '../planet/decor';
+import { CLEARING, PATH } from '../planet/mask';
+import { MAX_PLINTH_RADIUS } from '../planet/placement';
 import { PRESETS } from '../planet/presets';
 import type { PlanetEntry } from './world';
 
@@ -91,6 +93,9 @@ export class Dressing {
       exclude: (d) => planet.mask.exclude(d),
       rockColor: new THREE.Color(PRESETS[recipe.preset].ground.rock),
       seed: recipe.seed,
+      path: planet.mask.path,
+      pathWidth: PATH.width,
+      clearings: recipe.placements.map((p) => ({ dir: new THREE.Vector3(...p.dir).normalize(), radius: (MAX_PLINTH_RADIUS + CLEARING.margin) * p.scale })),
     });
     this.rocks = stats;
     this.rockGroup = group;

@@ -34,8 +34,8 @@ interface Look {
 }
 
 const LOOKS: Record<AtmospherePreset, Look> = {
-  day: { zenith: '#76aee3', horizon: '#f4efe4', below: '#f2ece6', sun: '#ffeccc', sunIntensity: 3.2, sky: '#cfe2f5', ground: '#6f7a4c', hemi: 1.1, elevation: 24, azimuth: -35 },
-  sunset: { zenith: '#8c84c6', horizon: '#f8b48c', below: '#f0c2b6', sun: '#ffb06a', sunIntensity: 3.0, sky: '#d9b4c8', ground: '#5e5048', hemi: 0.9, elevation: 8, azimuth: -55 },
+  day: { zenith: '#76aee3', horizon: '#f4efe4', below: '#f2ece6', sun: '#ffe6bf', sunIntensity: 3.4, sky: '#cfe2f5', ground: '#5f6b40', hemi: 0.55, elevation: 26, azimuth: -72 },
+  sunset: { zenith: '#8c84c6', horizon: '#f8b48c', below: '#f0c2b6', sun: '#ffaa62', sunIntensity: 3.2, sky: '#d9b4c8', ground: '#5e5048', hemi: 0.45, elevation: 9, azimuth: -80 },
 };
 
 // 小号等距柱状渐变（上天、下云），交给 scene.environment：three 会自己做 PMREM，金属材质照得到天光
@@ -112,6 +112,7 @@ export function createAtmosphere(scene: THREE.Scene, _renderer: THREE.WebGPURend
     env?.dispose();
     env = envTexture(look);
     scene.environment = env;
+    scene.environmentIntensity = 0.55;
   };
   setPreset(opts.preset);
 

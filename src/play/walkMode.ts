@@ -136,6 +136,8 @@ export class WalkMode {
     this.loading ??= loadCharacter(this.screen.view.library)
       .then(async ({ object, triboo }) => {
         this.triboo = triboo;
+        // 角色投影（脚下有影子才站得住）；要在预编译之前设好
+        object.traverse((o) => { o.castShadow = true; });
         this.character.setModel(object);
         await this.app.world.stage.precompile(object);
         this.ready = true;

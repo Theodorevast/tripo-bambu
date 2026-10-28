@@ -50,8 +50,8 @@ export interface Preset {
 // 水面压得很低，只在最低的洼地里留几个小水塘（星球外面的「海」是云海）
 export const PRESETS: Record<PresetId, Preset> = {
   verdant: {
-    id: 'verdant', label: 'Verdant', amp: 0.05, freq: 1.4, sea: -0.5,
-    ground: { grass: '#5b8a35', dry: '#a3a24c', moss: '#3f6b2a', soil: '#6e5236', path: '#b08f63', rock: '#8c857b' },
+    id: 'verdant', label: 'Verdant', amp: 0.05, freq: 1.4, sea: -0.62,
+    ground: { grass: '#4c7c2b', dry: '#979841', moss: '#395d25', soil: '#5e4630', path: '#b39466', rock: '#8c857b' },
     water: '#3c7f8c', atmosphere: '#bfe0f0', ring: '#e8dcc0',
   },
   desert: {

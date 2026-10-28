@@ -19,7 +19,8 @@ export interface DecorPiece {
 }
 
 export interface DecorKit {
-  rocks: DecorPiece[];
+  rocks: DecorPiece[]; // 岩石：一簇一簇、大小不一
+  pebbles: DecorPiece[]; // 小石子：路边、作品空地四周、草里零星的（面数少）
 }
 
 // 可调参数（?tune）
@@ -95,22 +96,27 @@ export function rockGeometry(seed: number, detail = 3): THREE.BufferGeometry {
 
 let procedural: DecorKit | null = null;
 
-// 默认的点缀素材：5 种形状的石头（细分 3：每块 1280 个三角面）
+// 默认的点缀素材：5 种形状的石头（细分 3：每块 1280 个三角面）、4 种小石子（细分 1：每颗 80 个三角面）
 export function proceduralDecorKit(): DecorKit {
   if (procedural) return procedural;
   const material = sharedRockMaterial();
-  procedural = { rocks: [11, 23, 37, 41, 59].map((seed, i) => ({ name: `rock-${i}`, geometry: rockGeometry(seed, 3), material })) };
+  procedural = {
+    rocks: [11, 23, 37, 41, 59].map((seed, i) => ({ name: `rock-${i}`, geometry: rockGeometry(seed, 3), material })),
+    pebbles: [71, 83, 97, 101].map((seed, i) => ({ name: `pebble-${i}`, geometry: rockGeometry(seed, 1), material })),
+  };
   return procedural;
 }
 
-// 从 GLB 读点缀素材（以后换 Tripo 生成的模型）：名字以 rock 开头的网格当岩石，几何按上面的约定归一化，材质原样用
+// 从 GLB 读点缀素材（以后换 Tripo 生成的模型）：名字以 rock 开头的网格当岩石、pebble 开头的当小石子（没有就用岩石缩小），
+// 几何按上面的约定归一化，材质原样用
 export async function decorKitFromGlb(url: string): Promise<DecorKit> {
   const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url);
   const rocks: DecorPiece[] = [];
+  const pebbles: DecorPiece[] = [];
   gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh || !/^rock/i.test(mesh.name)) return;
+    if (!mesh.isMesh || !/^(rock|pebble)/i.test(mesh.name)) return;
     const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
     geometry.computeBoundingBox();
     const box = geometry.boundingBox!;
@@ -119,10 +125,10 @@ export async function decorKitFromGlb(url: string): Promise<DecorKit> {
     const r = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2 || 1;
     geometry.scale(1 / r, 1 / r, 1 / r);
     geometry.computeBoundingSphere();
-    rocks.push({ name: mesh.name, geometry, material: mesh.material as THREE.Material });
+    (/^pebble/i.test(mesh.name) ? pebbles : rocks).push({ name: mesh.name, geometry, material: mesh.material as THREE.Material });
   });
   if (rocks.length === 0) throw new Error(`${url} 里没有名字以 rock 开头的网格`);
-  return { rocks };
+  return { rocks, pebbles: pebbles.length ? pebbles : rocks };
 }
 
 // 摆石头要知道的星球信息（星球本地坐标）
@@ -133,6 +139,9 @@ export interface DecorPlanet {
   exclude: (dir: THREE.Vector3) => number; // 0..1，> 0.05 的地方不放（土路、作品空地）
   rockColor: THREE.Color;
   seed: number;
+  path?: THREE.Vector3[]; // 土路中线（单位方向）：路边撒一些小石子
+  pathWidth?: number; // 土路宽（米）
+  clearings?: Array<{ dir: THREE.Vector3; radius: number }>; // 作品空地（米）：展台周围一圈小石子
 }
 
 export interface DecorStats {
@@ -164,15 +173,18 @@ export function scatterDecor(kit: DecorKit, planet: DecorPlanet): { group: THREE
   const rng = mulberry32((planet.seed * 2654435761) >>> 0);
   const R = planet.radius;
   const area = 4 * Math.PI * R * R;
-  const clusters = Math.round((area / 260) * DECOR.rocks);
-  type Item = { dir: THREE.Vector3; size: number; piece: number };
+  const clusters = Math.round((area / 200) * DECOR.rocks);
+  // kind：0 岩石（kit.rocks），1 小石子（kit.pebbles）
+  type Item = { dir: THREE.Vector3; size: number; kind: 0 | 1; piece: number };
   const items: Item[] = [];
   const d = new THREE.Vector3();
-  const ok = (dir: THREE.Vector3, size: number) => {
-    if (planet.exclude(dir) > 0.05) return false;
+  const ok = (dir: THREE.Vector3, size: number, allowPath = false) => {
+    if (!allowPath && planet.exclude(dir) > 0.05) return false;
     const h = planet.height(dir);
     return !(planet.sea > 0 && h < planet.sea + size * 0.2);
   };
+  const rock = (dir: THREE.Vector3, size: number) => items.push({ dir, size, kind: 0, piece: Math.floor(rng() * kit.rocks.length) });
+  const pebble = (dir: THREE.Vector3, size: number) => items.push({ dir, size, kind: 1, piece: Math.floor(rng() * kit.pebbles.length) });
   for (let c = 0; c < clusters; c++) {
     randomDir(rng, d);
     // 赤道附近（|y| 小）多放：在这一圈以外的簇按 1 / rim 的概率保留
@@ -182,20 +194,61 @@ export function scatterDecor(kit: DecorKit, planet: DecorPlanet): { group: THREE
     const lead = big ? 0.9 + rng() * 1.3 : 0.32 + rng() * 0.5;
     const center = d.clone();
     if (!ok(center, lead)) continue;
-    items.push({ dir: center, size: lead, piece: Math.floor(rng() * kit.rocks.length) });
+    rock(center, lead);
     const n = Math.floor(rng() * (big ? 6 : 3));
     for (let k = 0; k < n; k++) {
       const dir = around(rng, center, (lead * 2.2 + 0.6) / R, new THREE.Vector3());
       const size = lead * (0.18 + rng() * 0.4);
-      if (ok(dir, size)) items.push({ dir, size, piece: Math.floor(rng() * kit.rocks.length) });
+      if (!ok(dir, size)) continue;
+      if (size < 0.18) pebble(dir, size);
+      else rock(dir, size);
     }
   }
-  // 零散的小石子
-  const pebbles = Math.round((area / 40) * DECOR.rocks);
-  for (let k = 0; k < pebbles; k++) {
+  // 草里零星的小石子
+  const scattered = Math.round((area / 40) * DECOR.rocks);
+  for (let k = 0; k < scattered; k++) {
     const dir = randomDir(rng, new THREE.Vector3());
-    const size = 0.08 + rng() * 0.14;
-    if (ok(dir, size)) items.push({ dir, size, piece: Math.floor(rng() * kit.rocks.length) });
+    const size = 0.07 + rng() * 0.13;
+    if (ok(dir, size)) pebble(dir, size);
+  }
+  // 路边：沿土路中线每隔约 0.35 米，一半的机会在路的左边或右边沿上放一颗；路面上偶尔一颗很小的
+  const path = planet.path ?? [];
+  const half = (planet.pathWidth ?? 1.3) / 2;
+  for (let k = 1; k < path.length; k++) {
+    const a = path[k - 1];
+    const b = path[k];
+    const len = a.angleTo(b) * R;
+    const along = new THREE.Vector3().subVectors(b, a);
+    const side = new THREE.Vector3().crossVectors(a, along);
+    if (side.lengthSq() < 1e-14) continue;
+    side.normalize();
+    for (let t = 0; t < len; t += 0.35) {
+      const base = a.clone().lerp(b, t / Math.max(len, 1e-6)).normalize();
+      if (rng() < 0.55 * DECOR.rocks) {
+        const off = (rng() < 0.5 ? -1 : 1) * (half + (rng() - 0.35) * 0.4);
+        const dir = base.clone().addScaledVector(side, off / R).normalize();
+        const size = 0.05 + rng() ** 2 * 0.16;
+        if (ok(dir, size, true)) pebble(dir, size);
+      }
+      if (rng() < 0.12 * DECOR.rocks) {
+        const dir = base.clone().addScaledVector(side, ((rng() - 0.5) * half * 1.4) / R).normalize();
+        const size = 0.03 + rng() * 0.04;
+        if (ok(dir, size, true)) pebble(dir, size);
+      }
+    }
+  }
+  // 作品空地边上一圈：几颗大小不一的石子，像有人把石板四周收拾过
+  for (const c of planet.clearings ?? []) {
+    const n = 7 + Math.floor(rng() * 6);
+    const t1 = new THREE.Vector3(Math.abs(c.dir.y) < 0.9 ? 0 : 1, Math.abs(c.dir.y) < 0.9 ? 1 : 0, 0).cross(c.dir).normalize();
+    const t2 = new THREE.Vector3().crossVectors(c.dir, t1);
+    for (let k = 0; k < n; k++) {
+      const phi = (k / n) * Math.PI * 2 + rng() * 0.5;
+      const r = (c.radius + 0.1 + rng() * 0.45) / R;
+      const dir = c.dir.clone().addScaledVector(t1, Math.cos(phi) * r).addScaledVector(t2, Math.sin(phi) * r).normalize();
+      const size = 0.06 + rng() ** 2 * 0.2;
+      if (ok(dir, size, true)) pebble(dir, size);
+    }
   }
   const group = new THREE.Group();
   group.name = 'decor-rocks';
@@ -208,8 +261,9 @@ export function scatterDecor(kit: DecorKit, planet: DecorPlanet): { group: THREE
   const col = new THREE.Color();
   let triangles = 0;
   let drawCalls = 0;
-  kit.rocks.forEach((piece, pi) => {
-    const mine = items.filter((it) => it.piece === pi);
+  const pieces = [...kit.rocks.map((piece, pi) => ({ piece, kind: 0 as const, pi })), ...kit.pebbles.map((piece, pi) => ({ piece, kind: 1 as const, pi }))];
+  pieces.forEach(({ piece, kind, pi }) => {
+    const mine = items.filter((it) => it.kind === kind && it.piece === pi);
     if (mine.length === 0) return;
     const mesh = new THREE.InstancedMesh(piece.geometry, piece.material, mine.length);
     mesh.name = piece.name;

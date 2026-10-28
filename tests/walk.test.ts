@@ -119,8 +119,11 @@ describe('贴地', () => {
   });
 
   it('有海时在浅水里涉水：海底太深的地方脚下是海面以下 WADE_DEPTH，陆地上照常贴地', () => {
-    const height = makeHeightFn(11, 'verdant');
-    const sea = seaRadius('verdant');
+    // 自己造一个有深水的地形（V5 起预设里只剩很小的水塘，深到 WADE_DEPTH 以下的地方很少，不拿预设当夹具）：
+    // 半径 10 的球面上起伏 ±1，水面在 10，最深处比水面低 1，比 WADE_DEPTH 深
+    const height = (x: number, y: number, z: number) => R + Math.sin(x * 3.1 + 0.4) * Math.cos(z * 2.3) * 0.6 + Math.sin(y * 4.7) * 0.4;
+    const sea = R;
+    expect(seaRadius('verdant')).toBeGreaterThan(0); // 预设里还是有水的（小水塘）
     let wet = 0;
     let dry = 0;
     for (let i = 0; i < 2000; i++) {
