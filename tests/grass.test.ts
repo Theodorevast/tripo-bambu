@@ -256,6 +256,33 @@ describe('createGrassField（CPU 部分）', () => {
     g.dispose();
   });
 
+  it('摆下作品后 refresh(位置)：只原地重算附近几块瓦片，槽位和淡入都不变（草不会整片消失再长出来）', () => {
+    const planet = flatPlanet();
+    let blocked = false;
+    const spot = new THREE.Vector3(0, R, -3).normalize();
+    // 作品脚下半径 1 m 不长草
+    const exclude = (d: THREE.Vector3) => (blocked && d.angleTo(spot) * R < 1 ? 1 : 0);
+    const g = createGrassField({ renderer, planet, exclude });
+    const cam = groundCamera();
+    g.update(cam, 0);
+    g.update(cam, 1);
+    const before = new Map(g.inspect().map((e) => [`${e.band}:${e.tile}`, e]));
+    const calls = planet.calls;
+    blocked = true;
+    g.refresh(spot.clone().multiplyScalar(R), 1.5);
+    g.update(cam, 1.016);
+    const redone = (planet.calls - calls) / (GRID * GRID);
+    expect(redone).toBeGreaterThanOrEqual(1);
+    expect(redone).toBeLessThanOrEqual(6);
+    for (const e of g.inspect()) {
+      const b = before.get(`${e.band}:${e.tile}`);
+      if (!b) continue;
+      expect(e.slot).toBe(b.slot);
+      expect(e.scale).toBe(b.scale);
+    }
+    g.dispose();
+  });
+
   it('dispose 之后从父节点上摘掉', () => {
     const g = createGrassField({ renderer, planet: flatPlanet() });
     const scene = new THREE.Scene();

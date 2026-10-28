@@ -123,7 +123,7 @@ export interface GrassField {
   dispose(): void;
   // 以下是接口之外加的
   setSun(dir: THREE.Vector3, color?: THREE.ColorRepresentation, intensity?: number): void; // dir 指向太阳（世界坐标）
-  refresh(): void; // exclude 或海面变了：清掉地面网格，按由近到远重新算
+  refresh(near?: THREE.Vector3, radius?: number): void; // exclude 或地形变了：地面网格原地重算（由近到远，重算前照旧画）；给了 near 就只重算它周围 radius（默认 3）米
   readonly settings: GrassSettings;
   readonly stats: GrassStats;
   windAt: GrassWind; // 实际在用的风（外面传进来的，或者模块自己的）
@@ -485,6 +485,7 @@ export function createGrassField(opts: GrassOptions): GrassField {
   const slotBirth = new Float32Array(SLOTS);
   const slotRmin = new Float32Array(SLOTS);
   const slotRmax = new Float32Array(SLOTS);
+  const stale = new Uint8Array(SLOTS); // refresh() 标记过、要原地重算的槽位（重算前照旧用老数据，不会整片消失）
   const visit = new Int32Array(tileCount).fill(-1);
   const queue = new Int32Array(tileCount);
 
@@ -931,16 +932,8 @@ export function createGrassField(opts: GrassOptions): GrassField {
     return best;
   };
 
-  const generate = (tile: number): boolean => {
-    const slot = takeSlot();
-    if (slot < 0) return false;
-    const old = tileOfSlot[slot];
-    if (old >= 0) slotOfTile[old] = -1;
-    tileOfSlot[slot] = tile;
-    slotOfTile[tile] = slot;
-    slotSeen[slot] = frame;
-    // 第一帧算的瓦片直接长满（没有可以「跳出来」的东西）；之后进来的瓦片用 BIRTH_FADE 秒按名次长出来
-    slotBirth[slot] = frame === 1 ? clock - BIRTH_FADE : clock;
+  // 算一块瓦片的地面网格，写进它的槽位（数组贴图里那一层的一个角）
+  const fill = (slot: number, tile: number) => {
     const layer = slot >> 2;
     const qx = (slot & 1) * GRID;
     const qy = ((slot >> 1) & 1) * GRID;
@@ -964,11 +957,26 @@ export function createGrassField(opts: GrassOptions): GrassField {
     }
     slotRmin[slot] = rMin;
     slotRmax[slot] = rMax;
+    stale[slot] = 0;
     const relief = Math.max(Math.abs(rMax - planet.radius), Math.abs(rMin - planet.radius));
     maxRelief = reliefKnown ? Math.max(maxRelief, relief) : relief;
     reliefKnown = true;
     atlas.addLayerUpdate(layer);
     atlas.needsUpdate = true;
+  };
+
+  // 新进来的瓦片：找个槽位，算地面网格
+  const generate = (tile: number): boolean => {
+    const slot = takeSlot();
+    if (slot < 0) return false;
+    const old = tileOfSlot[slot];
+    if (old >= 0) slotOfTile[old] = -1;
+    tileOfSlot[slot] = tile;
+    slotOfTile[tile] = slot;
+    slotSeen[slot] = frame;
+    // 第一帧算的瓦片直接长满（没有可以「跳出来」的东西）；之后进来的瓦片用 BIRTH_FADE 秒按名次长出来
+    slotBirth[slot] = frame === 1 ? clock - BIRTH_FADE : clock;
+    fill(slot, tile);
     return true;
   };
 
@@ -1138,6 +1146,10 @@ export function createGrassField(opts: GrassOptions): GrassField {
         if (!generate(t)) continue;
         stats.generated++;
         slot = slotOfTile[t];
+      } else if (stale[slot] && (firstFrame || performance.now() - genStart <= GEN_BUDGET_MS)) {
+        // refresh() 之后：原地重算，不换槽位、不重新淡入
+        fill(slot, t);
+        stats.generated++;
       }
       slotSeen[slot] = frame;
       // 瓦片到镜头的最近距离（偏小，保证名次淡出的那几根也画到）
@@ -1234,11 +1246,33 @@ export function createGrassField(opts: GrassOptions): GrassField {
     return out;
   }
 
-  function refresh(): void {
-    slotOfTile.fill(-1);
-    tileOfSlot.fill(-1);
-    slotSeen.fill(-1);
-    reliefKnown = false;
+  // 地面网格要重算（exclude 变了、地形改了）：标记为过期，之后几帧由近到远原地重算，重算前照旧画老的。
+  // 给了 near（世界坐标里的一个点，比如刚摆下作品的位置）就只标记它周围 radius 米以内的瓦片
+  function refresh(near?: THREE.Vector3, radius = 3): void {
+    let dx = 0;
+    let dy = 0;
+    let dz = 0;
+    let cosMax = -2;
+    if (near) {
+      dx = near.x - planet.center.x;
+      dy = near.y - planet.center.y;
+      dz = near.z - planet.center.z;
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      dx /= len;
+      dy /= len;
+      dz /= len;
+      cosMax = Math.cos(radius / planet.radius);
+    }
+    const tc = tiles.center;
+    for (let s = 0; s < SLOTS; s++) {
+      const t = tileOfSlot[s];
+      if (t < 0) continue;
+      if (near) {
+        const c = tc[t * 3] * dx + tc[t * 3 + 1] * dy + tc[t * 3 + 2] * dz;
+        if (Math.acos(Math.min(1, c)) - tiles.spread[t] > Math.acos(cosMax)) continue;
+      }
+      stale[s] = 1;
+    }
   }
 
   function dispose(): void {
