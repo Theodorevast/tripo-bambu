@@ -131,12 +131,15 @@ check('摆放点上没有界面遮挡', await stageAt(spot));
 await page.mouse.move(spot.x, spot.y);
 await page.waitForTimeout(100);
 await page.mouse.click(spot.x, spot.y);
-await page.waitForTimeout(600);
+// 摆上以后要等模型准备好（贴图、着色器后台编译）才选中、出编辑条：V5 打开了太阳阴影，WebGL2 上编译比原来慢，固定等 600 ms 不够，改成等编辑条出现（最多 8 秒）
+await page.waitForFunction(() => { const b = document.querySelector('.edit-bar'); return !!b && !b.hidden && getComputedStyle(b).visibility === 'visible'; }, null, { timeout: 8000 }).catch(() => {});
+await page.waitForTimeout(200);
 check('从作品栏摆回星球', (await placedIds()).includes(target.id));
 // 摆回去的位置在画面中线以下：编辑条照样在旁边，不挡作品，滑块点得到
 const low = await workPos(target.id);
 const barLow = await barState(low);
 check('画面下半部分的作品：编辑条在旁边、不挡作品、滑块点得到', low.y > 450 && barLow.inside && barLow.sliderHit && barLow.workClear);
+if (!(low.y > 450 && barLow.inside && barLow.sliderHit && barLow.workClear)) console.log(`  画面下半部分的作品：${JSON.stringify(low)} 摆放点 ${JSON.stringify(spot)} 编辑条：${JSON.stringify(barLow)}`);
 await page.screenshot({ path: 'shots/editor-bar-low.png' });
 
 const before = (await placementOf(target.id)).yaw;
