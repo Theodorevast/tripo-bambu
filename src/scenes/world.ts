@@ -3,6 +3,7 @@ import { setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { createAtmosphere, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
 import { createLife, type Life, type LifePlanet } from '../nature/life';
+import { updatePlanetLook } from '../nature/planetLook';
 import { decorInstances } from '../planet/decor';
 import { focusDetail, LOD_LOW, prewarmTerrain } from '../planet/generate';
 import { PlanetObject } from '../planet/planetObject';
@@ -507,6 +508,7 @@ export class World {
     light.sunColor.copy(sun.color);
     light.sunIntensity = sun.intensity;
     light.evening = WEATHER.evening ?? eveningFor(this.atmosphere.params.sunElevation);
+    updatePlanetLook(dt, light.sunDir, camera); // planet：远看的大气、云层跟着太阳转，镜头近了藏起来
     if (this.life.object.visible) {
       this.life.setWalker(this.walkerOn ? this.walkerPos : null, this.walkerVel, this.walkerGrounded);
       const w = this.weatherArgs;
