@@ -2,9 +2,9 @@ import * as THREE from 'three/webgpu';
 import { ModelLibrary, type LoadedModel } from '../assets/models';
 import type { Placement, Team, Work } from '../data/types';
 import { footprintGroundRadius } from '../planet/footprint';
-import { PLINTH_HEIGHT, placementTransform, plinthRadius } from '../planet/placement';
+import { placementTransform, plinthRadius } from '../planet/placement';
 import { onPlanetRadius, PRESETS } from '../planet/presets';
-import { plinthMaterial, slabGeometry } from './plinth';
+import { plinthMaterial, STAND_TOP, standGeometry } from './plinth';
 import type { PlanetEntry, World } from './world';
 
 export { plinthRadius };
@@ -21,7 +21,7 @@ export interface PlacedWork {
 
 // 所有展台共用一份石板几何（按展台半径缩放）
 let slab: THREE.BufferGeometry | null = null;
-const plinthGeometry = () => (slab ??= slabGeometry());
+const plinthGeometry = () => (slab ??= standGeometry());
 
 // 射线从起点到进入星球遮挡球的距离，打不中为 Infinity。遮挡球以星球中心为心、半径取最低可能的地形，
 // 比这个距离更远的东西一定在地表背后
@@ -97,7 +97,7 @@ export class PlanetView {
     const scaler = new THREE.Group();
     // 模型加载完之前展台是半透明的（spec 2.2）
     const plinth = new THREE.Mesh(plinthGeometry(), plinthMaterial(true));
-    plinth.position.y = PLINTH_HEIGHT; // 石板顶面在几何的 y = 0，往下延伸 PLINTH_DEPTH
+    plinth.position.y = STAND_TOP; // 底座顶面在几何的 y = 0，往下延伸 STAND_DEPTH
     plinth.castShadow = true;
     plinth.receiveShadow = true;
     const proxy = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicNodeMaterial());
@@ -125,7 +125,7 @@ export class PlanetView {
       return null;
     }
     pw.model = model;
-    model.object.position.y = PLINTH_HEIGHT;
+    model.object.position.y = STAND_TOP;
     scaler.add(model.object);
     this.sizeParts(pw, model.height, model.footprint);
     this.updateTransform(pw); // 展台半径要等模型加载完才知道，重新贴地
@@ -184,7 +184,7 @@ export class PlanetView {
 
   // 作品顶上一点的世界坐标，给悬浮标签和编辑条用
   topOf(pw: PlacedWork): THREE.Vector3 {
-    const h = (PLINTH_HEIGHT + (pw.model?.height ?? 1) + 0.4) * pw.placement.scale;
+    const h = (STAND_TOP + (pw.model?.height ?? 1) + 0.4) * pw.placement.scale;
     return pw.root.localToWorld(new THREE.Vector3(0, h, 0));
   }
 
@@ -201,6 +201,6 @@ export class PlanetView {
     pw.plinth.scale.set(r, 1, r);
     const w = Math.max(0.6, footprint * 2);
     pw.proxy.scale.set(w, height, w);
-    pw.proxy.position.y = PLINTH_HEIGHT + height / 2;
+    pw.proxy.position.y = STAND_TOP + height / 2;
   }
 }
