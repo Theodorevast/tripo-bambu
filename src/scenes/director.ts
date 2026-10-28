@@ -4,7 +4,6 @@ import { createVeil, VEIL_U } from '../style/veil';
 import type { CameraRig, Framing } from './camera';
 import { easeInOutCubic } from './ease';
 import { TribooPeek } from './peek';
-import { plinthMaterial, standGeometry } from './plinth';
 import { TRANSITIONS } from './shots';
 import { clearVeil, moveFor, reducedMotion, Timeline, veilFrame, writeVeil, type Move, type TransitionKind } from './transition';
 import type { PlanetEntry, World } from './world';
@@ -121,8 +120,6 @@ export class Director {
   private readonly palette: Palette = clonePalette(PRESETS.day);
   private readonly world: World;
   private warmed = false; // 开场预热做完了（之前云层一直显示着，让预热把它编译好）
-  private prime: THREE.Group | null = null; // 预热完后先画一帧的展台（见 primePlinths）
-  private primeFrames = 0;
 
   constructor(world: World) {
     this.world = world;
@@ -132,10 +129,11 @@ export class Director {
     world.scene.add(this.veil);
     // 翠宝的模型现在就开始加载，加载完在后台编译好（不挡开场）；开场飞行落定时还没好就不探
     this.peek = new TribooPeek((o) => world.stage.precompile(o));
+    // 预编译完的东西在 WebGL2 上先画一次（gatedStager.ts）：只在这一帧真的会画出来的时候做（开场预热完、Museum 没盖着）
+    world.stage.drawGate = () => this.warmed && !world.paused;
     void world.warm.then(() => {
       this.warmed = true;
       if (!this.timeline) this.veil.visible = false;
-      this.primePlinths();
     });
   }
 
@@ -154,47 +152,6 @@ export class Director {
     if (this.timeline && !this.timeline.step(dt)) this.timeline = null;
     this.veil.visible = VEIL_U.on.value > 0.5 || !this.warmed;
     this.peek.tick(dt, this.world.rig.camera);
-    this.stepPrime();
-  }
-
-  // 展台第一次真正画出来时，WebGL2（ANGLE / D3D11）上还要停一下：着色器在后台编好了，第一次拿来画还是卡一帧
-  // （T2 实测 50 ms；int/v6 的第一次进星球是云层全遮住的那一帧，50 ms）。预热完马上把三种展台（加载中、不透明、高亮，
-  // 和 PlanetView 用的是同一个函数做的材质，同样投影、接受阴影）摆在镜头前面很小的一块，画一帧就撤掉：
-  // 这时启动画面还盖着画布，卡一下也看不见
-  private primePlinths(): void {
-    const group = new THREE.Group();
-    group.name = 'prime-plinths';
-    const geometry = standGeometry(); // 舞台角色把石板展台换成了圆润底座（standGeometry），预热用同一个几何
-    for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
-      const mesh = new THREE.Mesh(geometry, plinthMaterial(loading, glow));
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-      group.add(mesh);
-    }
-    this.prime = group;
-    this.primeFrames = 2;
-  }
-
-  private stepPrime(): void {
-    const group = this.prime;
-    if (!group) return;
-    if (this.primeFrames-- > 1) {
-      // 这一帧画：镜头正前方、很小（几个像素）
-      const cam = this.world.rig.camera;
-      cam.getWorldDirection(_f);
-      group.position.copy(cam.position).addScaledVector(_f, 20);
-      group.scale.setScalar(0.05);
-      if (!group.parent) this.world.scene.add(group);
-      return;
-    }
-    group.removeFromParent();
-    group.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (mesh.isMesh) (mesh.material as THREE.Material).dispose();
-    });
-    (group.children[0] as THREE.Mesh).geometry.dispose();
-    this.prime = null;
   }
 
   // 调试：时间停住时让下一帧往前走 seconds 秒（逐帧录屏）
