@@ -1,0 +1,183 @@
+/* 启动画面（index.html 的 #boot）。index.html 用 <link> 直接引入这一份：开发服务器上 styles.css 要等 main.ts 的模块都下载完
+   才由 JS 插进来，写在那里的话启动画面会先露出没有样式的样子；构建时它和其余 CSS 合成同一个文件，放在 <head> 里，首帧就有。
+   画面：从高处看一片云海，和开场星系全景那一帧接得上（实测截图取色：云海整体是奶油、粉灰、灰紫，阴影偏蓝紫）。
+   上面一点天空，右上角一片暖光（太阳在画面右上，和 3D 场景一致）；云是绘本式的柔边平涂（没有描线）：背光的一面灰紫，
+   往右上方依次是粉奶油、暖奶油，边缘轻轻晕开。中间翠宝站在一朵小云上，下面一行提示和三步进度。
+   3D 准备好后（boot.ts 设 data-state="leaving"）中间的字先收起，云往两边、往下飞开，天空淡掉，露出正在飞进来的星系 */
+#boot {
+  --boot-ink: #4a4058;
+  --boot-accent: #f2b705;
+  /* 两朵云（同一套画法）：先铺背光色，再在剪影里面往右上方错开两层亮色，整体轻轻晕开（feGaussianBlur），像水彩的边 */
+  --boot-cloud-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='18 4 168 94'%3E%3Cdefs%3E%3Cfilter id='f' x='-5%25' y='-5%25' width='110%25' height='110%25'%3E%3CfeGaussianBlur stdDeviation='1.3'/%3E%3C/filter%3E%3Cg id='s'%3E%3Ccircle cx='52' cy='62' r='24'/%3E%3Ccircle cx='88' cy='44' r='30'/%3E%3Ccircle cx='128' cy='48' r='27'/%3E%3Ccircle cx='158' cy='64' r='20'/%3E%3Crect x='30' y='58' width='146' height='30' rx='15'/%3E%3C/g%3E%3Cmask id='m'%3E%3Cuse href='%23s' fill='%23fff'/%3E%3C/mask%3E%3C/defs%3E%3Cg filter='url(%23f)'%3E%3Cuse href='%23s' fill='%23b1abc6'/%3E%3Cg mask='url(%23m)'%3E%3Cuse href='%23s' fill='%23e3d3d5' transform='translate(4 -6)'/%3E%3Cuse href='%23s' fill='%23fcf5e7' transform='translate(10 -14)'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  --boot-cloud-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='18 -3 194 79'%3E%3Cdefs%3E%3Cfilter id='f' x='-5%25' y='-5%25' width='110%25' height='110%25'%3E%3CfeGaussianBlur stdDeviation='1.2'/%3E%3C/filter%3E%3Cg id='s'%3E%3Ccircle cx='44' cy='50' r='16'/%3E%3Ccircle cx='70' cy='38' r='22'/%3E%3Ccircle cx='104' cy='32' r='25'/%3E%3Ccircle cx='138' cy='38' r='21'/%3E%3Ccircle cx='166' cy='44' r='17'/%3E%3Ccircle cx='190' cy='52' r='12'/%3E%3Crect x='30' y='46' width='170' height='20' rx='10'/%3E%3C/g%3E%3Cmask id='m'%3E%3Cuse href='%23s' fill='%23fff'/%3E%3C/mask%3E%3C/defs%3E%3Cg filter='url(%23f)'%3E%3Cuse href='%23s' fill='%23b1abc6'/%3E%3Cg mask='url(%23m)'%3E%3Cuse href='%23s' fill='%23e3d3d5' transform='translate(4 -5)'/%3E%3Cuse href='%23s' fill='%23fcf5e7' transform='translate(9 -12)'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  position: fixed;
+  inset: 0;
+  z-index: 100; /* 压在顶栏（6）、查看器（10）、提示条（20）上面 */
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--boot-ink);
+  font-family: 'Nunito', ui-rounded, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* 天空和云海：上面一窄条淡蓝的天，往下是暖白的地平线，再往下是从高处看下去的云海（和星系全景的平均颜色一致）；
+   右上角一片暖光。再叠一层很淡的纸纹（小块平铺的噪点），像画在纸上 */
+.boot-sky {
+  position: absolute;
+  inset: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.3 0 0 0 0 0.25 0 0 0 0 0.35 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(farthest-corner at 100% 0%, rgba(255, 228, 182, 0.62), rgba(255, 228, 182, 0) 46%),
+    radial-gradient(120% 60% at 50% 100%, rgba(150, 146, 178, 0.3), rgba(150, 146, 178, 0) 70%),
+    linear-gradient(180deg, #9ab8d7 0%, #b9c9dc 16%, #e2d9d3 34%, #ddd2d0 46%, #cdc4cd 64%, #bfb9c9 82%, #b3afc3 100%);
+}
+
+/* 云：位置、宽度、飘的快慢写在 index.html 每朵云的 style 里（--x、--y、--w、--d）。
+   飘：transform 左右慢慢来回；散开：translate / scale（单独的属性，和飘的 transform 叠加，不打架）。
+   远处（.far）的小云淡一点、偏天空色，像隔着一层空气 */
+.boot-cloud {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--w);
+  background: var(--boot-cloud-a) center / contain no-repeat;
+  aspect-ratio: 168 / 94;
+  animation: boot-drift var(--d, 30s) ease-in-out calc(var(--d, 30s) * -0.5) infinite alternate;
+}
+.boot-cloud.b { background-image: var(--boot-cloud-b); aspect-ratio: 194 / 79; }
+.boot-cloud.r { animation-direction: alternate-reverse; }
+.boot-cloud.far { opacity: 0.78; filter: saturate(0.85); }
+@keyframes boot-drift {
+  from { transform: translateX(-2.5vw); }
+  to { transform: translateX(2.5vw); }
+}
+
+/* 中间：翠宝（像素动图，开发环境才有；没有时三个圆点跳）、一行提示、三步进度 */
+.boot-center {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 0 24px 6vh;
+  text-align: center;
+}
+.boot-art { position: relative; z-index: 0; width: 216px; height: 240px; }
+/* 翠宝脚下的小云 */
+.boot-art::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  bottom: 0;
+  width: 196px;
+  aspect-ratio: 168 / 94;
+  translate: -50% 0;
+  background: var(--boot-cloud-a) center / contain no-repeat;
+}
+/* triboo01.gif / boom01.gif 原图 1355 × 1072 / 1018 × 755（像素格已经放大过）：按宽度平滑缩小。
+   最近邻（pixelated）缩小会丢掉皇冠的细线，平滑缩小每格还有 9 px 左右，边缘照样清楚 */
+.boot-gif {
+  position: absolute;
+  left: 50%;
+  bottom: 70px; /* 脚踩进小云上沿一点 */
+  width: 216px;
+  height: auto;
+  translate: -50% 0;
+  animation: boot-fade-in 0.2s ease-out both;
+}
+#boot[data-art='gif'] .boot-dots { display: none; }
+/* 没有动图（线上、没放品牌素材时）：三个翠宝黄的圆点在小云上方轮流跳，占翠宝的位置（图区高度不变，开发时动图换上来也不挪版）。
+   圆点是软的：深一点的黄做边、底下一小团暖色的影子，不用描线 */
+.boot-dots { position: absolute; left: 50%; bottom: 118px; display: flex; gap: 14px; translate: -50% 0; }
+.boot-dots i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe08a, var(--boot-accent) 55%, #d99a00);
+  box-shadow: 0 4px 8px rgba(120, 80, 40, 0.22);
+  animation: boot-hop 0.9s ease-in-out infinite;
+}
+.boot-dots i:nth-child(2) { animation-delay: 0.12s; }
+.boot-dots i:nth-child(3) { animation-delay: 0.24s; }
+@keyframes boot-hop {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-18px); }
+}
+@keyframes boot-fade-in { from { opacity: 0; } }
+
+/* 天空上的字：带一圈暖白的光晕，压在云上也看得清 */
+.boot-title, .boot-steps, .boot-msg { text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55), 0 0 18px rgba(255, 246, 228, 0.85); }
+.boot-title { margin: 0; font-weight: 800; font-size: 30px; line-height: 1.1; letter-spacing: -0.01em; }
+
+/* 三步进度：沿着一条虚线的三个站，走过的涂实，当前这一站是翠宝黄、轻轻跳动 */
+.boot-steps {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-weight: 800;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.boot-steps li { display: flex; align-items: center; gap: 7px; opacity: 0.6; transition: opacity 0.2s; }
+.boot-steps li + li::before { content: ''; width: 20px; margin-right: 3px; border-top: 2px dashed currentColor; opacity: 0.55; }
+.boot-steps i { flex: none; width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 50%; }
+.boot-steps .is-done { opacity: 0.85; }
+.boot-steps .is-done i { background: currentColor; }
+.boot-steps .is-now { opacity: 1; }
+.boot-steps .is-now i { background: var(--boot-accent); border-color: #c98f00; animation: boot-beat 1s ease-in-out infinite; }
+@keyframes boot-beat { 50% { transform: scale(1.25); } }
+/* 只给读屏：当前阶段的文字（role="status"，换阶段时读一遍） */
+.boot-now { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* 起不来：进度收起，提示换成一句话（出错时多一个 Reload）；有 boom01.gif 时翠宝换成它，没有时不放图 */
+#boot[data-state='unsupported'] .boot-steps, #boot[data-state='error'] .boot-steps { display: none; }
+#boot[data-state='unsupported']:not([data-art='gif']) .boot-art, #boot[data-state='error']:not([data-art='gif']) .boot-art { display: none; }
+.boot-msg { max-width: min(30em, calc(100vw - 48px)); margin: 0; font-weight: 700; font-size: 16px; line-height: 1.5; }
+/* Reload：圆圆的暖奶油色按钮（启动画面在 styles.css 之前就要能用，不靠全局的按钮样式） */
+#boot button {
+  font: 800 14px/1 'Nunito', ui-rounded, system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  color: #3b2f12;
+  background: var(--boot-accent);
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 22px;
+  box-shadow: 0 4px 12px rgba(120, 80, 40, 0.25);
+  cursor: pointer;
+}
+#boot button:hover { background: #ffc61a; }
+#boot button:focus-visible { outline: 3px solid var(--boot-ink); outline-offset: 2px; }
+
+/* 散开：字先收起；云往两边、往下飞开并放大（像镜头从云里穿过去，和开场飞行同时）；天空淡掉露出 3D。
+   云是先快后慢地让开（一开始就看得出在动，最后一段慢慢出画），最长的一段 1.1 秒结束（boot.ts 的 LEAVE_MS 到点撤掉整个 #boot） */
+#boot[data-state='leaving'] .boot-center { opacity: 0; translate: 0 -12px; scale: 0.96; transition: opacity 0.25s ease-in, translate 0.3s ease-in, scale 0.3s ease-in; }
+#boot[data-state='leaving'] .boot-sky { opacity: 0; transition: opacity 0.8s ease-in-out 0.2s; }
+#boot[data-state='leaving'] .boot-cloud {
+  translate: var(--ox, 0) var(--oy, 0);
+  scale: 1.3;
+  opacity: 0;
+  transition: translate 1.1s cubic-bezier(0.3, 0.1, 0.3, 1), scale 1.1s cubic-bezier(0.3, 0.1, 0.3, 1), opacity 0.35s linear 0.75s;
+}
+.boot-cloud.l { --ox: -42vw; }
+.boot-cloud.r { --ox: 42vw; }
+.boot-cloud.d { --oy: 36vh; }
+
+@media (max-width: 560px) {
+  .boot-title { font-size: 24px; }
+  .boot-art { scale: 0.85; margin: -15px 0; }
+  .boot-steps li:not(.is-now) span { display: none; } /* 窄屏只写当前这一步的名字，其余只留圆点 */
+}
+
+/* 系统设置了减少动态效果：云不飘、圆点不跳，散开只是淡出 */
+@media (prefers-reduced-motion: reduce) {
+  #boot *, #boot *::before, #boot *::after { animation: none !important; }
+  #boot[data-state='leaving'] .boot-center, #boot[data-state='leaving'] .boot-cloud { translate: none; scale: none; transition: opacity 0.35s linear; }
+  #boot[data-state='leaving'] .boot-sky { transition: opacity 0.35s linear; }
+}

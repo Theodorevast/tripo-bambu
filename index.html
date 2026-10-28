@@ -6,10 +6,32 @@
     <meta name="description" content="Community Planets: teams of 3D artists build a planet together and show their work." />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <title>Community Planets</title>
+    <link rel="stylesheet" href="/src/ui/boot.css" />
   </head>
   <body>
     <canvas id="stage"></canvas>
     <div id="app"></div>
+    <!-- 启动画面（src/ui/boot.ts、boot.css）。云：--x/--y/--w 位置和宽度，--d 飘一个来回的时长；l / r / d 散开时往左、往右、往下飞；far 远处的小云 -->
+    <div id="boot" data-state="loading">
+      <div class="boot-sky"></div>
+      <i class="boot-cloud a l far" style="--x: -7vw; --y: 9vh; --w: clamp(220px, 26vw, 460px); --d: 26s"></i>
+      <i class="boot-cloud b r far" style="--x: 73vw; --y: 15vh; --w: clamp(200px, 25vw, 440px); --d: 32s"></i>
+      <i class="boot-cloud a l far" style="--x: 24vw; --y: 25vh; --w: clamp(90px, 9vw, 150px); --d: 40s"></i>
+      <i class="boot-cloud b r" style="--x: 67vw; --y: 44vh; --w: clamp(110px, 11vw, 180px); --d: 36s"></i>
+      <i class="boot-cloud a l" style="--x: -10vw; --y: 66vh; --w: clamp(320px, 40vw, 700px); --d: 30s"></i>
+      <i class="boot-cloud b r" style="--x: 58vw; --y: 72vh; --w: clamp(360px, 50vw, 860px); --d: 34s"></i>
+      <i class="boot-cloud a d" style="--x: 28vw; --y: 82vh; --w: clamp(280px, 36vw, 620px); --d: 38s"></i>
+      <div class="boot-center">
+        <div class="boot-art"><span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+        <p class="boot-title">Gathering planets…</p>
+        <ol class="boot-steps">
+          <li><i></i><span>Building the sky</span></li>
+          <li><i></i><span>Warming up</span></li>
+          <li><i></i><span>Landing</span></li>
+        </ol>
+        <span class="boot-now" role="status"></span>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

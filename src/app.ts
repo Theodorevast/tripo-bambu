@@ -3,7 +3,9 @@ import type { Seed, Team } from './data/types';
 import { isCurrentRoute } from './lib/currentRoute';
 import { LatestQueue } from './lib/latestQueue';
 import { parseRoute, toHash, type Route } from './router';
+import { installTransitionDebug } from './scenes/transitionDebug';
 import type { World } from './scenes/world';
+import { installBadge } from './ui/badge';
 import { GalaxyUi } from './ui/galaxyUi';
 import { toast } from './ui/toast';
 import { Topbar } from './ui/topbar';
@@ -55,6 +57,8 @@ export class App {
       edit: () => this.onEdit(),
     });
     this.galaxyUi = new GalaxyUi(world, root, (teamId) => this.navigate({ view: 'planet', teamId }));
+    installBadge(root); // 角落里的「Made with Tripo」
+    installTransitionDebug(world); // window.__trans：转场自查脚本用
     world.setTeams(teams);
     // 开场飞行期间顶栏就显示星系标题；直接打开星球页时，show() 在第一次 await 之前就换成 showTeam
     this.topbar.showGalaxy(teams.length, teams.reduce((n, t) => n + t.works.length, 0));
@@ -115,9 +119,16 @@ export class App {
     if (route.view !== 'museum' || !sameTeam) this.museum?.close();
     if (!team) {
       if (this.currentTeamId) {
-        this.planetLayer?.leave();
         this.currentTeamId = null;
-        await this.world.unfocus();
+        // 作品在云层全遮住时才撤下（转场开头那一下看不见）；转场没走到那一步时（测试里的假世界）落地后补上
+        let left = false;
+        const leave = () => {
+          if (left) return;
+          left = true;
+          this.planetLayer?.leave();
+        };
+        await this.world.unfocus({ covered: leave });
+        leave();
       }
       this.topbar.showGalaxy(this.teams.length, this.teams.reduce((n, t) => n + t.works.length, 0));
       this.galaxyUi.setEnabled(true);
@@ -125,11 +136,21 @@ export class App {
     }
     this.galaxyUi.setEnabled(false);
     if (!sameTeam) {
-      this.planetLayer?.leave();
+      // 从星系进来：转场一开始就摆展台、开始加载模型（World 先把作品排着，云散开时才依次弹出来），模型加载藏在转场里。
+      // 从另一颗星球跳过来：旧星球的作品在云层全遮住时才撤下，同时摆新星球的。都不等模型
+      const hop = this.currentTeamId !== null;
+      let entered = false;
+      const swap = () => {
+        if (entered) return;
+        entered = true;
+        if (hop) this.planetLayer?.leave();
+        this.planetLayer?.enter(team);
+      };
       this.currentTeamId = team.id;
       this.topbar.showTeam(team, team.id === this.you.teamId);
-      await this.world.focus(team.id);
-      this.planetLayer?.enter(team); // 不等模型
+      if (!hop) swap();
+      await this.world.focus(team.id, { covered: swap });
+      swap(); // 转场没走到全遮住那一步（测试里的假世界）：落地后补上
     }
     if (route.view === 'members') await this.members?.open(team, route);
     if (route.view === 'museum') await this.museum?.open(team, route);
