@@ -292,9 +292,11 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // ---- 小波纹（配方「波光粼粼」：两层噪声把法线推歪，频率换算成每米）。风大水面碎一点
   const rs = U.rippleScale;
   const windK = windUniforms.strength.mul(0.9).add(0.55);
+  // 再加一层大的（约 3 米一起伏，慢慢漂）：海面远看时天光的倒影有一条条明暗，不是一整片平的
+  const o0 = noise3v(p.mul(rs.mul(0.33)).add(vec3(t.mul(0.05), t.mul(0.03), t.mul(-0.04))).add(41.3)).sub(0.5);
   const o1 = noise3v(p.mul(rs.mul(1.1)).add(vec3(t.mul(0.23), t.mul(-0.17), t.mul(0.11)))).sub(0.5);
   const o2 = noise3v(p.mul(rs.mul(2.6)).add(vec3(t.mul(-0.31), t.mul(0.21), t.mul(-0.26))).add(19.7)).sub(0.5);
-  const shimmer = o1.mul(keep(rs.mul(1.1))).add(o2.mul(0.55).mul(keep(rs.mul(2.6)))).mul(U.ripple).mul(windK);
+  const shimmer = o0.mul(0.6).add(o1.mul(keep(rs.mul(1.1)))).add(o2.mul(0.55).mul(keep(rs.mul(2.6)))).mul(U.ripple).mul(windK);
   // 一圈圈的波纹：梯度（世界坐标；星球不转，方向和本地一样）
   const rings = ringsNode(p, positionWorld).toVar();
   const tilt = shimmer.sub(rings.xyz);
@@ -310,7 +312,8 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
 
   // ---- 深浅（配方「浅海透明」）：浅处青绿、看得见底，往深处变成蓝绿；大块的不匀，像手涂的
   const patch = valueNoise3(p.mul(0.33).add(5.3)).sub(0.5);
-  const tone = saturate(d.div(U.deep).add(patch.mul(0.22)));
+  const bigPatch = valueNoise3(p.mul(0.07).add(13.1)).sub(0.5); // 海上十几米一块的深浅（远看像水彩一笔一笔涂的）
+  const tone = saturate(d.div(U.deep).add(patch.mul(0.22)).add(bigPatch.mul(0.3)));
   const body = mix(mix(pal.shallow, pal.mid, smoothstep(0.0, 0.55, tone)), pal.deep, smoothstep(0.45, 1.0, tone));
   const pathLen = d.div(max(cosV, 0.35)); // 视线在水里走过的路程：斜着看更不透（掠射时封顶，近岸那一条斜着看也透底）
   const absorb = float(1).sub(exp(pathLen.mul(U.clarity).negate()));
@@ -363,7 +366,7 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // ---- 水底光斑：沿折射后的视线落到水底的那一点上取两层「脊」噪声相乘，成一张网；浅水最亮，深了、浑了就淡。
   // 只在浅水、看得见底的地方算噪声
   const causticK = U.caustics.mul(0.35).mul(smoothstep(0.01, 0.06, d)).mul(float(1).sub(smoothstep(0.12, 0.55, d)))
-    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(foam)).mul(keep(3.1)).toVar();
+    .mul(exists.sub(alphaBody).max(0)).mul(float(1).sub(foam)).mul(keep(12)).toVar(); // 远处就不画了：从星球视图看像撒了一层白点
   const causticAmt = Fn(() => {
     const out = float(0).toVar();
     If(causticK.greaterThan(0.001), () => {
