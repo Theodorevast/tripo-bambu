@@ -15,6 +15,8 @@ export interface PlanetLayer {
   // 立即返回：展台马上摆好，模型在后台加载。路由不等模型（等了，加载期间 Back、Members 这些操作都会卡住）
   enter(team: Team): void;
   leave(): void;
+  // 转场一开始：作品的模型先在后台下载、解码（不摆、不编译）；云层全遮住时 enter 才摆上展台
+  prefetch?(team: Team): void;
 }
 
 export interface Sheet {
@@ -79,6 +81,8 @@ export class App {
     if (first.view === 'galaxy') await this.world.intro();
     await this.queue(first);
     window.__ready = true;
+    // 开场的品牌露出：飞行落定、还停在星系全景上时，翠宝从一颗星球后面探头挥手（不等它，路由照常）
+    if (first.view === 'galaxy' && !this.currentTeamId && !this.routing) this.world.director.peekIntro();
   }
 
   // replace：替换当前这条历史记录（重定向用），后退时不会回到出错的地址又被弹回来
@@ -136,8 +140,9 @@ export class App {
     }
     this.galaxyUi.setEnabled(false);
     if (!sameTeam) {
-      // 从星系进来：转场一开始就摆展台、开始加载模型（World 先把作品排着，云散开时才依次弹出来），模型加载藏在转场里。
-      // 从另一颗星球跳过来：旧星球的作品在云层全遮住时才撤下，同时摆新星球的。都不等模型
+      // 模型在转场一开始就先下载、解码（加载藏在转场里）；展台在云层全遮住时才摆（第一次画展台、编译作品着色器的那一帧
+      // 在 WebGL2 上要 30–50 ms，藏在云里看不见），World 先把作品排着，云散开时依次弹出来。
+      // 从另一颗星球跳过来：旧星球的作品也是这时才撤下。都不等模型
       const hop = this.currentTeamId !== null;
       let entered = false;
       const swap = () => {
@@ -148,7 +153,7 @@ export class App {
       };
       this.currentTeamId = team.id;
       this.topbar.showTeam(team, team.id === this.you.teamId);
-      if (!hop) swap();
+      this.planetLayer?.prefetch?.(team);
       await this.world.focus(team.id, { covered: swap });
       swap(); // 转场没走到全遮住那一步（测试里的假世界）：落地后补上
     }
