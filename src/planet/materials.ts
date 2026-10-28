@@ -1,39 +1,5 @@
-import * as THREE from 'three/webgpu';
-import { cameraPosition, color, dot, float, length, modelPosition, normalize, positionLocal, positionWorld, pow, saturate, sin, smoothstep, sqrt, uniform } from 'three/tsl';
-import type { PresetId } from '../data/types';
-import { PRESETS } from './presets';
-
-// 世界坐标下：从星球中心指向片元的方向、从片元指向镜头的方向
-const sphereNormal = () => normalize(positionWorld.sub(modelPosition));
-const toCamera = () => normalize(cameraPosition.sub(positionWorld));
-
 // 水面（小水塘）：材质、几何都在 nature/water.ts（按地表网格挑出水塘、带水深；浅深渐变、岸边白沫、闪光、水底光斑）
 export { waterMaterial } from '../nature/water';
 
-// 大气：背面渲染的薄外壳，叠加混合。d 是视线和外壳法线夹角的余弦，r 是外壳半径（本地单位），
-// 这条视线离球心最近的距离就是 b = r·√(1 − d²)。t 把 b 换算到「星球半径 → 外壳边缘」的 0..1：
-// t = 0 贴着星球轮廓，光晕最亮；t = 1 是外壳边缘，(1 − t)^2.5 在这里平滑地降到 0，
-// 所以没有硬边，也没有一圈亮度不变的色带。外壳半径必须大于 planetRadius
-// strength：整体浓度的倍数（集成时加的）。星球视图里聚焦的那颗压淡：它和云海、高度雾叠在一起，星球边上会多出一圈白光（参考图 F2 没有）
-export function atmosphereMaterial(preset: PresetId, planetRadius: number, strength: THREE.UniformNode<'float', number> = uniform(1)): THREE.MeshBasicNodeMaterial {
-  const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-  const d = dot(sphereNormal(), toCamera()).mul(-1);
-  const r = length(positionLocal);
-  const b = r.mul(sqrt(saturate(float(1).sub(d.mul(d)))));
-  const t = saturate(b.sub(planetRadius).div(r.sub(planetRadius)));
-  m.colorNode = color(PRESETS[preset].atmosphere);
-  m.opacityNode = pow(float(1).sub(t), 2.5).mul(0.35).mul(strength);
-  return m;
-}
-
-// 光环：RingGeometry 在 XY 平面；按到中心的距离画约 6 道深浅交替的环带（sin(t·38) 在 t 的 0..1 上约 6 个周期），内外缘淡出。
-// strength 是整体不透明度的倍数（0..1），用 uniform 传进来：聚焦时淡化光环只改它的值，不用重建材质
-export function ringMaterial(preset: PresetId, inner: number, outer: number, strength: THREE.UniformNode<'float', number> = uniform(1)): THREE.MeshBasicNodeMaterial {
-  const m = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, transparent: true, depthWrite: false });
-  const t = length(positionLocal.xy).sub(inner).div(outer - inner);
-  const bands = sin(t.mul(38)).mul(0.5).add(0.5).mul(0.35).add(0.45);
-  const edge = smoothstep(0, 0.08, t).mul(float(1).sub(smoothstep(0.85, 1, t)));
-  m.colorNode = color(PRESETS[preset].ring);
-  m.opacityNode = bands.mul(edge).mul(0.6).mul(strength);
-  return m;
-}
+// 大气光晕、光环（planet 角色）：搬到 nature/planetLook.ts——光晕是普通混合的薄晕（晨昏线偏暖、厚度沿轮廓起伏），
+// 光环换成一圈慢慢转的苔藓石头带（PlanetLookParts）。这里原来的叠加光晕、条纹光环不再用，删掉了
