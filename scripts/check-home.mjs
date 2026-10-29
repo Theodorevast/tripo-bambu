@@ -247,8 +247,8 @@ try {
   flew = await r.page.evaluate(() => window.__coupons.state().coupons.some((c) => c.phase === 'pickup'));
   check('减少动态效果：不打招呼、点了翠宝券不飞，领券窗口直接淡入', !!rAt && !rIntro && rShown && !flew);
   await r.ctx.close();
-  // —— 9. 标题卡片上的「Tune」按钮：平时不下载调参面板；点一下才加载、右边的面板出来；再点（键盘回车）藏起来；
-  //        开关记在 localStorage，刷新后照旧；星球页的名牌卡片上也有；不压着标题；?tune 照旧开页就打开 ——
+  // —— 9. Tune（先不开放）：地址不带 ?tune 时标题卡片上没有 Tune 按钮、不下载调参面板（localStorage 记着开也不开）；
+  //        带 ?tune 时开页就打开面板，标题卡片上有 Tune 按钮，点了能关上 ——
   {
     const t = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
     const tp = await t.newPage();
@@ -257,71 +257,22 @@ try {
     const tweakpane = [];
     tp.on('request', (r) => { if (/tweakpane/i.test(r.url())) tweakpane.push(r.url()); });
     const loaded = () => until(tp, () => window.__ready === true && window.__app.routeIdle() && !document.querySelector('#boot'), null, 90000);
-    const paneState = () => tp.evaluate(() => {
-      const pane = document.querySelector('.tune-pane');
-      const btn = document.querySelector('.tb-title .tb-tune');
-      return { pane: !!pane, shown: !!pane && !pane.hidden && getComputedStyle(pane).display !== 'none', pressed: btn?.getAttribute('aria-pressed') ?? null };
-    });
+    await tp.addInitScript(() => { try { localStorage.setItem('community-planets:tune-open', '1'); } catch {} });
     await tp.goto(`${base}/?nolocal`);
     await loaded();
-    const geo = await tp.evaluate(() => {
-      const r = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
-      const b = r('.tb-title .tb-tune');
-      const hit = (a) => !!a && !!b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-      const card = r('.tb-title');
-      const btn = document.querySelector('.tb-title .tb-tune');
-      return {
-        visible: !!b && b.width > 20,
-        inside: !!b && !!card && b.left >= card.left && b.right <= card.right && b.top >= card.top && b.bottom <= card.bottom,
-        covers: ['.tb-name', '.cb-head .cobrand', '.cb-event', '.tb-tagline', '.tb-visit', '.tb-create'].filter((s) => hit(r(s))),
-        title: btn?.getAttribute('title'),
-        label: btn?.getAttribute('aria-label'),
-        size: b ? `${Math.round(b.width)}×${Math.round(b.height)}` : '-',
-      };
-    });
-    check('Tune 按钮：在左上角标题卡片里，不压着标题、联名标志、说明和按钮；提示文字 Tune', geo.visible && geo.inside && geo.covers.length === 0 && geo.title === 'Tune' && geo.label === 'Tune',
-      `${geo.size}，压到 ${geo.covers.join('、') || '没有'}`);
-    let s = await paneState();
-    const before = tweakpane.length;
-    await tp.locator('.tb-title .tb-tune').click();
-    const opened = await until(tp, () => {
-      const p = document.querySelector('.tune-pane');
-      return !!p && !p.hidden && !document.querySelector('.tune-pane .tune-card')?.hidden && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'true';
-    }, null, 20000);
-    check('Tune 按钮：平时不下载 Tweakpane；点一下才加载，右边的调参面板出来（aria-pressed=true）', !s.pane && before === 0 && opened && tweakpane.length > 0,
-      `点之前 ${before} 个请求、面板 ${s.pane ? '有' : '没有'}；点之后 ${tweakpane.length} 个`);
-    await tp.locator('.tb-title .tb-tune').focus();
-    await tp.keyboard.press('Enter');
-    const closed = await until(tp, () => document.querySelector('.tune-pane')?.hidden === true && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'false', null, 3000);
-    check('Tune 按钮：再按一下（键盘回车）面板整块藏起来（aria-pressed=false）', closed);
-    await tp.reload();
-    await loaded();
     await tp.waitForTimeout(800);
-    s = await paneState();
-    check('Tune 按钮：关着的刷新以后还是关着', (!s.pane || !s.shown) && s.pressed === 'false', JSON.stringify(s));
-    await tp.locator('.tb-title .tb-tune').click();
-    await until(tp, () => document.querySelector('.tune-pane')?.hidden === false, null, 20000);
-    await tp.reload();
-    await loaded();
-    const restored = await until(tp, () => document.querySelector('.tune-pane')?.hidden === false && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'true', null, 20000);
-    check('Tune 按钮：开着的刷新以后自己打开', restored);
-    // 星球页：名牌卡片上也有，点了关上
-    await tp.evaluate((id) => { location.hash = `#/t/${id}`; }, you.id);
-    await until(tp, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), you.id, 30000);
-    const onPlanet = await tp.evaluate(() => {
+    const plain = await tp.evaluate(() => {
       const b = document.querySelector('.tb-title .tb-tune');
-      const n = document.querySelector('.tb-title .tb-name')?.getBoundingClientRect();
-      const r = b?.getBoundingClientRect();
-      return { shown: !!r && r.width > 20, pressed: b?.getAttribute('aria-pressed'), clear: !!r && !!n && (n.right <= r.left || n.bottom <= r.top) };
+      const p = document.querySelector('.tune-pane');
+      return { button: !!b && !b.hidden && b.getBoundingClientRect().width > 0, pane: !!p && !p.hidden };
     });
-    await tp.locator('.tb-title .tb-tune').click();
-    const closedOnPlanet = await until(tp, () => document.querySelector('.tune-pane')?.hidden === true, null, 3000);
-    check('Tune 按钮：星球页的名牌卡片上也有（不压着团队名），点了关上', onPlanet.shown && onPlanet.pressed === 'true' && onPlanet.clear && closedOnPlanet, JSON.stringify(onPlanet));
-    // ?tune：照旧开页就打开（记下的是关着也一样）
+    check('Tune 先不开放：地址不带 ?tune 时没有 Tune 按钮、不打开调参面板、不下载 Tweakpane（记着开也不开）', !plain.button && !plain.pane && tweakpane.length === 0, JSON.stringify({ ...plain, tweakpane: tweakpane.length }));
     await tp.goto(`${base}/?nolocal&tune`);
     await loaded();
-    const forced = await until(tp, () => document.querySelector('.tune-pane')?.hidden === false && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'true', null, 20000);
-    check('地址带 ?tune：照旧开页就打开调参面板', forced);
+    const forced = await until(tp, () => document.querySelector('.tune-pane')?.hidden === false && document.querySelector('.tb-title .tb-tune')?.getAttribute('aria-pressed') === 'true', null, 20000);
+    await tp.locator('.tb-title .tb-tune').click();
+    const closed = await until(tp, () => document.querySelector('.tune-pane')?.hidden === true, null, 3000);
+    check('地址带 ?tune：开页就打开调参面板，标题卡片上有 Tune 按钮，点了能关上', forced && closed);
     await t.close();
   }
 
