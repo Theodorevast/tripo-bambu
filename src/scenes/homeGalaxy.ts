@@ -15,7 +15,7 @@ export const HOME_DUST = {
   size: 1, // 星尘大小
   glow: 1, // 星尘亮度
   width: 1, // 弧带多宽
-  wisps: 1, // 小云絮浓淡（0 = 没有）
+  wisps: 0, // 小云絮浓淡（0 = 没有）。第二版不要：夜里一团团的软云像两条发光的奶油虫，旋臂只靠细小的颗粒和亮度渐变显出形状
   halo: 1, // 你的星球的暖光、底下的光环（0 = 没有）
   extra: 1.6, // 螺旋臂画到最外那颗星球外面再多长多少（× 半径）
 };
@@ -35,7 +35,7 @@ export const STARDUST_TRIBOO = {
   lift: 0.6, // 流的时候往上拱多高（× 星球半径）
 };
 
-const DUST_BASE = 4800; // 第二版 [v2-world]：粒子更细、多一些（3600 → 4800），总的填充量反而小了
+const DUST_BASE = 6400; // 第二版 [v2-world]：粒子更细、多一些（3600 → 6400，其中四成是极细的微尘），总的填充量反而小了
 const WISP_COUNT = 110;
 
 function rng(seed: number): () => number {
@@ -286,6 +286,7 @@ export class GalaxyDecor {
       let y: number;
       let k: number; // 0 中心 .. 1 外端
       let bright: number;
+      let fine = false; // 第二版：极细、很淡的微尘（铺出旋臂的「身体」，代替第一版的小云絮）
       if (rand() < 0.1) {
         // 中间一小团（核球）：围着你的星球
         const rr = Math.abs(gauss(rand)) * r0 * 0.45 + R * 1.6;
@@ -300,7 +301,8 @@ export class GalaxyDecor {
         const t = Math.pow(rand(), 0.85);
         spiralPoint(arm, t * total, r0, p, pt);
         const loose = rand() < 0.12;
-        const w = R * HOME_DUST.width * (loose ? 1.6 + 1.4 * t : 0.32 + 0.45 * t);
+        fine = !loose && rand() < 0.45;
+        const w = R * HOME_DUST.width * (loose ? 1.6 + 1.4 * t : (0.32 + 0.45 * t) * (fine ? 1.9 : 1));
         const across = gauss(rand) * w;
         const along = gauss(rand) * R * 0.3;
         const ta = pt.a + Math.PI / 2;
@@ -308,12 +310,12 @@ export class GalaxyDecor {
         z = pt.z + Math.sin(pt.a) * across + Math.sin(ta) * along;
         y = gauss(rand) * R * (0.15 + 0.2 * t);
         k = t;
-        bright = (loose ? 0.45 : 1) * (1 - 0.6 * t); // 往外慢慢暗，但一直看得出来
+        bright = (loose ? 0.45 : fine ? 0.42 : 1) * (1 - 0.6 * t); // 往外慢慢暗，但一直看得出来
       }
       pos[i * 3] = x * rc - z * rs;
       pos[i * 3 + 1] = y;
       pos[i * 3 + 2] = (x * rs + z * rc) * sz;
-      size[i] = R * (0.12 + 0.3 * rand() * rand()) * (1.15 - 0.35 * k) * HOME_DUST.size;
+      size[i] = R * (fine ? 0.045 + 0.05 * rand() : 0.12 + 0.3 * rand() * rand()) * (1.15 - 0.35 * k) * HOME_DUST.size;
       // 一条臂暖金（往外偏琥珀），一条奶白（往外偏珍珠桃）
       if (arm === 0) tmp.copy(gold).lerp(amber, k * 0.8);
       else tmp.copy(cream).lerp(pearl, k * 0.8);
@@ -429,6 +431,7 @@ export class GalaxyDecor {
     this.group.visible = this.fade.value > 0.001;
     this.glow.value = HOME_DUST.glow;
     this.wispK.value = HOME_DUST.wisps;
+    this.wisps.sprite.visible = HOME_DUST.wisps > 0; // 第二版默认没有小云絮：不画（不白占一百多个大面片的填充）
     this.haloK.value = you ? HOME_DUST.halo : 0;
     if (you) {
       this.halo.position.copy(you.pos);

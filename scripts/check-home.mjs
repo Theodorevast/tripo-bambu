@@ -476,9 +476,10 @@ try {
       window.__overlap.on = false;
       return window.__overlap;
     });
-    check('和云朵翠宝互相避开：它聚好、散开、聚拢的时候叫云里那只出来，探出来、停着的时候都不和它叠在一起；散开时它占的地方更大',
-      shown && scattering && gathering && p1 && p2 && p3 && o.frames > 0 && o.both === 0 && wScatter > wShow,
-      `云里那只探出来、停着 ${o.frames} 帧，叠在一起 ${o.both} 帧；云朵翠宝聚好时宽 ${Math.round(wShow)} px，散开 0.5 秒时 ${Math.round(wScatter)} px`);
+    // 第二版 [v2-world]：云朵翠宝换成了星座翠宝，淡掉的时候不往外散，占的地方和亮着时一样（不能变小：它还看得见的时候照样要躲开）
+    check('和星座翠宝互相避开：它亮着、淡掉、亮起来的时候叫云里那只出来，探出来、停着的时候都不和它叠在一起；淡掉时它占的地方不比亮着时小',
+      shown && scattering && gathering && p1 && p2 && p3 && o.frames > 0 && o.both === 0 && wShow > 0 && wScatter >= wShow * 0.98,
+      `云里那只探出来、停着 ${o.frames} 帧，叠在一起 ${o.both} 帧；星座翠宝亮着时宽 ${Math.round(wShow)} px，淡掉 0.5 秒时 ${Math.round(wScatter)} px`);
   }
 
   // —— 5b. 螺旋星系随便转：左右拖 180° 以后，照样能悬停名牌、点进星球；回首页时回到正面的取景 ——

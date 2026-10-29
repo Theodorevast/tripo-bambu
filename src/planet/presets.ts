@@ -68,27 +68,27 @@ export interface Preset {
 export const PRESETS: Record<PresetId, Preset> = {
   verdant: {
     id: 'verdant', label: 'Verdant', amp: 0.06, freq: 1.4, sea: -0.12, continentFreq: 1.15, land: 0.02, basin: 0,
-    ground: { grass: '#2a3227', fresh: '#3e453b', dry: '#545240', tip: '#747561', root: '#10160f', moss: '#232b20', soil: '#322c26', path: '#655e50', rock: '#494643', sand: '#857966', deep: '#233340', far: '#75816f', field: '#b3b794' },
+    ground: { grass: '#293e2a', fresh: '#3c553f', dry: '#536345', tip: '#728c67', root: '#101d11', moss: '#233523', soil: '#322c26', path: '#776d5a', rock: '#444241', sand: '#857966', deep: '#233340', far: '#739b75', field: '#b0da9e' },
     water: '#5f7f97', atmosphere: '#c5cdd8', ring: '#d8c08e',
   },
   desert: {
     id: 'desert', label: 'Desert', amp: 0.06, freq: 1.8, sea: null, continentFreq: 1.3, land: 0.06, basin: -0.2,
-    ground: { grass: '#636049', fresh: '#757159', dry: '#83785e', tip: '#958c73', root: '#2f2b21', moss: '#4d4b38', soil: '#5d4d3e', path: '#8d7d67', rock: '#675c4f', sand: '#b9a98f', deep: '#9e8e75', far: '#96846a', field: '#bdaf94' },
+    ground: { grass: '#69664d', fresh: '#7c785d', dry: '#8b8062', tip: '#9e9578', root: '#322e23', moss: '#52503b', soil: '#5d4d3e', path: '#9a876d', rock: '#61574b', sand: '#b9a98f', deep: '#9e8e75', far: '#9f8c6f', field: '#c8ba9b' },
     water: '#000000', atmosphere: '#d9c9b8', ring: '#d8c08e',
   },
   glacier: {
     id: 'glacier', label: 'Glacier', amp: 0.055, freq: 1.2, sea: -0.1, continentFreq: 1.0, land: -0.02, basin: 0,
-    ground: { grass: '#64716b', fresh: '#737f79', dry: '#929999', tip: '#9ca1a0', root: '#2b3434', moss: '#505d57', soil: '#595d63', path: '#8e939b', rock: '#656d82', sand: '#acb1b5', deep: '#293d4c', far: '#8696a0', field: '#d8d8d2' },
+    ground: { grass: '#627d75', fresh: '#728a85', dry: '#92a6a8', tip: '#9eb0af', root: '#2a3a39', moss: '#50665f', soil: '#595d63', path: '#9da3aa', rock: '#5f6880', sand: '#acb1b5', deep: '#293d4c', far: '#83a1b0', field: '#dbe8e9' },
     water: '#6d8ea4', atmosphere: '#d3dbe4', ring: '#c9ccd2',
   },
   volcanic: {
     id: 'volcanic', label: 'Volcanic', amp: 0.065, freq: 1.6, sea: null, continentFreq: 1.4, land: 0.04, basin: -0.25,
-    ground: { grass: '#3c4337', fresh: '#4b5142', dry: '#514b3f', tip: '#736e5b', root: '#161916', moss: '#272d23', soil: '#231e1b', path: '#453d37', rock: '#2c2e33', sand: '#565259', deep: '#373340', far: '#585d53', field: '#72625a' },
+    ground: { grass: '#384c38', fresh: '#485b43', dry: '#4d553f', tip: '#6d7b5c', root: '#151d16', moss: '#253324', soil: '#231e1b', path: '#4f443c', rock: '#2a2b32', sand: '#565259', deep: '#373340', far: '#5d6c55', field: '#766b5e' },
     water: '#000000', atmosphere: '#c9b3b0', ring: '#a8894f',
   },
   coral: {
     id: 'coral', label: 'Coral', amp: 0.055, freq: 1.5, sea: -0.05, continentFreq: 1.7, land: -0.1, basin: 0,
-    ground: { grass: '#566a5f', fresh: '#6a7a70', dry: '#817a66', tip: '#96947d', root: '#262f24', moss: '#455442', soil: '#594a43', path: '#918077', rock: '#726664', sand: '#bea697', deep: '#2f4b5a', far: '#7f9188', field: '#c3b0a2' },
+    ground: { grass: '#567a62', fresh: '#678f77', dry: '#7c916f', tip: '#91af87', root: '#243828', moss: '#436448', soil: '#594a43', path: '#a89185', rock: '#6b6060', sand: '#bea697', deep: '#2f4b5a', far: '#7ba78c', field: '#cdb3a6' },
     water: '#5f8a94', atmosphere: '#d9c8cb', ring: '#d8c08e',
   },
 };

@@ -96,6 +96,27 @@ try {
     });
     await p.waitForTimeout(1800);
   });
+  // 中古点缀：镜头凑到星球上一样点缀（kind：tower / arch / lamp / menhir）旁边
+  for (const kind of ['tower', 'arch', 'lamp']) {
+    await shot(`props-${kind}`, '#/t/lumen-guild', async (p) => {
+      await planetReady(p, 'lumen-guild');
+      await p.waitForTimeout(1200);
+      await p.evaluate((k) => {
+        const w = window.__world;
+        const e = w.focused;
+        const it = window.__v2world.props().find((x) => x.kind === k) ?? window.__v2world.props()[0];
+        if (!it) return;
+        const V = w.rig.camera.position.constructor;
+        const d = new V(...it.dir).normalize();
+        const at = d.clone().multiplyScalar(e.planet.radius).add(e.home);
+        const side = new V(0, 1, 0).cross(d).normalize();
+        const fwd = d.clone().cross(side).normalize();
+        const pos = at.clone().addScaledVector(d, 2.4).addScaledVector(side, 5.5).addScaledVector(fwd, 3);
+        w.rig.jump({ target: at.clone().addScaledVector(d, 1.2), position: pos, minDistance: 0.5, maxDistance: 1e5, autoRotate: false });
+      }, kind);
+      await p.waitForTimeout(1800);
+    });
+  }
   // 首页正面：开场放完、停住自转
   await shot('home-front', '#/', async (p) => {
     await p.waitForTimeout(4200);
@@ -139,7 +160,8 @@ try {
     await p.waitForTimeout(4200);
     await stopSpin(p);
     await p.evaluate(() => window.__v2world?.showConstellation?.());
-    await p.waitForTimeout(3500);
+    await p.waitForFunction(() => window.__v2world?.constellationState?.()?.phase === 'show', null, { timeout: 30000 });
+    await p.waitForTimeout(600);
   });
   // 烫金券卡：首页右下角的翠宝吐一张券（等卡片飞出来、停住）
   await shot('card', '#/', async (p) => {
