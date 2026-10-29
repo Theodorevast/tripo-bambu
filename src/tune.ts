@@ -1,4 +1,5 @@
-import { FOLLOW, WALK } from './play/params';
+import { FOLLOW, WALK, WALK_ANIM } from './play/params';
+import { addWalkAnimTune } from './play/walkTune';
 import { applyDecor, DECOR } from './planet/decor';
 import { applyGround, applyGroundPalette, GRASS_GROUND, GROUND } from './planet/ground';
 import { PLANET_RADIUS, PLANET_RADIUS_MAX, PLANET_RADIUS_MIN, PRESETS, setPlanetRadius } from './planet/presets';
@@ -62,6 +63,7 @@ export function tuneJson(world?: World): string {
       shots: SHOTS,
       follow: FOLLOW,
       walk: WALK,
+      walkAnim: WALK_ANIM, // W1：翠宝走路动画的幅度和节奏
       museumLook: LOOK,
       museumLights: LIGHTS,
       look: LOOK_TUNE,
@@ -196,6 +198,7 @@ export function installTune(world: World): TuneShell {
   walk.addBinding(FOLLOW, 'shoulder', { label: 'shoulder (m)', min: -1.2, max: 1.2, step: 0.01 });
   walk.addBinding(FOLLOW, 'focus', { label: 'focus height (m)', min: 0.2, max: 1.5, step: 0.01 });
   walk.addBinding(WALK, 'speed', { label: 'walk speed (m/s)', min: 0.5, max: 8, step: 0.05 });
+  addWalkAnimTune(pane); // —— Walk animation ——（play/walkTune.ts，W1：步子、身体、手臂、涉水）
 
   // —— Museum & viewer（它们有自己的渲染器和摄影棚灯，主画面不受影响）——
   const museum = pane.addFolder({ title: 'Museum & viewer', expanded: false });

@@ -51,7 +51,7 @@ declare global {
       obstacles(): Array<{ id: string; dir: Vec; minAngle: number }>;
       teleport(dir: Vec, heading: Vec): boolean;
       trace(on: boolean): WalkSample[]; // trace(true) 开始记、返回空数组；trace(false) 停下、返回记下的每一帧
-      feet(): { left: FootSample; right: FootSample; phase: number; amp: number }; // 两只脚：录屏脚本算着地时滑了多远
+      feet(): { left: FootSample; right: FootSample; phase: number; amp: number; bob: number; squash: number }; // 两只脚、身体颠的高度和伸缩：自查、录屏脚本算着地时滑了多远
     };
   }
 }
@@ -121,7 +121,8 @@ export function installWalkDebug(app: App, walk: WalkMode): void {
     feet: () => {
       const [l, r] = walk.character.gait.feet;
       const foot = (f: typeof l): FootSample => ({ planted: f.planted, pos: vec(f.pos), lift: f.lift });
-      return { left: foot(l), right: foot(r), phase: walk.character.gait.phase, amp: walk.character.gait.amp };
+      const g = walk.character.gait;
+      return { left: foot(l), right: foot(r), phase: g.phase, amp: g.amp, bob: g.bob, squash: g.squash };
     },
     trace: (on) => {
       const done = samples ?? [];

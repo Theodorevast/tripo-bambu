@@ -23,7 +23,7 @@ export const WALK = {
 export const WALK_ANIM = {
   // —— 步子 ——
   stepBase: 0.2, // 一步的长度 = stepBase + stepPerSpeed × 速度（夹在 stepMin..stepMax）：走得越快步子越大、步频也越高
-  stepPerSpeed: 0.11,
+  stepPerSpeed: 0.125,
   stepMin: 0.14,
   stepMax: 0.6,
   dutySlow: 0.62, // 慢走时一只脚着地的时间占一个周期的比例（> 0.5：有两只脚都着地的一小段）
@@ -34,8 +34,8 @@ export const WALK_ANIM = {
   settleError: 0.035, // 脚离站姿超过这么多（米；朝向差按 yawLever 折算）就要收一步
   yawLever: 0.12,
   turnStep: 0.55, // 原地转身：每转这么多弧度踩一步
-  lift: 0.045, // 抬脚高度 = lift + liftPerStep × 这一步的长度
-  liftPerStep: 0.12,
+  lift: 0.04, // 抬脚高度 = lift + liftPerStep × 这一步脚走的路程（全速时一步脚走约 1 米）
+  liftPerStep: 0.065,
   footPitch: 0.32, // 迈步时脚尖先朝下（脚跟先抬）、落地前脚尖翘起（脚跟先着地）
   lockAt: 0.8, // 迈步走完这么多以后不再改落点
   // —— 身体 ——
@@ -49,7 +49,8 @@ export const WALK_ANIM = {
   hipTwist: 0.1,
   leanSpeed: 0.07, // 全速时前倾
   leanAccel: 0.009, // 每 1 米/秒² 的加速度往前倾多少（减速往后仰）
-  leanTurn: 0.008, // 转弯时往里倾（每 1 米/秒² 的侧向加速度）
+  leanTurn: 0.015, // 转弯时往里倾（每 1 米/秒² 的侧向加速度）
+  tiltMax: 0.18, // 往里倾最多这么多
   leanMax: 0.3,
   sink: 0.03, // 起步、刹车时身体往下沉（米，加速度到 accelRef 时）：起步的预备、停下的回弹
   accelRef: 15,
@@ -68,7 +69,7 @@ export const WALK_ANIM = {
   idleSeconds: 2.8,
   // —— 涉水（水深到 WADE_DEPTH 时的量，浅一些按比例）——
   wadeStride: 0.12, // 步子长这么多（加上 WALK.wadeSlow 走慢了，步频明显慢下来）
-  wadeLift: 1.3, // 抬脚高度多这么多倍
+  wadeLift: 0.7, // 抬脚高度多这么多倍
   wadeArms: 0.3, // 手臂往外抬
   wadeLean: 0.06, // 往前倾一点
   // —— 减少动态效果：身体、手臂的幅度乘这个（脚步照走，不会变回滑行）——

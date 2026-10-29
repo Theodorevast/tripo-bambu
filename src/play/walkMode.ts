@@ -148,7 +148,10 @@ export class WalkMode {
         await this.app.world.stage.precompile(this.character.model);
         this.ready = true;
         // 模型还没好就进了漫游：好了马上出场
-        if (this.active && this.entry) this.character.show(this.entry.planet.group);
+        if (this.active && this.entry) {
+          this.character.resetGait(this.walker); // 脚的站姿按模型重新算过：站回去
+          this.character.show(this.entry.planet.group);
+        }
       })
       .catch((err: unknown) => console.error(err));
     return this.loading;

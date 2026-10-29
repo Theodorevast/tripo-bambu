@@ -91,6 +91,10 @@ const spots = await page.evaluate(async (id) => {
         let s = 0.25;
         while (s < 4.5 && !land(go(w, t, s))) s += 0.25;
         if (s < 1.5 || s >= 4.5) continue;
+        // 过了 w 往前还要有 4 米深一点的水（不是一条窄河，下了水能多走一会儿）
+        let deep = true;
+        for (let k = 0.5; k <= 4.5 && deep; k += 0.5) deep = sea - h(go(w, t.map((x) => -x), k)) > 0.12;
+        if (!deep) continue;
         const start = go(w, t, s + 1.5);
         if (!land(start) || !clear(start, 4)) continue;
         // 起点切向朝着水（w 方向）

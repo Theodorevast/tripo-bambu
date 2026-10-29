@@ -29,6 +29,8 @@ export interface FootState {
   height: number; // 这一步抬多高
   stride: number; // 这一步水平走多远
   skip: boolean; // 这个周期不用迈（站着、脚已经在站姿上）
+  readonly groundDir: THREE.Vector3; // 上次算地面高度的方向和结果（落点没怎么挪就不再算）
+  groundR: number;
 }
 
 function makeFoot(side: 1 | -1): FootState {
@@ -37,6 +39,7 @@ function makeFoot(side: 1 | -1): FootState {
     anchor: new THREE.Vector3(), anchorFwd: new THREE.Vector3(0, 0, 1), target: new THREE.Vector3(), targetFwd: new THREE.Vector3(0, 0, 1),
     pos: new THREE.Vector3(), fwd: new THREE.Vector3(0, 0, 1),
     lift: 0, pitch: 0, swing: 0, pLift: 0, height: 0, stride: 0, skip: false,
+    groundDir: new THREE.Vector3(), groundR: 1,
   };
 }
 
@@ -124,6 +127,7 @@ export class Gait {
       f.skip = false;
       f.pos.copy(f.anchor);
       f.fwd.copy(w.facing);
+      f.groundDir.set(0, 0, 0); // 可能换了星球：地面高度重新算
     }
     this.resting = true;
     this.amp = 0;
@@ -228,11 +232,16 @@ export class Gait {
     }
     // 包络：有脚在迈步时按这一步的长度淡入，没在迈就淡出
     let target = 0;
-    for (const f of this.feet) if (!f.planted) target = Math.max(target, clamp(f.stride / (A.stepBase + A.stepPerSpeed * WALK.speed), 0.3, 1));
+    // 脚一步走的路程是两个步长（一个周期）：按全速时的那么长算满
+    const full = 2 * clamp(A.stepBase + A.stepPerSpeed * WALK.speed, A.stepMin, A.stepMax);
+    for (let i = 0; i < 2; i++) {
+      const f = this.feet[i];
+      if (!f.planted) target = Math.max(target, clamp(f.stride / full, 0.3, 1));
+    }
     this.amp += (target - this.amp) * damp(target > this.amp ? 10 : 5, dt);
     // 加速度带出来的前倾、侧倾、下沉（弹簧）
     const leanTarget = clamp(A.leanSpeed * (w.velocity.dot(facing) / WALK.speed) + A.leanAccel * along + A.wadeLean * this.wade, -A.leanMax, A.leanMax);
-    const tiltTarget = clamp(A.leanTurn * side, -A.leanMax, A.leanMax);
+    const tiltTarget = clamp(A.leanTurn * side, -A.tiltMax, A.tiltMax);
     const sinkTarget = -A.sink * Math.min(1, Math.hypot(along, side) / A.accelRef);
     springStep(this.lean, leanTarget, A.leanSpring, A.leanDamping, dt);
     springStep(this.tilt, tiltTarget, A.leanSpring, A.leanDamping, dt);
@@ -291,7 +300,12 @@ export class Gait {
     if (speed > 1e-4) f.target.addScaledVector(w.velocity, tau + reach);
     const r = f.target.length();
     _n.copy(f.target).divideScalar(r);
-    f.target.copy(_n).multiplyScalar(w.ground(_n));
+    // 地面高度：落点挪得不到 1 厘米就用上次算的（匀速走时落点不动，不用每帧算一次噪声）
+    if (f.groundDir.distanceToSquared(_n) * r * r > 1e-4) {
+      f.groundDir.copy(_n);
+      f.groundR = w.ground(_n);
+    }
+    f.target.copy(_n).multiplyScalar(f.groundR);
   }
 
   // 脚的站姿在星球上的位置（面朝 facing）写进 out
@@ -307,7 +321,8 @@ export class Gait {
   // 两只脚离站姿最远的那只差多少（位置 + 朝向折算）
   private maxError(w: Walker): number {
     let worst = 0;
-    for (const f of this.feet) {
+    for (let i = 0; i < 2; i++) {
+      const f = this.feet[i];
       if (!f.planted) continue;
       _q.crossVectors(w.dir, w.facing);
       const rest = this.rest[f.side === 1 ? 0 : 1];
@@ -330,7 +345,8 @@ export class Gait {
       const f = this.feet[i];
       w.positionInto(_v).sub(f.anchor);
       const behind = _v.dot(w.velocity); // 越大越落在后面
-      const score = behind + this.rest[i].x * Math.sign(-this.omega) * 0.01;
+      // 原地往左转先迈左脚（往右转先迈右脚）
+      const score = behind + this.rest[i].x * Math.sign(this.omega) * 0.01;
       if (score > bestScore) {
         bestScore = score;
         best = i;
@@ -358,7 +374,8 @@ export class Gait {
     _v.copy(f.targetFwd).addScaledVector(_n, -f.targetFwd.dot(_n)).normalize();
     spin(f.fwd, _n, signedAngle(f.fwd, _v, _n) * e);
     // 脚尖：前半段朝下（脚跟先抬），后半段翘起（脚跟先着地）
-    const pitch = -Math.sin(TAU * t) * A.footPitch * Math.min(1, f.stride / 0.25) * (0.6 + 0.4 * motion);
+    // 小碎步（原地转身、收脚）脚尖几乎不翘：鞋很长，脚尖朝下一点脚踝就得抬很高
+    const pitch = -Math.sin(TAU * t) * A.footPitch * Math.min(1, f.stride / 0.6) * (0.6 + 0.4 * motion);
     const clear = pitch < 0 ? this.toe * Math.sin(-pitch) : this.heel * Math.sin(pitch);
     f.pitch = pitch;
     f.lift = Math.max(f.height * Math.sin(Math.PI * t), clear + 0.005 * Math.sin(Math.PI * t));
