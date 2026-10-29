@@ -139,21 +139,51 @@ try {
     await shot(page, 'launch-step');
   });
 
-  await step('Launch：窗口收起、新星球从云里升起来飞进星系、镜头跟过去、进星球；最长帧间隔 ≤ 50 ms', async () => {
-    await page.evaluate(() => { window.__gaps = []; window.__phases = []; const tick = () => { const s = window.__create.state().launch.phase; if (window.__phases.at(-1) !== s) window.__phases.push(s); if (!document.querySelector('#app')?.dataset.planetReady) requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
+  await step('Launch：窗口收起 → 对准落点 → 蓄力（云打旋、原来的你的星球让开）→ 冲出来 → 落定 → 回首页停在新星球上；最长帧间隔 ≤ 33 ms', async () => {
+    await page.evaluate(() => {
+      window.__gaps = [];
+      window.__phases = [];
+      const tick = () => {
+        const s = window.__create.state().launch.phase;
+        if (window.__phases.at(-1) !== s) window.__phases.push(s);
+        if (!(s === 'home' && !window.__world.rig.flying)) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
     const t0 = Date.now();
     await page.locator('.cp-next').click();
-    // 量帧期间不截图（DPR 2 的截图本身会让页面停一下）：升起来的样子看录像（scripts/record-create.mjs）
-    await planetReady(page, ID);
+    // 量帧期间不截图（DPR 2 的截图本身会让页面停一下）：冲出来的样子看录像（scripts/record-create.mjs）
+    await until(page, '冲出来、落定、回到首页', () => window.__create.state().launch.phase === 'home' && !window.__world.rig.flying && !window.__world.rig.drive && location.hash === '#/' && window.__app.routeIdle(), null, 60000);
     const total = Date.now() - t0;
     const r = await page.evaluate(() => ({ gaps: window.__gaps, phases: window.__phases }));
     await page.evaluate(() => { window.__gaps = null; });
     const max = Math.max(...r.gaps);
-    numbers.push(`Launch → 星球就绪 ${total} ms，${r.gaps.length} 帧，帧间隔 p50 ${pct(r.gaps, 0.5).toFixed(1)} / p95 ${pct(r.gaps, 0.95).toFixed(1)} / 最长 ${max.toFixed(1)} ms（${WEBGL2 ? 'WebGL2' : 'WebGPU'}，DPR ${DPR}）`);
-    check('Launch 以后最长帧间隔 ≤ 50 ms', max <= 50, `${max.toFixed(1)} ms`);
-    check('经过了「升起来」那一段', r.phases.includes('rise') && r.phases.includes('enter'), r.phases.join(' → '));
-    const s = await page.evaluate(() => ({ title: document.querySelector('.tb-name')?.textContent, edit: !document.querySelector('.topbar button.primary')?.hidden, you: window.__home?.state().you, created: JSON.parse(localStorage.getItem('gbn:v1:planets') ?? '{}').created?.team?.id }));
-    check('进了新星球：标题是团队名、能编辑、它是你的星球、存进了本地', s.title === NAME && s.edit && s.you === ID && s.created === ID, JSON.stringify(s));
+    numbers.push(`Launch → 回到首页 ${total} ms，${r.gaps.length} 帧，帧间隔 p50 ${pct(r.gaps, 0.5).toFixed(1)} / p95 ${pct(r.gaps, 0.95).toFixed(1)} / 最长 ${max.toFixed(1)} ms（${WEBGL2 ? 'WebGL2' : 'WebGPU'}，DPR ${DPR}）`);
+    check('Launch 以后最长帧间隔 ≤ 33 ms（两帧）', max <= 33.5, `${max.toFixed(1)} ms`);
+    const order = ['aim', 'charge', 'burst', 'settle', 'home'].map((x) => r.phases.indexOf(x));
+    check('依次经过：对准 → 蓄力 → 冲出来 → 落定 → 回首页', order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), r.phases.join(' → '));
+    const h = await page.evaluate((id) => {
+      const w = window.__world;
+      const e = w.planets.get(id);
+      const slot = w.slotOf(e);
+      const old = w.planets.get('lumen-guild');
+      return {
+        you: window.__home.state().you,
+        tag: window.__home.state().tags.find((t) => t.id === id)?.you ?? false,
+        tier: slot?.tier,
+        atSlot: slot ? e.planet.group.position.distanceTo(e.home.clone().set(...slot.pos)) : -1,
+        oldTier: old ? w.slotOf(old)?.tier : null,
+        created: JSON.parse(localStorage.getItem('gbn:v1:planets') ?? '{}').created?.team?.id,
+      };
+    }, ID);
+    check('落在你的位置上：名牌写 You、停在自己那一格；原来的你的星球让开了；存进了本地', h.you === ID && h.tag && h.tier === 'you' && h.atSlot >= 0 && h.atSlot < 1 && h.oldTier !== 'you' && h.created === ID, JSON.stringify(h));
+    await page.waitForTimeout(600);
+    await shot(page, 'landed-home');
+    // 从首页进这颗星球：Visit your planet
+    await page.locator('.topbar .tb-visit').click();
+    await planetReady(page, ID);
+    const s = await page.evaluate(() => ({ title: document.querySelector('.tb-name')?.textContent, edit: !document.querySelector('.topbar button.primary')?.hidden }));
+    check('Visit your planet 进了新星球：标题是团队名、能编辑', s.title === NAME && s.edit, JSON.stringify(s));
     await page.waitForTimeout(400);
     await shot(page, 'landed');
   });
@@ -219,7 +249,7 @@ try {
   await context.close();
 
   // —— 减少动态效果：淡入淡出，镜头不飞 ——
-  await step('减少动态效果：窗口淡入淡出，Launch 以后不飞、不升，转场是淡入淡出；最长帧间隔 ≤ 50 ms', async () => {
+  await step('减少动态效果：窗口淡入淡出，Launch 以后不飞、不冲、不抖：云色的幕淡入淡出，回到首页；最长帧间隔 ≤ 33 ms', async () => {
     const { context: c, page: p } = await open('减少动态效果', { reduced: true });
     await p.goto(`${base}/${QUERY}#/create`);
     await ready(p);
@@ -233,21 +263,28 @@ try {
       await stepIs(p, id);
     }
     await until(p, '替身备好', () => window.__create.state().twinReady, null, 30000);
-    await p.evaluate(() => { window.__gaps = []; window.__kinds = []; const tick = () => { const k = window.__trans?.state().transition?.kind; if (k && window.__kinds.at(-1) !== k) window.__kinds.push(k); if (!document.querySelector('#app')?.dataset.planetReady) requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
-    await p.locator('.cp-next').click();
-    await planetReady(p, 'quiet-comets');
-    const r = await p.evaluate(() => ({ gaps: window.__gaps, kinds: window.__kinds, phase: window.__create.state().launch.phase }));
-    const max = Math.max(...r.gaps);
-    numbers.push(`减少动态效果：Launch → 星球就绪最长帧间隔 ${max.toFixed(1)} ms，转场 ${r.kinds.join(', ')}`);
-    check('减少动态效果：转场是 fade、没有升起来那一段', r.kinds.length > 0 && r.kinds.every((k) => k === 'fade'), r.kinds.join(', '));
-    check('减少动态效果：最长帧间隔 ≤ 50 ms', max <= 50, `${max.toFixed(1)} ms`);
-    await p.waitForTimeout(1200); // 首页加星球时的镜头飞行（0.9 秒）要是还在飞，会把镜头拉回星系：等它飞完再看
-    const cam = await p.evaluate(() => {
-      const w = window.__world;
-      const e = w.planets.get('quiet-comets');
-      return w.rig.camera.position.distanceTo(e.home) / e.planet.radius;
+    await p.evaluate(() => {
+      window.__gaps = [];
+      window.__veil = false;
+      window.__phases = [];
+      const tick = () => {
+        if (document.querySelector('.cp-veil')) window.__veil = true;
+        const s = window.__create.state().launch.phase;
+        if (window.__phases.at(-1) !== s) window.__phases.push(s);
+        if (!(s === 'home' && !document.querySelector('.cp-veil'))) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
     });
-    check('减少动态效果：落地以后镜头在新星球前面（约 2.8 个半径）', Math.abs(cam - 2.8) < 0.3, `${cam.toFixed(2)} 个半径`);
+    await p.locator('.cp-next').click();
+    await until(p, '幕淡入淡出以后回到首页', () => window.__create.state().launch.phase === 'home' && !document.querySelector('.cp-veil') && location.hash === '#/' && window.__app.routeIdle(), null, 60000);
+    const r = await p.evaluate(() => ({ gaps: window.__gaps, veil: window.__veil, phases: window.__phases }));
+    const max = Math.max(...r.gaps);
+    numbers.push(`减少动态效果：Launch → 回到首页最长帧间隔 ${max.toFixed(1)} ms（${r.phases.join(' → ')}）`);
+    check('减少动态效果：云色的幕淡入淡出，没有蓄力、冲出来、落定', r.veil && !r.phases.some((x) => x === 'charge' || x === 'burst' || x === 'settle'), r.phases.join(' → '));
+    check('减少动态效果：最长帧间隔 ≤ 33 ms（两帧）', max <= 33.5, `${max.toFixed(1)} ms`);
+    await p.waitForTimeout(1200); // 首页加星球时的镜头飞行（0.9 秒）要是没被接管住，会在这时把镜头带走：等一下再看
+    const cam = await p.evaluate(() => ({ drive: !!window.__world.rig.drive, flying: window.__world.rig.flying, you: window.__home.state().you }));
+    check('减少动态效果：镜头交回首页、新星球是你的星球', !cam.drive && !cam.flying && cam.you === 'quiet-comets', JSON.stringify(cam));
     await c.close();
   });
 
@@ -291,8 +328,8 @@ try {
     check('Tab 一直在窗口里循环', await p.evaluate(() => !!document.activeElement?.closest('section.creator')));
     for (let i = 0; i < 30 && !(await p.evaluate(() => document.activeElement?.classList.contains('cp-next'))); i++) await p.keyboard.press('Tab');
     await p.keyboard.press('Enter');
-    await planetReady(p, 'key-board-club');
-    check('只用键盘建好并进了新星球', true);
+    await until(p, '只用键盘 Launch：冲出来以后回到首页', () => window.__create.state().launch.phase === 'home' && !window.__world.rig.flying && window.__home.state().you === 'key-board-club', null, 60000);
+    check('只用键盘建好了新星球（冲出来、回到首页，它是你的星球）', true);
     await c.close();
   });
 

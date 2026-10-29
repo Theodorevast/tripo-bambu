@@ -57,7 +57,7 @@ async function shoot(n = 1) {
   for (let i = 0; i < n; i++) {
     await step();
     await page.screenshot({ path: path.join(dir, `f-${String(frame).padStart(4, '0')}.png`) });
-    const s = await page.evaluate(() => ({ launch: window.__create?.state().launch.phase ?? '', trans: window.__trans.state().transition?.kind ?? '', ready: document.querySelector('#app')?.dataset.planetReady ?? '' }));
+    const s = await page.evaluate(() => ({ launch: window.__create?.state().launch.phase ?? '', trans: window.__trans.state().transition?.kind ?? '', ready: document.querySelector('#app')?.dataset.planetReady ?? '', flying: window.__world.rig.flying }));
     phases.push(s);
     frame++;
   }
@@ -149,6 +149,7 @@ for (let i = 0; i < 900; i++) {
   await shoot();
   const s = phases.at(-1);
   if (s.ready && !(await page.evaluate(() => window.__trans.state().transition))) break;
+  if (s.launch === 'home' && !s.flying) break; // 回首页的那一下飞完了
 }
 await shoot(60);
 mark('end');
@@ -163,7 +164,7 @@ const firstOf = (fn, offset = 0) => {
   return i < 0 ? null : Math.min(frame - 1, i + offset);
 };
 const keys = {
-  home: marks.home + 20,
+  start: marks.home + 20,
   open: marks.open + 20,
   name: marks.name + 10,
   look: marks.colour + 10,
@@ -171,11 +172,13 @@ const keys = {
   crew: marks.crew,
   'launch-step': marks['launch-step'] + 10,
   collapse: marks.launch + 16,
-  approach: firstOf((p) => p.launch === 'approach', 30),
-  emerge: firstOf((p) => p.launch === 'rise', 30),
-  rising: firstOf((p) => p.launch === 'rise', 70),
-  settled: firstOf((p) => p.launch === 'settle', 10),
-  'cloud-punch': firstOf((p) => p.trans === 'enter', 45),
+  aim: firstOf((p) => p.launch === 'aim', 40),
+  charge: firstOf((p) => p.launch === 'charge', 22),
+  burst: firstOf((p) => p.launch === 'burst', 6),
+  'burst-2': firstOf((p) => p.launch === 'burst', 18),
+  settle: firstOf((p) => p.launch === 'settle', 14),
+  hold: firstOf((p) => p.launch === 'hold', 20),
+  'back-home': firstOf((p) => p.launch === 'home', 40),
   landed: frame - 20,
 };
 const out = path.join(OUT, `create-${tag}.mp4`);
