@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Community Planets · 第一版 / 第二版</title>
+<style>
+@font-face { font-family: 'Cinzel'; src: url('fonts/Cinzel-var.woff2') format('woff2'); font-weight: 400 900; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('fonts/CormorantGaramond-var.woff2') format('woff2'); font-weight: 300 700; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('fonts/CormorantGaramond-italic-var.woff2') format('woff2'); font-weight: 300 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('fonts/Inter-var.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+:root { --midnight: #0f1530; --indigo: #1b2348; --dusk: #3a3866; --gold: #d8c08e; --gold-deep: #a8894f; --star: #f6f1e7; --ivory: #efe8db; --mauve: #6f6488; }
+* { box-sizing: border-box; }
+html { background: var(--midnight); }
+body { margin: 0; color: var(--star); font-family: 'Cormorant Garamond', Georgia, serif; font-size: 19px; line-height: 1.6;
+  background: radial-gradient(ellipse at 50% -10%, rgba(58, 56, 102, 0.55), transparent 60%), linear-gradient(180deg, var(--midnight) 0%, var(--indigo) 55%, var(--midnight) 100%); min-height: 100vh; }
+.wrap { max-width: 1680px; margin: 0 auto; padding: 72px 48px 96px; }
+.hero { text-align: center; margin-bottom: 72px; }
+.hero .kicker { font-family: 'Inter', sans-serif; font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--gold); }
+.hero h1 { font-family: 'Cinzel', serif; font-weight: 500; font-size: 44px; letter-spacing: 0.16em; text-transform: uppercase; margin: 18px 0 10px; }
+.hero .tag { font-style: italic; font-size: 24px; color: rgba(246, 241, 231, 0.82); margin: 0; }
+.rule { display: flex; align-items: center; gap: 14px; justify-content: center; margin: 28px auto 0; max-width: 520px; }
+.rule::before, .rule::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold), transparent); opacity: 0.7; }
+.rule span { color: var(--gold); font-size: 14px; }
+.legend { display: flex; justify-content: center; gap: 40px; margin-top: 26px; font-family: 'Inter', sans-serif; font-size: 13px; letter-spacing: 0.12em; color: rgba(246, 241, 231, 0.7); }
+.pair { margin: 0 0 84px; }
+.pair header { display: flex; align-items: baseline; gap: 18px; border-bottom: 1px solid rgba(216, 192, 142, 0.35); padding-bottom: 10px; margin-bottom: 18px; }
+.pair .no { font-family: 'Inter', sans-serif; font-size: 12px; letter-spacing: 0.2em; color: var(--gold-deep); }
+.pair h2 { font-family: 'Cinzel', serif; font-weight: 500; font-size: 22px; letter-spacing: 0.16em; text-transform: uppercase; margin: 0; }
+.pair .zh, .mob .zh { margin: 0; font-size: 18px; color: rgba(246, 241, 231, 0.75); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+figure { margin: 0; position: relative; border: 1px solid rgba(216, 192, 142, 0.32); border-radius: 4px; overflow: hidden; background: rgba(15, 21, 48, 0.6); }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { display: block; padding: 7px 12px; font-family: 'Inter', sans-serif; font-size: 11px; letter-spacing: 0.22em; color: var(--gold); background: rgba(15, 21, 48, 0.9); border-bottom: 1px solid rgba(216, 192, 142, 0.3); }
+figure.missing div { aspect-ratio: 16 / 10; display: grid; place-items: center; color: var(--mauve); font-family: 'Inter', sans-serif; letter-spacing: 0.2em; }
+.note { max-width: 1100px; margin: 16px 0 0; color: rgba(246, 241, 231, 0.88); }
+.mobiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.mob .two { gap: 10px; margin-top: 10px; }
+h3.section { font-family: 'Cinzel', serif; font-weight: 500; font-size: 26px; letter-spacing: 0.18em; text-transform: uppercase; text-align: center; margin: 96px 0 8px; }
+p.section-sub { text-align: center; font-style: italic; margin: 0 0 36px; color: rgba(246, 241, 231, 0.75); }
+table { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 14px; }
+th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid rgba(216, 192, 142, 0.22); vertical-align: top; }
+th { font-weight: 500; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); }
+td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.d { color: rgba(246, 241, 231, 0.7); }
+.tbd { color: var(--mauve); letter-spacing: 0.1em; }
+.foot { margin-top: 22px; font-family: 'Inter', sans-serif; font-size: 12px; line-height: 1.7; color: rgba(246, 241, 231, 0.6); }
+@media (max-width: 900px) { .wrap { padding: 40px 16px 64px; } .two { grid-template-columns: 1fr; } .mobiles { grid-template-columns: 1fr; } .hero h1 { font-size: 30px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="kicker">Version One · Version Two</div>
+    <h1>Community Planets</h1>
+    <p class="tag">第一版 · 第二版 —— 从绘本里的白天，到午夜的天文台</p>
+    <div class="rule"><span>✦</span></div>
+    <div class="legend"><span>左：第一版（int/v6）</span><span>右：第二版（v2-medieval）</span><span>同样的画面、同样的时刻 · ?nolocal</span></div>
+  </div>
+<section class="pair">
+  <header><span class="no">01</span><h2>Loading</h2><p class="zh">启动画面</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-01-boot.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-01-boot.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">奶油色的卡通云和像素翠宝，换成夜空渐变和满天细星：正中是一个细金色的天体仪环（里面是 Tripo 的标志），标题用 Cinzel 大写、字距拉开，「Gathering planets…」用 Cormorant 斜体，三个阶段前面的小图标是月相。打开页面的第一眼就是「午夜的天文台」，不再是玩具感。</p>
+</section>
+<section class="pair">
+  <header><span class="no">02</span><h2>Galaxy · Front</h2><p class="zh">首页正面</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-02-home.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-02-home.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">星系浮在夜空里：云海压成一层冷灰紫、低对比的月光云（只做舞台），云缝里透出满天细星，空气里飘着很稀的星屑，右上角一弯月牙。旋臂的星尘换成香槟金和星光白；你的星球周围三圈细金的天体仪环，同一条旋臂上的星球连成淡淡的星座线；云朵翠宝换成用星点和细线画的「星座翠宝」。标题卡片是深靛蓝半透明面板配细金边，名牌去掉了胶囊底，Cinzel 的星球名。用户说第一版「太幼稚」：去掉奶油色的云和饱和的暖黄，换成成熟、克制的夜色和细金线。</p>
+</section>
+<section class="pair">
+  <header><span class="no">03</span><h2>Galaxy · Turned</h2><p class="zh">首页侧面（转 90°）</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-03-home-side.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-03-home-side.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">镜头绕星系转过去：星空跟着转，月亮钉在画面上的一个位置、不挡星系。星球降了饱和、更哑光，背光一侧带一道冷色边光，从夜色里跳出来；天体仪环跟着你的星球慢慢转。</p>
+</section>
+<section class="pair">
+  <header><span class="no">04</span><h2>Coupon</h2><p class="zh">领券窗口</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-04-claim.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-04-claim.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">点右下角的翠宝吐券：卡通票根换成一张烫金卡片，深色底配金线，面额用衬线字；Tripo 黄只留在品牌标志和「Claim on Tripo」按钮上，面积很小。品牌要露出，但要体面。（券是随机的，两边抽到的不是同一张。）</p>
+</section>
+<section class="pair">
+  <header><span class="no">05</span><h2>Planet</h2><p class="zh">星球页</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-05-planet.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-05-planet.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">默认的光换成「蓝调时刻」：主光冷白、天光偏冷，背光一侧一道冷色补光让星球的轮廓从云海里跳出来，近处不起雾。地表换成大地色（Sage、Moss、Stone），草不再是荧光绿，水偏灰蓝；展台换成石座加一圈细金，路边立着几盏石灯柱。作品区域的平均亮度约是第一版的九成，作品依然是主角。</p>
+</section>
+<section class="pair">
+  <header><span class="no">06</span><h2>Hop</h2><p class="zh">跳星球的转场（中间那一刻）</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-06-hop.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-06-hop.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">甩镜跳星球时盖住画面的云是月光下的冷灰紫；第一版扫过的一宽一窄两道翠宝黄光带，改成一条扫过的香槟金细线，后面跟着一串一闪一闪的星屑。节奏、时长、时刻都没变。</p>
+</section>
+<section class="pair">
+  <header><span class="no">07</span><h2>Walk</h2><p class="zh">漫游近景</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-07-walk.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-07-walk.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">走在星球上抬头是有星星和月牙的夜空，云海在月光下泛一圈很淡的银边；草是灰绿，土路上铺着磨圆的踏石，萤火虫是贴着草飞的细小暖白光点。轻中古只做点缀（石灯柱、立石、矮石塔），不要城堡。</p>
+</section>
+<section class="pair">
+  <header><span class="no">08</span><h2>Members</h2><p class="zh">Members</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-08-members.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-08-members.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">成员页从奶油色的卷轴换成画廊：深靛蓝面板、一圈细金边和四角的小星点，Cinzel 的标题；成员卡片是 Ivory 的底，头像框是克制的尖拱，名字用衬线字。没有厚投影、粗圆角和波浪下划线。</p>
+</section>
+<section class="pair">
+  <header><span class="no">09</span><h2>Museum</h2><p class="zh">Museum</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-09-museum.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-09-museum.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">作品墙换成画廊：深色面板上一排 Ivory 的作品卡，顶上尖拱，作品名用 Cormorant，编号和面数用很小的 Inter，像一本精装画册的排版。</p>
+</section>
+<section class="pair">
+  <header><span class="no">10</span><h2>Viewer</h2><p class="zh">作品查看器</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-10-viewer.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-10-viewer.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">查看器跟着画廊的样子：作品放在一块 Ivory 的展板上，旁边是深靛蓝、细金边的说明卡，作品名用 Cormorant，操作提示用 Inter 小字。</p>
+</section>
+<section class="pair">
+  <header><span class="no">11</span><h2>Create · Step 2</h2><p class="zh">造星窗口第 2 步（选样子）</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-11-create-look.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-11-create-look.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">造星的四个步骤用月相表示（新月 → 上弦 → 满月 → 下弦）；选样子这一步的五种星球是大地色，色块、开关、按钮都是细线和小圆角，预览框是一圈细金的环，不是糖果色。</p>
+</section>
+<section class="pair">
+  <header><span class="no">12</span><h2>Create · Launch</h2><p class="zh">造星：冲出来的那一刻</p></header>
+  <div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-12-create-burst.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-12-create-burst.jpg" alt="第二版" loading="lazy"></figure></div>
+  <p class="note">新星球从月光下的云海里冲出来，星尘是香槟金，远处挂着月亮；动作的节奏和第一版一样。</p>
+</section>
+  <h3 class="section">On a Phone</h3>
+  <p class="section-sub">390 × 844</p>
+  <div class="mobiles">
+<div class="mob"><p class="zh">首页</p><div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-m1-home.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-m1-home.jpg" alt="第二版" loading="lazy"></figure></div></div>
+<div class="mob"><p class="zh">星球页</p><div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-m2-planet.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-m2-planet.jpg" alt="第二版" loading="lazy"></figure></div></div>
+<div class="mob"><p class="zh">Museum</p><div class="two"><figure><figcaption>第一版</figcaption><img src="img/v1-m3-museum.jpg" alt="第一版" loading="lazy"></figure><figure><figcaption>第二版</figcaption><img src="img/v2-m3-museum.jpg" alt="第二版" loading="lazy"></figure></div></div>
+  </div>
+  <h3 class="section">Performance</h3>
+  <p class="section-sub">1440 × 900、像素比 2（画布 2880 × 1800）</p>
+  <table>
+    <thead><tr><th>项目</th><th>第一版</th><th>第二版</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>首页每帧 GPU 时间（p50，WebGPU）</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">每帧所有渲染加起来的 GPU 时间戳，取中位数</td></tr>
+      <tr><td>首页每帧 GPU 时间（p50，WebGL2）</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d"></td></tr>
+      <tr><td>首页静止帧间隔（中位 / 最长）</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">要求：平时 ≤ 17 ms，最长 ≤ 33 ms</td></tr>
+      <tr><td>进星球（穿云）最长帧</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">要求 ≤ 33 ms</td></tr>
+      <tr><td>跳星球最长帧</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">要求 ≤ 33 ms</td></tr>
+      <tr><td>回星系最长帧</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d"></td></tr>
+    </tbody>
+  </table>
+  <p class="foot">两版都是构建版（第一版 int/v6，第二版 v2-medieval），开页带 ?nolocal（种子里的占位作品）。
+  同一台机器上别的进程也在用 GPU、CPU：帧间隔偶尔会有一两帧长帧，出现的时刻每次不一样；GPU 时间是每帧所有渲染加起来的时间戳，取中位数。没量到的数字写「待测」。</p>
+  <p class="foot">另外，天空和后期（v2-sky）在同一个第二版构建里开关量过自己加的那部分（首页，2880 × 1800，每组 3 遍取中位数）：WebGPU 夜空 +0.179 ms、空气里的星屑 +0.002 ms、泛光 + 胶片颗粒 +0.058 ms，合计 +0.239 ms；WebGL2 合计 +0.250 ms。</p>
+</div>
+</body>
+</html>
