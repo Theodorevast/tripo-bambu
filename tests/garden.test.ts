@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 import { PIECE_IDS } from '../src/nature/decorKit';
-import { filterGarden, gardenCandidates, gardenReach, Gardens, vivid, type GardenGround, type GardenWork } from '../src/nature/decorGarden';
+import { filterGarden, GARDEN_V2, gardenCandidates, gardenReach, Gardens, vivid, type GardenGround, type GardenWork } from '../src/nature/decorGarden';
 
 // 作品四周的小花园（stage 角色）：布局按作品 id 定、过滤只看土路 / 水 / 邻居、横杆跟着柱子走、长出来和缩回去
 
@@ -24,9 +24,21 @@ describe('花园的布局', () => {
     expect(b).not.toEqual(a);
   });
 
-  it('有栅栏（柱子 + 横杆）、花、叶丛、灌木、踏脚石、团队色小旗和写着作者的路牌；没有作者就不立路牌', () => {
+  it('有栅栏（柱子 + 横杆）、花、叶丛、灌木、踏脚石和写着作者的路牌；没有作者就不立路牌；第二版默认没有团队色小旗（GARDEN_V2.flags）', () => {
     const kinds = new Set(gardenCandidates(work('w-1')).map(kind));
-    for (const k of ['post', 'rail', 'tuft', 'slab', 'flag', 'signpost', 'signface'] as const) expect(kinds.has(k)).toBe(true);
+    for (const k of ['post', 'rail', 'tuft', 'slab', 'signpost', 'signface'] as const) expect(kinds.has(k)).toBe(true);
+    expect(kinds.has('flag')).toBe(GARDEN_V2.flags);
+    GARDEN_V2.flags = true;
+    try {
+      const flagged = gardenCandidates(work('w-1'));
+      expect(new Set(flagged.map(kind)).has('flag')).toBe(true);
+      // 旗子开不开，别的零件的位置都一样（随机数照样取）
+      const others = (xs: ReturnType<typeof gardenCandidates>) => xs.filter((it) => kind(it) !== 'flag').map((it) => `${kind(it)}:${it.x.toFixed(4)},${it.z.toFixed(4)}`);
+      GARDEN_V2.flags = false;
+      expect(others(gardenCandidates(work('w-1')))).toEqual(others(flagged));
+    } finally {
+      GARDEN_V2.flags = false;
+    }
     expect(['daisy', 'bell', 'pom'].some((k) => kinds.has(k as never))).toBe(true);
     expect(kinds.has('bush') || kinds.has('bloom')).toBe(true);
     const unsigned = new Set(gardenCandidates(work('w-1', north, null)).map(kind));

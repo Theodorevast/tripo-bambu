@@ -892,10 +892,11 @@ export function createGrassField(opts: GrassOptions): GrassField {
       const r = length(uv);
       const a = uv.y.atan(uv.x);
       const kind = vKind;
-      const white = vec3(0.92, 0.9, 0.84);
-      const yellow = vec3(0.98, 0.72, 0.08);
-      const centre = vec3(0.95, 0.62, 0.05);
-      const lilac = vec3(0.36, 0.22, 0.72);
+      // 第二版 [v2-world]：花色退到灰调里——象牙白、淡香槟（不是明黄）、古金色的花心、灰紫（不是亮紫）
+      const white = vec3(0.84, 0.8, 0.72);
+      const yellow = vec3(0.72, 0.58, 0.3);
+      const centre = vec3(0.6, 0.45, 0.18);
+      const lilac = vec3(0.36, 0.3, 0.46);
       // 雏菊：13 片花瓣，花心黄；毛茛：5 片圆花瓣；薰衣草：一串小花苞
       const daisyEdge = mix(0.55, 1.0, pow(abs(cos(a.mul(6.5))), 0.5));
       const butterEdge = mix(0.68, 1.0, pow(abs(cos(a.mul(2.5))), 0.7));

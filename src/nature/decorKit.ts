@@ -29,24 +29,27 @@ export interface GardenPiece {
 }
 
 // —— 配色（sRGB）——
+// 第二版 [v2-world]：花园也退到灰调里（不要糖果色）——花是象牙白、香槟、灰玫瑰、陶土、灰紫、石板蓝；
+// 栅栏、长椅是旧木头、石灰白、灰绿；石头是 Stone
 export const PALETTE = {
-  flowers: ['#fbf6ec', '#F2B705', '#f3a3b8', '#ef8f72', '#b9a3e8', '#a6cdf2'],
-  fences: ['#b9854e', '#efe6d4', '#a9bb8c', '#c99173'],
-  benches: ['#a8733f', '#e9dcc3', '#9db083'],
-  sign: '#c6935a',
-  stone: '#a3927a',
+  flowers: ['#ece6d8', '#d3c08f', '#c4a5a4', '#b39882', '#a99cb8', '#9fb0c2'],
+  fences: ['#8a7360', '#7d6e60', '#8d9c86', '#9a8a78'],
+  benches: ['#83695a', '#cbc2b1', '#7f8f78'],
+  sign: '#7d6a5a',
+  stone: '#8f8b84',
 };
 
 const c = (hex: string) => new THREE.Color(hex);
-const STEM = c('#4d7a2a');
-const LEAF_DARK = c('#365a1e');
-const LEAF = c('#5c8c30');
-const LEAF_LIGHT = c('#8fb64a');
-const BUSH_DARK = c('#1d3a0f');
-const BUSH_MID = c('#3b6a1b');
-const BUSH_LIGHT = c('#7cab2f');
-const BLOSSOM = c('#fff1e2');
-const CENTER = c('#F2B705');
+// 第二版：叶子、灌木是 Moss / Sage 的灰绿（第一版是亮黄绿），花瓣象牙白，花心古金色
+const STEM = c('#55654c');
+const LEAF_DARK = c('#3b4837');
+const LEAF = c('#56654f');
+const LEAF_LIGHT = c('#86957f');
+const BUSH_DARK = c('#25301f');
+const BUSH_MID = c('#43513d');
+const BUSH_LIGHT = c('#76856a');
+const BLOSSOM = c('#efe8db');
+const CENTER = c('#c2a25a');
 const WHITE = c('#ffffff');
 
 type ColorFn = (p: THREE.Vector3, n: THREE.Vector3) => THREE.Color;

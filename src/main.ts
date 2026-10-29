@@ -23,6 +23,7 @@ import { installTuneToggle } from './ui/tuneToggle';
 import { installCreatePlanet } from './ui/createPlanet';
 import { installCloudTriboo } from './scenes/homeCloudTriboo';
 import { installHomeTribooTune } from './scenes/homeTribooTune';
+import { installWorldV2 } from './scenes/worldV2';
 // 第二版的界面主题（午夜天文台：深色半透明面板、香槟金细线、衬线字）：放在所有 import 的最后，
 // 盖过 styles.css 和各模块自带的 CSS（cobrand、badge、coupons、createPlanet、walk）；旧的 CSS 文件不动
 import './ui/theme-v2.css';
@@ -46,6 +47,7 @@ const coupons = installCoupons(app, planetScreen, walk, editor); // 点翠宝吐
 installHomeTriboo(app, coupons, home); // 首页右下角躲着的翠宝（H2）：点它吐一张券，展开成领券窗口
 installCloudTriboo(world); // 首页翠宝元素①：云海上空一朵翠宝形状的云（scenes/homeCloudTriboo.ts；开场预热之前装上，一起编译）
 installHomeTribooTune(world); // ?tune → Home → Cloud Triboo / Stardust Triboo
+installWorldV2(world); // 第二版 [v2-world]：首页的天体仪环、星座线（scenes/worldV2.ts；开场预热之前装上，一起编译）
 installCreatePlanet(app, store); // P3：#/create 造星窗口、首页标题卡片的「Create a planet」接上 openCreatePlanet、新星球从云海升起来（ui/createPlanet*.ts）
 app.planetLayer = {
   enter: (team) => {

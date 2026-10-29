@@ -21,6 +21,7 @@ import { addCouponsTune } from './fun/couponsTune';
 import { COUPONS } from './fun/couponsMath';
 import { TuneShell, type TuneFolder } from './ui/tuneShell';
 import { createTuneParams, tuneCreate } from './ui/createPlanetTune';
+import { addWorldV2Tune } from './scenes/worldV2';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
 // 分组（I1 整理）：
@@ -179,6 +180,7 @@ export function installTune(world: World): TuneShell {
   addHomeTune(pane, world); // —— Home ——（scenes/homeTune.ts，H2：首页的版式、镜头、安静的云海、星球悬停和回弹、右边的翠宝）
   addTransitionTune(pane, world); // —— Transitions ——（scenes/transitionTune.ts：转场的分镜表、开场探头、演示按钮）
   addCouponsTune(pane); // —— Coupons ——（fun/couponsTune.ts：点翠宝吐券每一步的时长、券的飞行和寿命、捡券）
+  addWorldV2Tune(pane); // —— World v2 ——（scenes/worldV2.ts，第二版：天体仪环、星座线、中古点缀）
 
   // —— Camera ——（首页 = 星系视图的镜头在「Home」组里：H2 改成按版式取景）
   const cam = pane.addFolder({ title: 'Camera', expanded: false });

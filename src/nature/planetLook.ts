@@ -26,7 +26,9 @@ export const PLANET_LOOK = {
   cloudSpeed: 1, // 云层转动的速度倍数
   cloudShadow: 0.3, // 云影的深度
   seaShadow: 0.7, // 星系里星球在云海上的影子（浓度；首页的云海是暖奶油色，影子也偏暖、淡一点）
-  rimLight: 1, // 星系里星球朝阳一侧边缘的暖光（让星球从云海里跳出来）
+  rimLight: 0.6, // 星系里星球朝阳一侧边缘的暖光（让星球从云海里跳出来）。第二版收一点：1 → 0.6
+  coolRim: 1, // 第二版 [v2-world]：星系里背光一侧贴着轮廓的一道冷色边光（月光从背后勾出来的边）
+  coolRimColor: '#9fb4e8',
 };
 
 const U = {
@@ -41,6 +43,8 @@ const U = {
   cloudShadow: uniform(PLANET_LOOK.cloudShadow).setGroup(renderGroup),
   seaShadow: uniform(PLANET_LOOK.seaShadow).setGroup(renderGroup),
   rimLight: uniform(PLANET_LOOK.rimLight).setGroup(renderGroup),
+  coolRim: uniform(PLANET_LOOK.coolRim).setGroup(renderGroup),
+  coolRimColor: uniform(new THREE.Color(PLANET_LOOK.coolRimColor)).setGroup(renderGroup),
   haze: uniform(new THREE.Color(0.62, 0.6, 0.55)).setGroup(renderGroup), // 首页里「淡」往哪个颜色靠：地平线的雾色（线性、曝光前，跟着天空预设）
 };
 
@@ -59,6 +63,8 @@ export function applyPlanetLook(): void {
   U.cloudShadow.value = PLANET_LOOK.cloudShadow;
   U.seaShadow.value = PLANET_LOOK.seaShadow;
   U.rimLight.value = PLANET_LOOK.rimLight;
+  U.coolRim.value = PLANET_LOOK.coolRim;
+  U.coolRimColor.value.set(PLANET_LOOK.coolRimColor);
 }
 
 // 镜头离星球中心多远（× 星球半径）以内，云层、大气光晕、表面的空气都不画：
@@ -154,10 +160,13 @@ export function planetSurfaceLook(radius: number | F, offset: THREE.UniformNode<
   const rimEdge = pow(float(1).sub(saturate(dot(n, view))), 5);
   const rimSide = smoothstep(-0.1, 0.6, mu);
   const rim = vec3(1, 0.78, 0.5).mul(rimEdge.mul(rimSide).mul(far).mul(U.rimLight).mul(0.12));
+  // 第二版：背光一侧一道冷色的边光（比朝阳那道宽一点、淡一点），星球在夜空里有一圈月光勾出来的轮廓
+  const coolEdge = pow(float(1).sub(saturate(dot(n, view))), 3.5);
+  const cool = (U.coolRimColor as unknown as V3).mul(coolEdge.mul(float(1).sub(rimSide)).mul(far).mul(U.coolRim).mul(0.3));
   // 首页：这颗星球要淡多少（建设中的往天色里淡；按远看部件的 dim，星球视图里是 0）：地面颜色乘 1 − dim，再加上 dim 份的雾色
   const dim = partsByOffset.get(offset)?.dim ?? float(0);
-  const haze = hazeCol.add(rim).mul(float(1).sub(dim)).add(U.haze.mul(dim));
-  const darkLimb = float(1).sub(rimEdge.mul(float(1).sub(rimSide)).mul(far).mul(U.rimLight).mul(0.35));
+  const haze = hazeCol.add(rim).add(cool).mul(float(1).sub(dim)).add(U.haze.mul(dim));
+  const darkLimb = float(1).sub(rimEdge.mul(float(1).sub(rimSide)).mul(far).mul(U.rimLight).mul(0.2));
   return { shade: shade.mul(darkLimb).mul(float(1).sub(dim)), haze };
 }
 
@@ -207,7 +216,7 @@ function floatingRockMaterial(): THREE.MeshStandardNodeMaterial {
   const light = mix(float(0.62), float(1.12), smoothstep(-0.6, 0.8, facing));
   const moss = smoothstep(0.25, 0.75, facing).mul(smoothstep(0.32, 0.58, spots)).mul(0.9);
   const stone = instanceColor.mul(vec3(1.06, 1.0, 0.9)).mul(light.mul(spots.mul(0.25).add(0.87)));
-  m.colorNode = mix(stone, color('#5d7a2c').mul(light), moss);
+  m.colorNode = mix(stone, color('#56624c').mul(light), moss); // 第二版：苔藓是灰绿的 Moss，不是亮黄绿
   floatMaterial = m;
   return m;
 }
@@ -318,7 +327,7 @@ function scaffoldMaterial(): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.85, metalness: 0 });
   m.name = 'site-wood';
   const grain = valueNoise3(positionLocal.mul(vec3(2, 14, 2)));
-  m.colorNode = color('#9a6b42').mul(grain.mul(0.25).add(0.85));
+  m.colorNode = color('#8a7360').mul(grain.mul(0.25).add(0.85)); // 第二版：旧木头的灰褐
   woodMat = m;
   return m;
 }
@@ -662,6 +671,8 @@ export function installPlanetLookTune(folder: TuneFolder, rebuildRocks: () => vo
   sky.addBinding(GALAXY_DECOR, 'beltSpeed', { label: 'rock belt spin', min: 0, max: 5, step: 0.05 });
   sky.addBinding(PLANET_LOOK, 'seaShadow', { label: 'shadow on cloud sea', min: 0, max: 1.5, step: 0.01 });
   sky.addBinding(PLANET_LOOK, 'rimLight', { label: 'rim light (galaxy)', min: 0, max: 3, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'coolRim', { label: 'cool back rim (galaxy)', min: 0, max: 3, step: 0.01 });
+  sky.addBinding(PLANET_LOOK, 'coolRimColor', { label: 'cool rim colour' });
   const team = f.addFolder({ title: 'Team colours', expanded: false });
   team.addBinding(GROUND, 'teamCover', { label: 'cover (planet view)', min: 0, max: 1, step: 0.01 });
   team.addBinding(GROUND, 'teamCoverGalaxy', { label: 'cover (galaxy)', min: 0, max: 1, step: 0.01 });
