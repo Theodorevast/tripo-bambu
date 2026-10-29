@@ -3,7 +3,7 @@ import type { App, CreatorLayer } from '../app';
 import type { PlanetStore } from '../data/store';
 import type { PresetId, Team } from '../data/types';
 import { PRESETS, PRESET_IDS } from '../planet/presets';
-import { CloudBurst, riseIntoGalaxy, type LaunchState } from './createPlanetLaunch';
+import { CloudBurst, LaunchWarmer, riseIntoGalaxy, type LaunchState } from './createPlanetLaunch';
 import { buildTeam, charCount, checkFriend, checkMotto, checkName, DEFAULT_MOTTO, inviteLink, LIMITS, newDraft, PRESET_BLURBS, randomSeed, teamIdFor, TEAM_COLORS, type Captain, type Check, type Draft } from './createPlanetModel';
 import { PlanetPreview } from './createPlanetPreview';
 import { el, initials } from './dom';
@@ -36,7 +36,7 @@ const NAME_IDEAS = ['Star Sprouts', 'Pebble Party', 'Moonlit Makers', 'Tiny Orbi
 declare global {
   interface Window {
     __create?: {
-      state(): { open: boolean; step: string; launching: boolean; launch: LaunchState; previewReady: boolean };
+      state(): { open: boolean; step: string; launching: boolean; launch: LaunchState; previewReady: boolean; twinReady: boolean };
       preview(): PlanetPreview['stats'];
     };
   }
@@ -78,6 +78,7 @@ export class CreatePlanet implements CreatorLayer {
   private readonly live = el('p', { className: 'cp-live' });
   private readonly preview: PlanetPreview;
   private readonly burst = new CloudBurst();
+  private readonly warmer: LaunchWarmer; // 样子定下来以后，主画面的渲染器里先把新星球独有的着色器备好（Launch 时不卡）
   private burstReady: Promise<void> | null = null;
   // 第一步
   private readonly nameInput = el('input', { className: 'cp-input', id: 'cp-name', type: 'text', maxLength: LIMITS.nameMax, autocomplete: 'off', spellcheck: false, placeholder: 'e.g. Star Sprouts' });
@@ -118,12 +119,13 @@ export class CreatePlanet implements CreatorLayer {
     this.store = store;
     this.captain = captain;
     this.preview = new PlanetPreview(app.world);
+    this.warmer = new LaunchWarmer(app.world);
     this.buildWindow();
     app.root.append(this.node);
     this.syncCreateButton();
     window.__create = {
-      state: () => ({ open: this.open_, step: STEPS[this.step].id, launching: this.launching, launch: { ...this.launchState }, previewReady: this.preview.ready }),
-      preview: () => ({ ...this.preview.stats, gpu: [...this.preview.stats.gpu] }),
+      state: () => ({ open: this.open_, step: STEPS[this.step].id, launching: this.launching, launch: { ...this.launchState }, previewReady: this.preview.ready, twinReady: this.warmer.ready }),
+      preview: () => ({ ...this.preview.stats, gpu: [...this.preview.stats.gpu], twin: { ...this.warmer.stats } }),
     };
   }
 
@@ -610,6 +612,9 @@ export class CreatePlanet implements CreatorLayer {
     this.step = i;
     this.node.dataset.step = STEPS[i].id;
     if (STEPS[i].id === 'crew') this.refreshCrew();
+    // 离开「选样子」：预览不再在后台备别的预设；样子定了，主画面里先把这颗星球的着色器备好（见 LaunchWarmer）
+    this.preview.pauseWarm(i !== 1);
+    if (i >= 2) void this.warmer.warm(this.look());
     if (STEPS[i].id === 'launch') this.refreshSummary();
     this.refreshStepper();
     this.swapPages(from, to, forward);
@@ -663,8 +668,8 @@ export class CreatePlanet implements CreatorLayer {
       : id === 'look' ? this.presetInputs.get(this.draft.preset) ?? null
       : id === 'crew' ? this.copyButton
       : this.nextButton;
-    // 等进场动画开始以后（元素显示出来）再给焦点
-    requestAnimationFrame(() => focusQuietly(target));
+    // 马上给：这一页已经显示出来了（进场动画只动 transform / opacity）。晚一帧再给的话，紧跟着的按键会落到上一步的按钮上
+    focusQuietly(target);
   }
 
   // —— 键盘：Esc 关，Tab 在窗口里循环 ——
@@ -762,17 +767,24 @@ export class CreatePlanet implements CreatorLayer {
     this.launchState.phase = 'wait';
     this.say(`${created.name} is launching`);
     removeEventListener('keydown', this.onKey);
+    this.preview.freeze();
     await this.burstReady;
     const collapse = this.collapse();
-    // 星球马上加进星系、开始在后台准备（编译着色器），和窗口收起同时进行；窗口收得差不多了镜头才起飞
-    const hold = new Promise((r) => setTimeout(r, reducedMotion() ? 0 : 360));
+    // 替身一般进第三步时就备好了；还在编（很快就点了 Launch）就先等它编完（最多 1.5 秒，窗口照常收起），
+    // 真的星球再加进来：两边的着色器不挤在一起编。镜头等窗口收得差不多、预览手上正在编的也编完了才起飞
+    // （WebGL2 上预览的链接会和主画面抢 GPU 进程）
+    const t0 = performance.now();
+    await Promise.race([this.warmer.warm(this.look()), new Promise((r) => setTimeout(r, 1500))]);
+    const rest = Math.max(0, (reducedMotion() ? 0 : 360) - (performance.now() - t0));
+    const hold = Promise.all([new Promise((r) => setTimeout(r, rest)), this.preview.settled()]);
     const rise = riseIntoGalaxy(this.app, created, reducedMotion() ? null : this.burst, this.launchState, hold);
     this.syncCreateButton();
     await collapse;
     this.node.hidden = true;
     this.open_ = false;
-    this.preview.dispose(); // 每个浏览器只建一颗：预览不会再用，放掉它的渲染器
+    this.preview.release(); // 每个浏览器只建一颗：预览不会再用，星球一颗颗放掉（渲染器不销毁，见 release）
     await rise;
+    setTimeout(() => this.warmer.release(), 2500); // 真的星球画上了：替身放掉
     this.launching = false;
     toast(saved ? `Welcome to ${created.name}! Press Edit to decorate it.` : `Welcome to ${created.name}! This browser can't save it, so it lasts until you close the tab.`, 4200);
   }

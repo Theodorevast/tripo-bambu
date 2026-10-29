@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import type { App } from '../app';
 import type { Team } from '../data/types';
 import { blendPalette, clonePalette, PRESETS, RAIN_MIX, RAIN_PALETTE } from '../nature/atmosphere';
+import { PlanetObject } from '../planet/planetObject';
 import type { PlanetEntry, World } from '../scenes/world';
 import { reducedMotion } from './motion';
 
@@ -52,6 +53,95 @@ export function bezier(out: V3, a: V3, c: V3, b: V3, u: number): V3 {
 // 云海平均的云顶高度（世界 y）：星球在云海上投影子的那一层（atmosphere.seaTop）
 export function cloudTopY(world: World): number {
   return world.atmosphere.seaTop;
+}
+
+// —— Launch 之前先备好新星球的着色器 ——
+// 新星球的大部分着色器和星系里同一种预设的星球一样（开场就编好了），只有大气外壳、小浮岛的着色器里写死了种子、团队色，
+// 是这颗星球独有的：Launch 时才编、才第一次画，WebGL2（ANGLE）上那一帧要停 30–70 ms。
+// 所以样子定下来以后（进第三步时），在主画面的渲染器里按同样的配方、颜色建一颗「替身」，在后台编好、先画一次（GatedStager.precompile）。
+// 管线按着色器代码共用（WebGL2 的 getRenderCacheKey 是空的，WebGPU 的只看渲染状态）：Launch 时真的那颗星球直接用现成的管线。
+// 替身不挂进场景；真的星球画上以后才放掉（放早了管线的引用数归零，跟着被删）
+export interface TwinLook {
+  preset: PlanetObject['currentRecipe']['preset'];
+  seed: number;
+  ring: boolean;
+  color: string;
+}
+
+export class LaunchWarmer {
+  private readonly world: World;
+  private twin: { key: string; planet: PlanetObject; ready: Promise<void> } | null = null;
+  private readonly spent: PlanetObject[] = []; // 样子又改了、换下来的替身：Launch 以后一起放掉
+  readonly stats = { builds: 0, warmMs: [] as number[] };
+  private readyKey: string | null = null; // 哪个样子的替身已经备好了
+
+  constructor(world: World) {
+    this.world = world;
+  }
+
+  warm(look: TwinLook): Promise<void> {
+    const key = [look.preset, look.seed, look.ring ? 1 : 0, look.color].join('|');
+    if (this.twin?.key === key) return this.twin.ready;
+    if (this.twin) this.spent.push(this.twin.planet);
+    const planet = new PlanetObject({ seed: look.seed, preset: look.preset, ring: look.ring, atmosphere: true, placements: [] }, look.color, false);
+    // 云海上的影子平时第一帧才建（updatePlanetLook）：先建出来，一起编（藏着的东西 compileAsync 会跳过，编的时候都显示出来）
+    planet.look.placeShadow(null, this.world.light.sunDir);
+    const hidden: THREE.Object3D[] = [];
+    planet.group.traverse((o) => {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    const t0 = performance.now();
+    this.stats.builds++;
+    const ready = this.world.stage.precompile(planet.group).catch((err: unknown) => console.warn('twin precompile failed', err)).then(() => {
+      for (const o of hidden) o.visible = false;
+      this.stats.warmMs.push(Math.round(performance.now() - t0));
+      this.readyKey = key;
+    });
+    this.twin = { key, planet, ready };
+    return ready;
+  }
+
+  // 现在这个样子的替身已经备好（自查脚本、Launch 前看）
+  get ready(): boolean {
+    return this.twin !== null && this.readyKey === this.twin.key;
+  }
+
+  // 真的星球已经画上了：替身一颗一颗放掉（只放它自己的几何、材质；和星系里别的星球共用的不动）
+  release(): void {
+    const all = [...this.spent, ...(this.twin ? [this.twin.planet] : [])];
+    this.spent.length = 0;
+    this.twin = null;
+    const keep = new Set<unknown>();
+    for (const e of this.world.planets.values()) {
+      e.planet.group.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        keep.add(mesh.geometry);
+        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) keep.add(m);
+      });
+    }
+    const next = () => {
+      const p = all.shift();
+      if (!p) return;
+      disposeOwn(p, keep);
+      setTimeout(next, 100);
+    };
+    next();
+  }
+}
+
+// 放掉一颗不再用的星球自己的东西：远看部件（从全局列表摘掉）、地表、水面……keep 里的（别的星球也在用的）不动
+export function disposeOwn(planet: PlanetObject, keep: Set<unknown>): void {
+  const meshes: THREE.Mesh[] = [];
+  planet.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh); });
+  planet.look.dispose();
+  for (const mesh of meshes) {
+    if (mesh.geometry && !keep.has(mesh.geometry)) mesh.geometry.dispose();
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m && !keep.has(m)) m.dispose();
+  }
 }
 
 // —— 冒出来时翻开的一圈云团 ——
