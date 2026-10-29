@@ -260,7 +260,7 @@ export function drawAtlas(canvas: HTMLCanvasElement): HTMLCanvasElement {
   return canvas;
 }
 
-// 卡片上的大券：按显示大小 × 像素比画（不糊）
+// 卡片上的大券：按显示大小 × 像素比画（不糊）。券的影子直接画在 canvas 里（不用 CSS 的 drop-shadow 滤镜：卡片出现那一帧不用现算模糊）
 export function drawCardTicket(canvas: HTMLCanvasElement, kind: CouponKind, cssWidth: number, dpr: number): void {
   const w = Math.round(cssWidth * dpr);
   const h = Math.round(w / 2);
@@ -268,6 +268,14 @@ export function drawCardTicket(canvas: HTMLCanvasElement, kind: CouponKind, cssW
   canvas.height = h;
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.shadowColor = 'rgba(70, 45, 15, 0.32)';
+  ctx.shadowBlur = 6 * dpr;
+  ctx.shadowOffsetY = 3 * dpr;
+  ticketPath(ctx, 0, 0, w, h, w / TICKET_W, false);
+  ctx.fillStyle = '#d9b46a';
+  ctx.fill();
+  ctx.restore();
   drawTicket(ctx, kind, 0, 0, w, h);
 }
 
