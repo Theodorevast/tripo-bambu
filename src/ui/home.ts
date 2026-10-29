@@ -47,6 +47,17 @@ export function installHome(app: App): HomeDebug {
   app.topbar.onVisitHover = (on) => app.galaxyUi.hoverTeam(on ? you : null);
   app.topbar.onCreate = openCreate;
   app.topbar.refreshVisit();
+  // 标题卡片多高（字体到了、窗口变了、加了联名标志都会变）：首页取景让开它
+  const title = app.root.querySelector<HTMLElement>('.tb-title');
+  if (title && typeof ResizeObserver !== 'undefined') {
+    const measure = () => {
+      if (title.dataset.home === undefined) return;
+      app.world.setHomeTop(title.getBoundingClientRect().bottom);
+    };
+    new ResizeObserver(measure).observe(title);
+    addEventListener('resize', measure);
+    measure();
+  }
   const debug: HomeDebug = {
     state: () => ({
       you,

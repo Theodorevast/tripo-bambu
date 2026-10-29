@@ -2,6 +2,7 @@ import './coupons.css';
 import { COUPON_KINDS, COUPONS_LIVE, type CouponTicket } from '../data/coupons';
 import { el } from '../ui/dom';
 import { TRIPO_URL } from '../ui/badge';
+import { cobrandLockup } from '../ui/cobrand';
 import { drawCardTicket } from './couponsArt';
 import { play } from './couponsAudio';
 
@@ -38,6 +39,7 @@ export class CouponCard {
   private readonly use: HTMLAnchorElement;
   private readonly claim: HTMLAnchorElement; // 首页领券窗口的大按钮（链接，不是 window.open）
   private readonly claimNote: HTMLParagraphElement;
+  private readonly cobrand: HTMLDivElement; // 领券窗口顶上的联名小标志（tripo × MakerWorld）
   private modeNow: CardMode = 'code';
   private current: CouponTicket | null = null;
   private state: 'closed' | 'pending' | 'open' | 'closing' = 'closed';
@@ -71,8 +73,9 @@ export class CouponCard {
     this.status.setAttribute('role', 'status');
     this.status.setAttribute('aria-live', 'polite');
     this.codeRow = el('div', { className: 'cc-code-row' }, this.code, this.copyButton);
+    this.cobrand = el('div', { className: 'cc-cobrand' }, cobrandLockup('sm'));
     this.fold = el('div', { className: 'cc-fold' },
-      this.title, this.value, this.blurb,
+      this.cobrand, this.title, this.value, this.blurb,
       this.codeRow,
       sample, use, this.claim, this.claimNote, this.status);
     const close = el('button', { className: 'cc-close', type: 'button', textContent: '×' });
@@ -212,6 +215,7 @@ export class CouponCard {
     this.use.hidden = claim;
     this.claim.hidden = !claim;
     this.claimNote.hidden = !claim || COUPONS_LIVE;
+    this.cobrand.hidden = !claim;
     const kind = COUPON_KINDS[ticket.kind] ?? COUPON_KINDS[0];
     if (this.canvasDpr !== pixelRatio()) this.drawTickets(); // 窗口拖到另一块屏幕上了
     const canvas = this.ticketCanvases[ticket.kind] ?? this.ticketCanvases[0];

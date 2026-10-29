@@ -106,6 +106,7 @@ export class World {
   private readonly homeK = new Map<PlanetEntry, number>(); // 这一帧乘在星球组缩放上的系数（下一帧先除掉）
   private readonly glides = new Map<PlanetEntry, { from: THREE.Vector3; to: THREE.Vector3 }>();
   private glideT = 1;
+  private homeTopPx = 0; // 首页标题卡片的底边（CSS 像素）
   private readonly canvasRect = { left: 0, top: 0, width: 1, height: 1 }; // 画布在页面上的位置（铺满窗口：resize 时更新，每帧不读布局）
   private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
@@ -719,7 +720,18 @@ export class World {
 
   // 首页的取景：按版式（homeLayout.ts）和当前窗口算，所有星球连同名牌都在画面的安全区里。slots：按这套槽位算（还没摆上去的新版式）
   private galaxyView(slots?: HomeSlot[]): Framing {
-    return homeFraming(fitHomeCamera(slots ?? [...this.slots.values()], PLANET_RADIUS, innerWidth, innerHeight, HOME_FIT[this.shape]));
+    const fit = { ...HOME_FIT[this.shape] };
+    // 安全区的上沿不高过标题卡片的底边（卡片里加了联名标志以后变高了；窄一点的窗口说明会折行）
+    if (this.homeTopPx > 0) fit.top = Math.min(fit.top, 1 - (2 * (this.homeTopPx + 10)) / Math.max(1, innerHeight));
+    return homeFraming(fitHomeCamera(slots ?? [...this.slots.values()], PLANET_RADIUS, innerWidth, innerHeight, fit));
+  }
+
+  // 首页标题卡片的底边（CSS 像素，ui/home.ts 量了告诉这里）：取景的安全区从它下面开始。在首页时立刻重新取景
+  // （开场飞行中就换飞行的终点；转场里、星球视图里不管，回首页时按新值取景）
+  setHomeTop(px: number): void {
+    if (Math.abs(px - this.homeTopPx) < 2) return;
+    this.homeTopPx = px;
+    if (!this.focused && !this.director.busy && !this.rig.drive && this.planets.size) this.rig.reframe(this.galaxyView());
   }
 
   // 首页：左右只让转一点点（版式是正对镜头排的）；离开首页（转场、星球视图、漫游、镜头在飞）时放开，星球视图的取景不受影响。
