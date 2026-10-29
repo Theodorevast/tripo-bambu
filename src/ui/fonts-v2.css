@@ -1,0 +1,9 @@
+/* 第二版的字体（都是 OFL，自托管，放在 src/assets/fonts/，许可证在同目录 OFL-*.txt）：
+   - Cinzel：罗马碑刻式的大写，标题、星球名，带一点点中古味
+   - Cormorant Garamond：优雅的衬线，副标题、说明文字（斜体用来写一句话的口号）
+   - Inter：界面里的小字、按钮、数字
+   都是可变字重的一个文件，只有拉丁字符子集 */
+@font-face { font-family: 'Cinzel'; src: url('../assets/fonts/Cinzel-var.woff2') format('woff2'); font-weight: 400 900; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/fonts/CormorantGaramond-var.woff2') format('woff2'); font-weight: 300 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/fonts/CormorantGaramond-italic-var.woff2') format('woff2'); font-weight: 300 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('../assets/fonts/Inter-var.woff2') format('woff2'); font-weight: 100 900; font-style: normal; font-display: swap; }
