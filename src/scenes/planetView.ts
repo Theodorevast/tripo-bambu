@@ -8,7 +8,14 @@ import { MAX_PLINTH_RADIUS, placementTransform, plinthRadius } from '../planet/p
 import { onPlanetRadius, PLANET_RADIUS, PRESETS } from '../planet/presets';
 import { plinthMaterial, STAND_TOP, standGeometry } from './plinth';
 import { compileShadowExact } from './shadowWarm';
+import type { Entrance } from './stager';
 import type { PlanetEntry, World } from './world';
+
+// 转场一开始就准备的一件作品（prepareAhead）：ready 在排到出场时给出模型和出场；claim 换掉判断「还要不要」的条件（place() 接手时换成它自己的）
+interface AheadWork {
+  ready: Promise<{ model: LoadedModel; entrance: Entrance } | null>;
+  claim(alive: () => boolean): void;
+}
 
 export { plinthRadius };
 
@@ -97,6 +104,7 @@ export class PlanetView {
   team: Team | null = null;
   private entry: PlanetEntry | null = null;
   private loading: Promise<void> = Promise.resolve();
+  private ahead: { teamId: string; works: Map<string, AheadWork> } | null = null; // 转场一开始就在准备的那颗星球的作品（prepareAhead）
   private readonly world: World;
   // 展台的三种状态（加载中半透明、不透明、不透明且高亮）各编译一份管线，这组网格一直留着、不挂上场景：
   // 进星球时摆出的展台、模型挂上时换成不透明的展台都直接用现成的，不在那一帧同步编译
@@ -185,6 +193,47 @@ export class PlanetView {
       if (label) this.gardens.atlas.claim(label);
     }
     this.loading = Promise.all(team.planet.placements.map((p) => this.place(p))).then(() => {});
+    // 转场一开始就准备的、这次没摆上的：作废（place() 在第一个 await 之前就把要用的接走了）
+    this.ahead = null;
+  }
+
+  // 进星球、跳星球的转场一开始就准备新星球的作品（F2）：模型下载、解码完马上排进 Stager（贴图按每帧的预算上传，着色器在后台编），
+  // 云层全遮住时 place() 摆展台，接过准备好（或准备到一半）的那一份，不用等全遮住才开始准备。作品照旧排着，到点依次出场。
+  // 准备期间又换了目的地：新的一次顶掉旧的，旧的准备到一半就收手
+  prepareAhead(team: Team): void {
+    const works = new Map<string, AheadWork>();
+    const ahead = { teamId: team.id, works };
+    this.ahead = ahead;
+    for (const p of team.planet.placements) {
+      const work = team.works.find((w) => w.id === p.workId);
+      if (!work?.file || works.has(work.id)) continue;
+      let alive = () => this.ahead === ahead;
+      let claimed = false;
+      const ready = this.library.load(work).then(async (model) => {
+        if (!alive() || model.failed) return null;
+        // 投影、接受阴影在预编译之前设好（和 place() 一样）
+        model.object.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+        const entrance = await this.world.stage.prepare(model.object, () => alive());
+        if (!entrance) return null;
+        if (!claimed) {
+          entrance.cancel(); // 轮到出场了还没人接手（目的地变了）：不挂
+          return null;
+        }
+        return { model, entrance };
+      });
+      works.set(work.id, { ready, claim: (fn) => { alive = fn; claimed = true; } });
+    }
+  }
+
+  // place() 接手转场一开始就在准备的那一份（没有就 null）
+  private takeAhead(workId: string, alive: () => boolean): AheadWork['ready'] | null {
+    const ahead = this.ahead;
+    if (!ahead || ahead.teamId !== this.team?.id) return null;
+    const w = ahead.works.get(workId);
+    if (!w) return null;
+    ahead.works.delete(workId);
+    w.claim(alive);
+    return w.ready;
   }
 
   leave(): void {
@@ -236,15 +285,24 @@ export class PlanetView {
     this.updateTransform(pw);
     pw.hero = Math.max(1, this.present); // 一摆上就是这一帧的放大倍数，不从原大慢慢长
     this.pose(pw, 0);
-    const model = await this.library.load(work);
     // 加载期间被移除了（编辑器删掉、离开星球、换了团队，或者离开后又回来、这件已经重新摆过）：按对象比，不按 id 找，
     // 迟到的模型就不会挂到别的团队或者同一件作品的新展台上
     const current = () => this.placed.get(work.id) === pw;
-    if (!current()) return null;
-    // 投影、接受阴影要在预编译之前设好：接受阴影的着色器不一样，挂上以后再改就要在那一帧同步编译
-    model.object.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
-    // 挂上之前：贴图逐帧上传、着色器在后台编译好，再排队（每帧最多挂一个）。准备期间被移除了就到此为止
-    const entrance = await this.world.stage.prepare(model.object, current);
+    // 转场一开始就在准备的（prepareAhead）：接手那一份（在第一个 await 之前接）；没有、或者没准备成就照常现准备
+    const ahead = this.takeAhead(work.id, current);
+    const got = ahead ? await ahead : null;
+    let model: LoadedModel;
+    let entrance: Entrance | null;
+    if (got) {
+      ({ model, entrance } = got);
+    } else {
+      model = await this.library.load(work);
+      if (!current()) return null;
+      // 投影、接受阴影要在预编译之前设好：接受阴影的着色器不一样，挂上以后再改就要在那一帧同步编译
+      model.object.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+      // 挂上之前：贴图逐帧上传、着色器在后台编译好，再排队（每帧最多挂一个）。准备期间被移除了就到此为止
+      entrance = await this.world.stage.prepare(model.object, current);
+    }
     if (!entrance) return null;
     if (!current()) {
       entrance.cancel();

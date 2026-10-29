@@ -11,6 +11,14 @@ import { compileShadowExact, compileSides } from './shadowWarm';
 // 3. 排队挂上：每帧最多放行一个；挂上后约 0.35 秒缩放（带一点回弹）加淡入，结束时换回原材质（预编译过，不卡）
 
 export const APPEAR_SECONDS = 0.35;
+// 贴图逐帧上传的预算：每帧最多传这么多字节（一张 2048² RGBA 那么多：WebGL2 上约 20 ms）
+export const UPLOAD_BUDGET = 2048 * 2048 * 4;
+
+// 一张贴图上传时大约多少字节（按 RGBA8 算，不算 mipmap；只用来分帧）
+export function textureBytes(texture: THREE.Texture): number {
+  const image = texture.image as { width?: number; height?: number } | null;
+  return Math.max(1, image?.width ?? 1) * Math.max(1, image?.height ?? 1) * 4;
+}
 const APPEAR_FROM = 0.6; // 起始缩放：从展台上「长」出来，而不是从一个点冒出来
 const BACK = 1.4; // easeOutBack 的回弹强度：常见的 1.70158 过冲约 10%，1.4 约 7%
 
@@ -160,12 +168,20 @@ export class Stager implements Stage {
 
   // 贴图每帧传一张，再在后台编译
   private async compile(object: THREE.Object3D, alive: () => boolean): Promise<boolean> {
+    // 每帧最多传 UPLOAD_BUDGET 字节（一张 2048² 那么多）：2048² 的照旧一帧一张，小贴图一帧传几张
+    // （冰魔像有 54 张 128²–1024² 的，原来一帧一张要传 54 帧，约 0.9 秒）
+    let budget = 0;
     for (const texture of modelTextures(object)) {
       if (this.uploaded.has(texture)) continue;
-      await this.nextFrame();
-      if (!alive()) return false;
+      const bytes = textureBytes(texture);
+      if (bytes > budget) {
+        await this.nextFrame();
+        if (!alive()) return false;
+        budget = UPLOAD_BUDGET;
+      }
       this.renderer.initTexture(texture);
       this.uploaded.add(texture);
+      budget -= bytes;
     }
     // 主画面那一遍：模型自己「半透明 + 双面」的材质（头发片那种）按背面、正面各编一遍（shadowWarm.ts 的 compileSides）；淡入用的克隆一遍画完，不拆
     await compileSides(this.renderer, object, this.camera, this.scene);

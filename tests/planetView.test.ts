@@ -329,3 +329,85 @@ describe('PlanetView：模型先准备好（贴图、着色器）再挂上，挂
     expect(world.planets.get('t')!.planet.works.children).toHaveLength(0);
   });
 });
+
+// F2：进星球、跳星球的转场一开始就准备作品（prepareAhead），云层全遮住时 place() 接过准备好的那一份
+describe('PlanetView：转场一开始就准备作品，全遮住时摆展台直接接过去', () => {
+  const withFiles = (t: Team): Team => ({ ...t, works: t.works.map((w) => ({ ...w, file: `${w.id}.glb` })) });
+  const teamF = withFiles(team);
+  const otherF = withFiles(other);
+  // 模型加载立刻完成（每次给一个新对象，和 ModelLibrary 每次给一份克隆一样）
+  const instantModels = (view: PlanetView) =>
+    vi.spyOn(view.library, 'load').mockImplementation(async (work) => {
+      const model: LoadedModel = { object: new THREE.Group(), height: 2, footprint: 0.6, failed: false };
+      model.object.userData.isModel = true;
+      model.object.userData.workId = work.id;
+      return model;
+    });
+
+  it('prepareAhead 先加载、交给 Stager 准备；enter 摆展台时接过同一个对象，不再加载、不再准备', async () => {
+    const { stage, pending } = manualStage();
+    const view = new PlanetView(fakeWorld(undefined, stage));
+    const load = instantModels(view);
+    view.prepareAhead(teamF);
+    await settle();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(pending).toHaveLength(2); // 展台还没摆，作品已经在准备
+    expect(view.placed.size).toBe(0);
+    const early = new Map(pending.map((p) => [p.object.userData.workId as string, p]));
+    view.enter(teamF);
+    await settle();
+    expect(load).toHaveBeenCalledTimes(2); // 没有再加载
+    expect(pending).toHaveLength(2); // 没有再准备
+    const entrances = pending.map(() => ({ start: vi.fn(), cancel: vi.fn() }));
+    pending.forEach((p, i) => p.resolve(entrances[i]));
+    await view.loaded;
+    for (const id of ['w1', 'w2']) expect(view.placed.get(id)!.model?.object).toBe(early.get(id)!.object);
+    for (const e of entrances) {
+      expect(e.start).toHaveBeenCalledOnce();
+      expect(e.cancel).not.toHaveBeenCalled();
+    }
+    // 接手以后按 place() 的条件判断：离开星球就不要了
+    view.leave();
+    expect(early.get('w1')!.alive()).toBe(false);
+  });
+
+  it('准备期间换了目的地：前一次的准备收手，轮到出场时取消、不挂', async () => {
+    const { stage, pending } = manualStage();
+    const view = new PlanetView(fakeWorld(undefined, stage));
+    instantModels(view);
+    view.prepareAhead(teamF);
+    await settle();
+    expect(pending[0].alive()).toBe(true);
+    view.prepareAhead(otherF);
+    await settle();
+    expect(pending).toHaveLength(4);
+    expect(pending[0].alive()).toBe(false);
+    expect(pending[2].alive()).toBe(true);
+    const stale = { start: vi.fn(), cancel: vi.fn() };
+    pending[0].resolve(stale);
+    await settle();
+    expect(stale.cancel).toHaveBeenCalledOnce();
+    expect(stale.start).not.toHaveBeenCalled();
+  });
+
+  it('准备了、全遮住时这件已经不在摆放里：没人接手，轮到出场时取消、不挂', async () => {
+    const { stage, pending } = manualStage();
+    const view = new PlanetView(fakeWorld(undefined, stage));
+    instantModels(view);
+    view.prepareAhead(teamF);
+    await settle();
+    const onlyW1: Team = { ...teamF, planet: { ...teamF.planet, placements: teamF.planet.placements.filter((p) => p.workId === 'w1') } };
+    view.enter(onlyW1);
+    await settle();
+    const w2 = pending.find((p) => p.object.userData.workId === 'w2')!;
+    expect(w2.alive()).toBe(false);
+    const unused = { start: vi.fn(), cancel: vi.fn() };
+    w2.resolve(unused);
+    pending.find((p) => p.object.userData.workId === 'w1')!.resolve({ start: vi.fn(), cancel: vi.fn() });
+    await view.loaded;
+    await settle();
+    expect(unused.cancel).toHaveBeenCalledOnce();
+    expect(view.placed.has('w2')).toBe(false);
+    expect(w2.object.parent).toBeNull();
+  });
+});
