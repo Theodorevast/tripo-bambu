@@ -70,6 +70,7 @@ type LayoutOpts = { sprout?: boolean; tucked?: boolean; delay?: number };
 const GRAVITY = 14; // 落下的加速度（米 / 秒²，原大时）：比真实的小一点，玩具落下来「软」一些
 const LIFT = 0.22; // 拖动时作品悬在地面上多高（米）
 const EXIT_SECONDS = 0.2; // 删掉时缩没的时长
+const PRELOAD_DWELL = 0.15; // 指着一颗星球（或名牌）多久才开始预取它的作品（秒）
 
 // 所有展台共用一份底座几何（按展台半径缩放）
 let standGeo: THREE.BufferGeometry | null = null;
@@ -97,7 +98,7 @@ const _t2 = new THREE.Vector3();
 // 聚焦星球上的作品：放展台和拾取盒，模型加载完再挂上；地形变了重新贴地
 export class PlanetView {
   static active: PlanetView | null = null; // 页面里正在用的那一个（?tune 的 Works & gardens 组找它）
-  readonly library = new ModelLibrary();
+  readonly library = new ModelLibrary(true); // 一次只解析一件（F2：几件同时解析会让转场开头掉帧）
   readonly placed = new Map<string, PlacedWork>();
   readonly extraWorks = new Map<string, Work>(); // 拖进来的临时作品
   readonly gardens: Gardens;
@@ -105,6 +106,9 @@ export class PlanetView {
   private entry: PlanetEntry | null = null;
   private loading: Promise<void> = Promise.resolve();
   private ahead: { teamId: string; works: Map<string, AheadWork> } | null = null; // 转场一开始就在准备的那颗星球的作品（prepareAhead）
+  private hoverAt: PlanetEntry | null = null; // 悬停预取：正指着哪颗、指了多久、哪些已经预取过
+  private hoverFor = 0;
+  private readonly preloaded = new Set<string>();
   private readonly world: World;
   // 展台的三种状态（加载中半透明、不透明、不透明且高亮）各编译一份管线，这组网格一直留着、不挂上场景：
   // 进星球时摆出的展台、模型挂上时换成不透明的展台都直接用现成的，不在那一帧同步编译
@@ -123,6 +127,9 @@ export class PlanetView {
   constructor(world: World) {
     this.world = world;
     PlanetView.active = this;
+    // 指着星球或名牌（首页的悬停都汇到 world.hovered）停一会儿，就先下载、解析那颗星球的作品（F2）：
+    // 点下去开始转场时模型已经在缓存里，转场开头不用再解析。只下载、解析，不编译（不一定会点进去）
+    world.frameHooks?.add((dt) => this.preloadHovered(dt));
     for (const [loading, glow] of [[true, 0], [false, 0], [false, 0.6]] as const) {
       // 和真的展台一样投影、接受阴影：接受阴影的着色器不一样，不设的话预热的是另一份
       const warm = new THREE.Mesh(plinthGeometry(), plinthMaterial(loading, glow));
@@ -222,6 +229,23 @@ export class PlanetView {
         return { model, entrance };
       });
       works.set(work.id, { ready, claim: (fn) => { alive = fn; claimed = true; } });
+    }
+  }
+
+  // 悬停预取（见构造函数）：同一颗星球指着超过 PRELOAD_DWELL 秒才开始（指针扫过去不算），每颗星球只预取一次
+  private preloadHovered(dt: number): void {
+    const h = this.world.hovered ?? null;
+    if (h !== this.hoverAt) {
+      this.hoverAt = h;
+      this.hoverFor = 0;
+    }
+    if (!h || this.preloaded.has(h.team.id)) return;
+    this.hoverFor += dt;
+    if (this.hoverFor < PRELOAD_DWELL) return;
+    this.preloaded.add(h.team.id);
+    for (const p of h.team.planet.placements) {
+      const work = h.team.works.find((w) => w.id === p.workId);
+      if (work) this.library.preload(work);
     }
   }
 
