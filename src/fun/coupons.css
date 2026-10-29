@@ -122,6 +122,20 @@
 .coupon-card button:focus-visible, .cc-use:focus-visible { outline: 3px solid #f2b705; outline-offset: 2px; }
 .cc-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+/* 首页右下角的翠宝（H2，fun/couponsHome.ts）给键盘用的按钮：盖在翠宝露出来的那一块上，看不见、不接鼠标（鼠标点的是 3D 的翠宝），
+   Tab 选中时翠宝探出来、按钮描一圈翠宝黄 */
+#app > .home-triboo-key {
+  position: absolute; left: 0; top: 0; z-index: 3; padding: 0; border: 0; border-radius: 50% 0 0 50%;
+  background: none; box-shadow: none; translate: none; color: transparent; font-size: 0; opacity: 0; pointer-events: none;
+}
+#app > .home-triboo-key:focus-visible { opacity: 1; outline: 3px solid #f2b705; outline-offset: 4px; }
+
+/* 首页的领券窗口（H2，fun/couponsHome.ts）：同一张卡片，没有兑换码，换成一个大的「Claim on Tripo」（链接，新标签页打开） */
+.coupon-card[data-mode='claim'] .cc-blurb { margin-bottom: 16px; }
+.cc-claim { margin-top: 2px; padding: 15px 18px 16px; font-size: 17px; box-shadow: 0 4px 0 #c18c00; }
+.cc-claim:hover { box-shadow: 0 5px 0 #c18c00; }
+.cc-claim-note { margin-top: 11px; }
+
 @media (max-width: 480px) {
   .cc-fold { margin: -18px 10px 0; padding: 26px 16px 16px; }
   .cc-title { font-size: 20px; }

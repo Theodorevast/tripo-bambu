@@ -82,7 +82,23 @@ export interface AtmosphereParams {
 export interface AtmospherePlanetOptions {
   seaDrop?: number;
   fog?: number;
+  calm?: number; // 0..1：首页（星系视图）把云海放安静（见 CALM），和中心一起缓动
 }
+
+// 首页的云海放安静（H2）：calm = 1 时按这些比例改，0 时完全是原样（星球视图不受影响）。
+// 起伏变平、云团变大（少掉碎的高频细节）、贴图取更模糊的一级、明暗对比收一些、空气透视浓一点；
+// 天上的细云条和远处的积云淡掉，天空只剩一层柔和的渐变。步进次数跟着少（云面平了，少走几步也找得准），GPU 也省一点
+export const CALM = {
+  thickness: 0.45, // 云层厚度少多少（起伏）
+  scale: 0.7, // 云团放大多少（+70%）
+  blur: 0.6, // 贴图细节等级再模糊多少倍
+  soft: 0.35, // 背光、缝隙的颜色往中间调靠多少（明暗对比）
+  haze: 0.9, // 空气透视浓多少
+  streaks: 1, // 天上的细云条淡掉多少
+  puffs: 0.75, // 远处积云淡掉多少
+  steps: 0.4, // 步进次数少多少
+  horizon: 1.6, // 地平线附近融进雾色的范围宽多少（镜头低的时候，远处的云海和天空之间没有一条硬边）
+};
 
 export interface Atmosphere {
   update(dtSec: number, camera: THREE.Camera): void;
@@ -100,6 +116,8 @@ export interface Atmosphere {
   // 以下是集成时加的最小接口
   setRain(amount: number): void; // 0..1（生机层 onRain 给的平滑雨量）：光变冷变暗，天和云发灰，雾浓一点
   readonly rain: number;
+  readonly seaTop: number; // 云顶的平均高度（世界坐标 y；星系视图里「上」是 +Y）：星球在云海上的影子贴在这里（H2）
+  readonly horizon: THREE.Color; // 现在的地平线雾色（线性、曝光前；含预设过渡和雨）：首页把后排的星球往这个颜色淡（H2）
   // 漫游时地平线的「上」：传 camera.up（角色脚下的球面法线），标架直接跟着它；传 null 回到按镜头位置算（轨道视角）
   setHorizonUp(up: THREE.Vector3 | null): void;
 }
@@ -569,7 +587,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   let radiusGoal = radius;
   let radiusFrom = radius;
   // setPlanet 的可选项：云海下压（× 半径）、雾的倍数，和中心一起缓动
-  const extra = { drop: 0, dropFrom: 0, dropGoal: 0, fog: 1, fogFrom: 1, fogGoal: 1 };
+  const extra = { drop: 0, dropFrom: 0, dropGoal: 0, fog: 1, fogFrom: 1, fogGoal: 1, calm: 0, calmFrom: 0, calmGoal: 0 };
   let planetJump = true; // 第一帧之前设的星球直接到位
   let planetT = 1;
   const frame = new AtmosphereFrame();
@@ -600,6 +618,8 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   const uCamRight = uniform(new THREE.Vector3(1, 0, 0)).setGroup(renderGroup);
   const uCamUp = uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup);
   const uSeaAmount = uniform(1).setGroup(renderGroup); // 云海、远处积云、高度雾的整体浓度（星系视图里淡到 0）
+  const uPuffs = uniform(1).setGroup(renderGroup); // 远处积云的浓度（首页放安静时淡一些，CALM.puffs）
+  const uGraze = uniform(0.07).setGroup(renderGroup); // 视线贴着云海时融进雾色的范围（掠射角的正弦；首页放安静时更宽，CALM.horizon）
 
   const uZenith = colorUniform(palette.zenith);
   const uUpper = colorUniform(palette.upper);
@@ -776,7 +796,8 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     col = col.add(uGlow.mul(towardSun.mul(rim).mul(1.2).mul(uGlowStrength)));
     // 空气透视：按距离融进地平线的颜色（加上太阳方向的光晕）
     // 再加一道只看视线掠射角的淡出：越贴近地平线越融进雾色，远处的云海连成一片亮带（参考图的地平线）
-    const fogK = float(1).sub(exp(dist.mul(uHaze).negate()).mul(smoothstep(0.004, 0.07, dy.negate())));
+    // 首页放安静时这道淡出更宽（uGraze）：远处的云海和地平线的雾连成一片，没有一条硬边
+    const fogK = float(1).sub(exp(dist.mul(uHaze).negate()).mul(smoothstep(0.004, uGraze, dy.negate())));
     const far = hazeColor(dir).add(glow(dir));
     col = mix(col, far, fogK);
     // 贴近星球表面时变透明（软过渡）；视线先碰到星球的像素完全透明
@@ -862,7 +883,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       const d = length(cameraPosition.sub(vCenter));
       const dirToC = normalize(vCenter.sub(cameraPosition));
       col = mix(col, hazeColor(dirToC).add(glow(dirToC)), float(1).sub(exp(d.mul(uHaze).mul(1.6).negate())));
-      return vec4(col, saturate(alpha).mul(uSeaAmount));
+      return vec4(col, saturate(alpha).mul(uSeaAmount).mul(uPuffs));
     })();
   }
   const clouds = new THREE.Mesh(cloudGeo, cloudMat);
@@ -983,6 +1004,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       radius = radiusGoal;
       extra.drop = extra.dropGoal;
       extra.fog = extra.fogGoal;
+      extra.calm = extra.calmGoal;
       planetJump = false;
       planetT = 1;
     } else if (planetT < 1) {
@@ -992,6 +1014,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       radius = radiusFrom + (radiusGoal - radiusFrom) * k;
       extra.drop = extra.dropFrom + (extra.dropGoal - extra.dropFrom) * k;
       extra.fog = extra.fogFrom + (extra.fogGoal - extra.fogFrom) * k;
+      extra.calm = extra.calmFrom + (extra.calmGoal - extra.calmFrom) * k;
     }
 
     // 预设过渡
@@ -1026,18 +1049,19 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
       sc.updateProjectionMatrix();
     }
 
-    // 云海
+    // 云海（calm：首页放安静，见 CALM；星球视图里是 0）
     const R = radius;
+    const calm = extra.calm;
     uCenter.value.copy(center);
     uRadius.value = R;
     const top = (params.seaHeight - extra.drop) * R;
-    const thick = Math.max(0.02, params.seaThickness) * R;
+    const thick = Math.max(0.02, params.seaThickness) * R * (1 - CALM.thickness * calm);
     uSeaBase.value = top - thick * 0.6; // 平均顶面以下 0.6 个厚度是缝隙最深处
     uSeaThick.value = thick;
     uSeaTopNow.value = top;
-    uCollar.value = R * 0.45;
+    uCollar.value = R * 0.45 * (1 - calm); // 星系视图里没有聚焦的星球：中间不堆云
     uCollarR.value = R * 1.75;
-    const scale = Math.max(0.1, params.cloudScale);
+    const scale = Math.max(0.1, params.cloudScale) * (1 + CALM.scale * calm);
     uScale1.value = 1 / (7 * R * scale);
     uScale2.value = 1 / (4.4 * R * scale);
     const speed = params.cloudSpeed * dt;
@@ -1048,8 +1072,16 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uFogDensity.value = look.fogDensity * params.fog * extra.fog;
     const seaAmount = THREE.MathUtils.clamp(params.seaAmount, 0, 1);
     uSeaAmount.value = seaAmount;
-    uSteps.value = Math.round(THREE.MathUtils.clamp(params.cloudSteps, 4, 64));
-    uHaze.value = (1 / (260 * R)) * Math.max(0.25, params.fog);
+    uSteps.value = Math.round(THREE.MathUtils.clamp(params.cloudSteps * (1 - CALM.steps * calm), 4, 64));
+    uHaze.value = (1 / (260 * R)) * Math.max(0.25, params.fog) * (1 + CALM.haze * calm);
+    // 放安静：明暗对比收一些（背光、缝隙往中间调靠），天上的细云条、远处积云淡掉
+    const soft = CALM.soft * calm;
+    const mid = look.cloudMid;
+    uCloudShade.value.set(look.cloudShade.r, look.cloudShade.g, look.cloudShade.b).lerp(tmp.set(mid.r, mid.g, mid.b), soft);
+    uCloudDeep.value.set(look.cloudDeep.r, look.cloudDeep.g, look.cloudDeep.b).lerp(tmp, soft);
+    uStreaks.value = look.streaks * (1 - CALM.streaks * calm);
+    uPuffs.value = 1 - CALM.puffs * calm;
+    uGraze.value = 0.07 * (1 + CALM.horizon * calm);
 
     // 圆盘：放在云层最高处（含堆云），中心在镜头正下方，半径铺到远平面以内
     const discTop = uSeaBase.value + thick + uCollar.value + 0.5;
@@ -1066,7 +1098,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     renderer.getDrawingBufferSize(size);
     const fov = (camera as THREE.PerspectiveCamera).isPerspectiveCamera ? (camera as THREE.PerspectiveCamera).fov : 45;
     const pixelAngle = (2 * Math.tan(THREE.MathUtils.degToRad(fov) / 2)) / Math.max(1, size.y);
-    uLodK.value = pixelAngle / (1 / uScale1.value / NOISE_SIZE) * 1.6;
+    uLodK.value = pixelAngle / (1 / uScale1.value / NOISE_SIZE) * 1.6 * (1 + CALM.blur * calm);
 
     // 远处积云
     camera.getWorldQuaternion(camQ);
@@ -1092,16 +1124,19 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     setPlanet(c: THREE.Vector3, r: number, o: AtmospherePlanetOptions = {}) {
       const drop = o.seaDrop ?? 0;
       const fogK = o.fog ?? 1;
+      const calmK = THREE.MathUtils.clamp(o.calm ?? 0, 0, 1);
       // 每帧用同样的参数调也没关系：目标没变就不重新开始
-      if (c.distanceToSquared(centerGoal) < 1e-8 && Math.abs(r - radiusGoal) < 1e-6 && drop === extra.dropGoal && fogK === extra.fogGoal) return;
+      if (c.distanceToSquared(centerGoal) < 1e-8 && Math.abs(r - radiusGoal) < 1e-6 && drop === extra.dropGoal && fogK === extra.fogGoal && calmK === extra.calmGoal) return;
       centerFrom.copy(center);
       radiusFrom = radius;
       extra.dropFrom = extra.drop;
       extra.fogFrom = extra.fog;
+      extra.calmFrom = extra.calm;
       centerGoal.copy(c);
       radiusGoal = r;
       extra.dropGoal = drop;
       extra.fogGoal = fogK;
+      extra.calmGoal = calmK;
       planetT = 0;
     },
     sun,
@@ -1145,6 +1180,12 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     },
     get rain() {
       return rain;
+    },
+    get seaTop() {
+      return center.y + uSeaTopNow.value * frame.up.y;
+    },
+    get horizon() {
+      return look.horizon;
     },
     setHorizonUp(up: THREE.Vector3 | null) {
       horizonUp = up;

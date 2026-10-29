@@ -3,7 +3,7 @@ import { setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { createAtmosphere, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
 import { createLife, type Life, type LifePlanet } from '../nature/life';
-import { updatePlanetLook } from '../nature/planetLook';
+import { setGalaxyHaze, updatePlanetLook } from '../nature/planetLook';
 import { decorInstances } from '../planet/decor';
 import { focusDetail, LOD_LOW, prewarmTerrain } from '../planet/generate';
 import { PlanetObject } from '../planet/planetObject';
@@ -12,9 +12,10 @@ import { CameraRig, type Framing } from './camera';
 import { Director, type TransitionCues } from './director';
 import { GatedStager } from './gatedStager';
 import { Dressing } from './dressing';
-import { galaxyPositions } from './layout';
+import { fitHomeCamera, HOME_FIT, homeLayout, homeShape, type HomeShape, type HomeSlot } from './homeLayout';
+import { PlanetMotion } from './homeMotion';
 import { MainPost } from './post';
-import { galaxyFraming, INTRO, planetFraming } from './shots';
+import { homeFraming, INTRO, planetFraming, SHOTS } from './shots';
 import { compileShadow, compileUnculled } from './stager';
 
 export interface PlanetEntry {
@@ -56,9 +57,12 @@ export const EVENING_AT_SUNSET = 0.6;
 // 天空在游戏里的取值（集成时定的，?tune → Sky & light 可调）：
 // fog：距离雾的倍数。atmosphere 演示页的默认 1 在星球视图里把草地蒙上一层灰白（镜头离地面 50 米，3% 的亮雾色叠在很暗的草色上，
 // 饱和度掉一半），云海的空气透视也跟着它，压低以后远处云海的明暗对比也更接近参考图
-// galaxySeaDrop：星系视图里云海压到所有星球下面（× 半径）；galaxyFog：星系视图里雾再乘的倍数（镜头离星球几百米）
-export const SKY = { fog: 0.4, galaxySeaDrop: 3, galaxyFog: 0.5 };
-const GALAXY_CENTER = new THREE.Vector3(0, 0, 0); // 星系布局的中心（layout.ts）
+// galaxySeaDrop：星系视图里云海压到所有星球下面（× 半径）；galaxyFog：星系视图里雾再乘的倍数（镜头离星球几百米）；
+// galaxyCalm：首页（星系视图）把云海放安静多少 0..1（nature/atmosphere.ts 的 CALM，H2）
+export const SKY = { fog: 0.4, galaxySeaDrop: 3.6, galaxyFog: 0.5, galaxyCalm: 1 };
+const GALAXY_CENTER = new THREE.Vector3(0, 0, 0); // 星系布局的中心（homeLayout.ts：第一排正中）
+const DIM_RATE = 3; // 首页后排的星球淡下去、星球视图里淡回来的速率（每秒逼近）
+const GLIDE_SECONDS = 0.9; // 首页换版式（加了一颗星球）时星球挪过去、镜头飞到新取景的时长
 
 // 傍晚系数：按太阳高度（度）在白天（22°）和日落（6°）之间插值；预设过渡时太阳高度是缓动的，傍晚系数跟着走
 export function eveningFor(sunElevation: number): number {
@@ -89,10 +93,20 @@ export class World {
   // warmUp() 完成之前不画：画了就会在主线程上同步编译。从构造时就开始等（主循环在构造函数里就启动了，
   // main.ts 在 warmUp 之前还要等存储、装配页面，这期间画出来的帧会把星球的着色器同步编译一遍）
   private warming = true;
-  private readonly halo: THREE.Mesh;
   private readonly ringGoals = new Map<PlanetObject, number>(); // 各星球光环要淡到多少，frame() 里逐帧逼近
   private readonly haloGoals = new Map<PlanetObject, number>(); // 各星球大气光晕要淡到多少，同上
   private readonly scaleGoals = new Map<PlanetObject, number>(); // 各星球要缩放到多大（星球视图里邻居缩小）
+  // 首页（H2）：版式、每颗星球的小动作（悬停放大、慢慢转、按下回弹）、换版式时慢慢挪过去
+  private you: string | null = null; // 「你的星球」的团队：放在前排正中
+  private shape: HomeShape = homeShape(innerWidth / Math.max(1, innerHeight));
+  private pendingLayout = false; // 宽屏 ↔ 竖屏换了、但在星球视图里：回首页时（云层全遮住的那一刻）再重排
+  private readonly slots = new Map<PlanetEntry, HomeSlot>();
+  private readonly motions = new Map<PlanetEntry, PlanetMotion>();
+  private readonly homeBase = new Map<PlanetEntry, number>(); // 版式的大小（逐帧逼近：首页按槽位，星球视图里 1）
+  private readonly homeK = new Map<PlanetEntry, number>(); // 这一帧乘在星球组缩放上的系数（下一帧先除掉）
+  private readonly glides = new Map<PlanetEntry, { from: THREE.Vector3; to: THREE.Vector3 }>();
+  private glideT = 1;
+  private readonly canvasRect = { left: 0, top: 0, width: 1, height: 1 }; // 画布在页面上的位置（铺满窗口：resize 时更新，每帧不读布局）
   private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
@@ -125,13 +139,7 @@ export class World {
     this.life.object.visible = false;
     this.life.onRain((r) => this.atmosphere.setRain(r));
     this.dressing = new Dressing({ renderer, scene: this.scene, life: this.life, precompile: (o) => this.stage.precompile(o) });
-    // 悬停光圈：每帧转到正对镜头
-    this.halo = new THREE.Mesh(
-      new THREE.RingGeometry(1, 1.04, 96),
-      new THREE.MeshBasicNodeMaterial({ color: '#f3d48a', transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
-    );
-    this.halo.visible = false;
-    this.scene.add(this.halo);
+    // 悬停：首页（H2）不再画黄色的光圈，星球自己放大、慢慢转，名牌弹出来（stepHome、ui/galaxyUi.ts）
     this.rig.jump(this.galaxyView());
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -167,29 +175,136 @@ export class World {
     this.ringGoals.clear();
     this.haloGoals.clear();
     this.scaleGoals.clear();
-    const homes = galaxyPositions(teams.length);
-    teams.forEach((team, i) => {
-      const home = new THREE.Vector3(...homes[i]);
+    this.slots.clear();
+    this.motions.clear();
+    this.homeBase.clear();
+    this.homeK.clear();
+    this.glides.clear();
+    teams.forEach((team) => {
       const planet = new PlanetObject(team.planet, team.color, team.status === 'under-construction'); // planet：团队色给星球染一点；建设中的有工地
-      planet.group.position.copy(home);
-      // 拾取球：单位球，按星球半径缩放（半径滑块拖动后只改缩放）
+      // 拾取球：单位球，按星球半径（和首页的大小）缩放（半径滑块拖动后只改缩放）
       const hit = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicNodeMaterial());
-      hit.scale.setScalar(PLANET_RADIUS * 1.3);
       hit.visible = false; // Raycaster 照样能打中不可见的物体
-      hit.position.copy(home);
       hit.userData.teamId = team.id;
       this.scene.add(planet.group, hit);
-      this.planets.set(team.id, { team, planet, hit, home });
+      const entry: PlanetEntry = { team, planet, hit, home: new THREE.Vector3() };
+      this.planets.set(team.id, entry);
+      this.motions.set(entry, new PlanetMotion());
     });
+    this.applySlots(this.computeSlots(), true); // 位置、大小、淡不淡按首页的版式（homeLayout.ts）
   }
 
-  // 开场前把场景里所有东西（星球、天空、悬停光圈、石头）的着色器在后台编译好。编译期间不画（画布保持黑色，界面照常能点）；
+  // 「你的星球」（main.ts 在开场前调一次）：首页把它放在前排正中、大一点，重新排
+  setYou(teamId: string | null): void {
+    if (this.you === teamId) return;
+    this.you = teamId;
+    if (this.focused || this.director.busy) {
+      this.pendingLayout = true;
+      return;
+    }
+    this.applySlots(this.computeSlots(), true);
+    if (!this.rig.flying && !this.rig.drive) this.rig.jump(this.galaxyView());
+  }
+
+  // 首页的版式：按团队、「你的星球」、宽屏 / 竖屏、星球半径算每颗星球的槽位（和 planets 同样的顺序）
+  private computeSlots(): HomeSlot[] {
+    const entries = [...this.planets.values()];
+    return homeLayout(entries.map((e) => ({ id: e.team.id, built: e.team.status !== 'under-construction' })), this.you, this.shape, PLANET_RADIUS);
+  }
+
+  // 摆上去：原地改 home（引用它的地方都跟着变）；jump：大小、淡不淡直接到位（开场、换团队列表），否则 frame() 里慢慢变过去；
+  // glide：在首页时星球从现在的位置慢慢挪过去（加了一颗星球），不然直接到位
+  private applySlots(slots: HomeSlot[], jump: boolean, glide = false): void {
+    let i = 0;
+    const moving = glide && !this.focused && !this.director.busy;
+    if (!moving) this.glides.clear();
+    for (const e of this.planets.values()) {
+      const s = slots[i++];
+      if (!s) continue;
+      this.slots.set(e, s);
+      e.hit.scale.setScalar(PLANET_RADIUS * 1.3 * s.scale);
+      if (moving && e.planet.group.parent && e.home.distanceToSquared(new THREE.Vector3(...s.pos)) > 1e-6) {
+        this.glides.set(e, { from: e.home.clone(), to: new THREE.Vector3(...s.pos) });
+      } else {
+        this.glides.delete(e);
+        e.home.set(...s.pos);
+        e.planet.group.position.copy(e.home);
+        e.hit.position.copy(e.home);
+      }
+      if (jump) {
+        this.homeBase.set(e, this.focused ? 1 : s.scale);
+        e.planet.look.dim.value = this.focused ? 0 : s.dim;
+      }
+    }
+    if (this.glides.size) this.glideT = 0;
+    this.pendingLayout = false;
+  }
+
+  // 运行时加一颗星球（「Create a planet」建好以后）：马上登记（路由、名牌都找得到它），着色器在后台编好以后才挂进场景、从小弹出来；
+  // 首页的版式跟着重排：别的星球慢慢挪到新位置，镜头慢慢飞到新的取景。已经有这个团队时只更新数据
+  addPlanet(team: Team): PlanetEntry {
+    const old = this.planets.get(team.id);
+    if (old) {
+      this.updateTeam(team);
+      return old;
+    }
+    const planet = new PlanetObject(team.planet, team.color, team.status === 'under-construction');
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicNodeMaterial());
+    hit.visible = false;
+    hit.userData.teamId = team.id;
+    this.scene.add(hit);
+    const entry: PlanetEntry = { team, planet, hit, home: new THREE.Vector3() };
+    this.planets.set(team.id, entry);
+    const motion = new PlanetMotion();
+    this.motions.set(entry, motion);
+    this.applySlots(this.computeSlots(), false, true);
+    this.homeBase.set(entry, this.slots.get(entry)?.scale ?? 1);
+    planet.look.dim.value = this.slots.get(entry)?.dim ?? 0;
+    const show = () => {
+      if (this.planets.get(team.id) !== entry || planet.group.parent) return;
+      this.scene.add(planet.group);
+      motion.press = -0.85; // 从小弹出来：回弹的弹簧冲过头再回来
+      motion.pressV = 0;
+    };
+    void this.stage.precompile(planet.group).then(show, show);
+    if (!this.focused && !this.director.busy && !this.rig.drive) void this.rig.fly(this.galaxyView(), GLIDE_SECONDS);
+    return entry;
+  }
+
+  // 首页的槽位（名牌按它分大小、显示「You」）
+  slotOf(e: PlanetEntry): HomeSlot | null {
+    return this.slots.get(e) ?? null;
+  }
+
+  get homeShape(): HomeShape {
+    return this.shape;
+  }
+
+  // 首页：按下 / 松开一颗星球（画布、名牌都走这里）。按下去压扁一点，松开时回弹；null：全部松开（指针移走了、取消了）
+  pressPlanet(e: PlanetEntry | null, down: boolean): void {
+    for (const [entry, m] of this.motions) m.pressed = down && entry === e;
+  }
+
+  // 首页：一颗星球在画面上的圆（CSS 像素，含悬停放大）；在镜头背后时返回 false。名牌摆在它下面
+  planetOnScreen(e: PlanetEntry, out: { x: number; y: number; r: number }): boolean {
+    const cam = this.rig.camera;
+    _scr.copy(e.home).project(cam);
+    if (_scr.z > 1) return false;
+    const r = this.canvasRect;
+    out.x = r.left + ((_scr.x + 1) / 2) * r.width;
+    out.y = r.top + ((1 - _scr.y) / 2) * r.height;
+    const d = cam.position.distanceTo(e.home);
+    const rad = e.planet.radius * e.planet.group.scale.x;
+    out.r = (rad / Math.sqrt(Math.max(1e-6, d * d - rad * rad)) / Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2)) * (r.height / 2);
+    return true;
+  }
+
+  // 开场前把场景里所有东西（星球、天空、石头）的着色器在后台编译好。编译期间不画（画布保持黑色，界面照常能点）；
   // 不预编译的话第一帧在主线程上同步编译：实测 WebGL2 一个任务约 0.5 秒，WebGPU 约 0.15 秒、画面停约 0.4 秒。
-  // 每颗星球（和天空、光圈）各调一次 compileAsync、同时进行：一次 compileAsync 里的着色器是一个编完再编下一个，
+  // 每颗星球（和天空）各调一次 compileAsync、同时进行：一次 compileAsync 里的着色器是一个编完再编下一个，
   // 二十多个排队在 WebGL2 上要 0.6–2 秒；分开同时编，驱动在后台并行编译。几颗星球共用的着色器可能各编一遍，结果一样
   async warmUp(): Promise<void> {
     this.warming = true;
-    this.halo.visible = true; // 悬停光圈平时藏着，第一次悬停才画：一起编译
     // 石头的网格一直留着（Dressing.field），开场就编译好：主画面那一遍和投影那一遍。每种形状先放 1 个（数量 0 的网格编译时会跳过）
     prewarmTerrain();
     const rocks = this.dressing.field;
@@ -212,7 +327,6 @@ export class World {
       this.life.prewarm(false);
       this.life.object.visible = this.focused !== null;
       rocks.showOneEach(false);
-      this.halo.visible = this.hovered !== null;
       this.warming = false;
       this.warmed();
     }
@@ -302,7 +416,6 @@ export class World {
 
   setHover(e: PlanetEntry | null): void {
     this.hovered = e;
-    this.halo.visible = e !== null;
   }
 
   // 世界坐标 → 屏幕像素坐标；在镜头背后时返回 null
@@ -316,7 +429,9 @@ export class World {
   // 打开页面时从远处缓缓推进到星系全景
   intro(): Promise<void> {
     const view = this.galaxyView();
-    this.rig.jump({ ...view, position: view.position.clone().multiplyScalar(INTRO.distance), maxDistance: Infinity });
+    // 从同一个方向、INTRO.distance 倍远的地方开始（首页看的点不一定在原点：按看的点放大）
+    const from = view.position.clone().sub(view.target).multiplyScalar(INTRO.distance).add(view.target);
+    this.rig.jump({ ...view, position: from, maxDistance: Infinity });
     return this.rig.fly(view, INTRO.seconds);
   }
 
@@ -329,11 +444,18 @@ export class World {
     const prev = this.focused;
     this.focused = e;
     this.setHover(null);
+    // 首页还在挪（刚加了星球）：直接到位；刚加的、着色器还没编好的星球现在就挂上（星球视图要画它）
+    this.finishGlide();
+    if (!e.planet.group.parent) this.scene.add(e.planet.group);
     this.atmosphere.setPlanet(e.home, PLANET_RADIUS);
     this.fadeRings(e);
-    // 全遮住以后分三帧：先撤旧作品、摆新展台（App，作品最早开始准备）→ 换地表细分 → 草、石头、生机层
+    // 全遮住以后分三帧：先撤旧作品、摆新展台（App，作品最早开始准备）→ 换地表细分 → 草、石头、生机层。
+    // 首页的小动作（悬停转过的角度、回弹）在全遮住的那一刻归零：星球视图按「星球不旋转」算
     await this.director.focus(e, prev !== null && prev !== e, planetFraming(e.home), [
-      () => cues.covered?.(),
+      () => {
+        for (const m of this.motions.values()) m.reset();
+        cues.covered?.();
+      },
       () => {
         if (prev && prev !== e) prev.planet.setDetail(LOD_LOW);
         e.planet.setDetail(focusDetail());
@@ -351,11 +473,16 @@ export class World {
   async unfocus(cues: TransitionCues = {}): Promise<void> {
     const prev = this.focused;
     this.focused = null;
+    // 在星球视图里换过宽屏 / 竖屏（或换了「你的星球」）：取景现在就按新的版式算，星球在云层全遮住的那一刻才挪过去
+    const slots = this.pendingLayout ? this.computeSlots() : null;
     this.fadeRings(null);
     // 星系视图里云海压到所有星球下面（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）：马上开始（1.2 秒缓动，云散开时已经快到位）
     this.galaxySky();
     this.setWalker(null);
-    await this.director.unfocus(prev, this.galaxyView(), [() => cues.covered?.()]);
+    await this.director.unfocus(prev, this.galaxyView(slots ?? undefined), [() => {
+      if (slots) this.applySlots(slots, false);
+      cues.covered?.();
+    }]);
     if (this.focused === null) {
       this.dressing.leave();
       this.life.object.visible = false;
@@ -371,13 +498,8 @@ export class World {
   // 星球半径变了：每颗星球按新半径重建，星系按比例重新排（原地改 home），聚焦的星球加细分，点缀重新摆，镜头重新取景。
   // 作品贴地由 PlanetView 自己登记的监听处理（在这之后调用）
   private applyRadius(): void {
-    const homes = galaxyPositions(this.planets.size);
-    let i = 0;
+    this.applySlots(this.computeSlots(), false);
     for (const e of this.planets.values()) {
-      e.home.set(...homes[i++]);
-      e.planet.group.position.copy(e.home);
-      e.hit.position.copy(e.home);
-      e.hit.scale.setScalar(PLANET_RADIUS * 1.3);
       e.planet.rebuildForRadius();
       if (e === this.focused) e.planet.setDetail(focusDetail());
     }
@@ -389,14 +511,24 @@ export class World {
     if (!this.rig.drive) this.applyShots();
   }
 
-  // 星系视图的天空：云海中心放在星系中心、压到所有星球下面，雾淡一些
+  // 星系视图的天空：云海中心放在星系中心、压到所有星球下面，雾淡一些；首页把云海放安静（H2：起伏平、云团大、对比小）
   private galaxySky(): void {
-    this.atmosphere.setPlanet(GALAXY_CENTER, PLANET_RADIUS, { seaDrop: SKY.galaxySeaDrop, fog: SKY.galaxyFog });
+    this.atmosphere.setPlanet(GALAXY_CENTER, PLANET_RADIUS, { seaDrop: SKY.galaxySeaDrop, fog: SKY.galaxyFog, calm: SKY.galaxyCalm });
   }
 
   // ?tune 改了 SKY（星系视图的云海、雾）：在星系视图里就立刻按新值重摆
   applySky(): void {
     if (!this.focused) this.galaxySky();
+  }
+
+  // ?tune → Home 改了版式、取景：在首页时立刻重排、按新的取景摆镜头；在星球视图里时等回首页再排
+  applyHome(): void {
+    if (this.focused || this.director.busy) {
+      this.pendingLayout = true;
+      return;
+    }
+    this.applySlots(this.computeSlots(), false);
+    if (!this.rig.flying && !this.rig.drive) this.rig.reframe(this.galaxyView());
   }
 
   // 定下各星球光环的目标浓淡和大小；实际的变化在 frame() 里逐帧做，镜头飞行的同时慢慢淡入淡出。
@@ -432,6 +564,63 @@ export class World {
       planet.group.scale.setScalar(next);
       if (next === goal) this.scaleGoals.delete(planet);
     }
+  }
+
+  // —— 首页（H2）的大小、小动作、淡 ——
+  // 版式的大小（建设中的小一些、你的星球大一点）、悬停放大、按下回弹合成一个系数，乘在星球组的缩放上；悬停时绕竖轴慢慢转。
+  // 每帧 stepRings 之前先除掉上一帧乘上的（removeHomeScale），之后再乘这一帧的（stepHome）：stepRings、fadeRings 照旧只管
+  // 星球视图的大小（聚焦的原大小、邻居缩小），不用知道首页。星球视图里系数回到 1，转过的角度很快转回 0（云层全遮住时 focus() 再归零），淡的也淡回来
+  private removeHomeScale(): void {
+    for (const [e, k] of this.homeK) if (k !== 1) e.planet.group.scale.divideScalar(k);
+  }
+
+  private stepHome(dt: number): void {
+    const kb = 1 - Math.exp(-8 * dt);
+    const kd = 1 - Math.exp(-DIM_RATE * dt);
+    const settle = this.focused !== null;
+    this.stepGlide(dt);
+    for (const e of this.planets.values()) {
+      const slot = this.slots.get(e);
+      const goal = settle ? 1 : slot?.scale ?? 1;
+      const now = this.homeBase.get(e) ?? goal;
+      const base = Math.abs(goal - now) < 0.002 ? goal : now + (goal - now) * kb;
+      this.homeBase.set(e, base);
+      const m = this.motions.get(e);
+      let k = base;
+      let spin = 0;
+      if (m) {
+        m.step(dt, e === this.hovered, settle);
+        if (!m.resting) k *= m.scale;
+        spin = m.spin;
+      }
+      const g = e.planet.group;
+      if (k !== 1) g.scale.multiplyScalar(k);
+      this.homeK.set(e, k);
+      if (g.rotation.y !== spin) g.rotation.y = spin;
+      const dimGoal = settle ? 0 : slot?.dim ?? 0;
+      const d = e.planet.look.dim.value;
+      if (d !== dimGoal) e.planet.look.dim.value = Math.abs(dimGoal - d) < 0.004 ? dimGoal : d + (dimGoal - d) * kd;
+    }
+  }
+
+  // 换了版式时星球慢慢挪到新位置（加了一颗星球）：原地改 home，星球组、拾取球跟着走
+  private stepGlide(dt: number): void {
+    if (!this.glides.size) return;
+    this.glideT = Math.min(1, this.glideT + dt / GLIDE_SECONDS);
+    const k = this.glideT < 0.5 ? 4 * this.glideT ** 3 : 1 - (-2 * this.glideT + 2) ** 3 / 2;
+    for (const [e, g] of this.glides) {
+      e.home.lerpVectors(g.from, g.to, k);
+      e.planet.group.position.copy(e.home);
+      e.hit.position.copy(e.home);
+    }
+    if (this.glideT >= 1) this.glides.clear();
+  }
+
+  // 挪到一半就要进星球了：直接到位（星球视图按 home 取景）
+  private finishGlide(): void {
+    this.glideT = 1;
+    this.stepGlide(0);
+    this.glides.clear();
   }
 
   private setupShadows(): void {
@@ -490,15 +679,14 @@ export class World {
     this.timer.update(time);
     // 夹到 0–0.1 秒：卡了一下也不让动画一步跳太远。切回标签页时计时器已经重置，第一帧的 dt 很小（偶尔是负的，夹成 0）
     const dt = this.director.dt(THREE.MathUtils.clamp(this.timer.getDelta(), 0, 0.1));
+    this.limitOrbit();
     this.rig.update(dt);
     this.director.tick(dt); // 转场：按分镜表摆镜头、画云层、到点换场景
+    this.removeHomeScale(); // 首页的大小系数：stepRings 之前除掉、之后再乘上（见 stepHome）
     this.stepRings(dt);
+    this.stepHome(dt);
     this.stage.tick(dt);
-    if (this.hovered) {
-      this.halo.position.copy(this.hovered.home);
-      this.halo.scale.setScalar(PLANET_RADIUS * 1.55);
-      this.halo.quaternion.copy(this.rig.camera.quaternion);
-    }
+    setGalaxyHaze(this.atmosphere.horizon); // 首页后排的星球往地平线的雾色里淡（跟着天空预设）
     for (const hook of this.frameHooks) hook(dt);
     const camera = this.rig.camera;
     // 漫游时地平线的「上」是 camera.up（角色脚下的球面法线，进出漫游时和 +Y 之间插值）；轨道镜头时按镜头位置推算
@@ -529,14 +717,37 @@ export class World {
     for (const hook of this.renderHooks) hook();
   }
 
-  // 按当前窗口的宽高比取星系全景（窗口变化后下一次回星系才生效，不在用户拖动、缩放时挪镜头）
-  private galaxyView(): Framing {
-    return galaxyFraming(innerWidth / Math.max(1, innerHeight));
+  // 首页的取景：按版式（homeLayout.ts）和当前窗口算，所有星球连同名牌都在画面的安全区里。slots：按这套槽位算（还没摆上去的新版式）
+  private galaxyView(slots?: HomeSlot[]): Framing {
+    return homeFraming(fitHomeCamera(slots ?? [...this.slots.values()], PLANET_RADIUS, innerWidth, innerHeight, HOME_FIT[this.shape]));
+  }
+
+  // 首页：左右只让转一点点（版式是正对镜头排的）；离开首页（转场、星球视图、漫游、镜头在飞）时放开，星球视图的取景不受影响。
+  // 在 rig.update 之前设：OrbitControls 在 update 里按它夹住方位角
+  private limitOrbit(): void {
+    const home = !this.focused && !this.director.busy && !this.rig.flying && !this.rig.drive;
+    const orbit = home ? THREE.MathUtils.degToRad(SHOTS.galaxy.orbit) : Infinity;
+    const c = this.rig.controls;
+    if (c.maxAzimuthAngle === orbit) return;
+    c.minAzimuthAngle = -orbit;
+    c.maxAzimuthAngle = orbit;
   }
 
   private resize(): void {
     this.renderer.setPixelRatio(budgetPixelRatio(innerWidth, innerHeight, devicePixelRatio || 1));
     this.renderer.setSize(innerWidth, innerHeight, false);
     this.rig.resize(innerWidth, innerHeight);
+    this.canvasRect.width = innerWidth;
+    this.canvasRect.height = innerHeight;
+    // 首页：宽屏 ↔ 竖屏换了就重排（在星球视图、转场里时等回首页再排）；在首页、镜头没在飞时按新的窗口重新取景
+    const shape = homeShape(innerWidth / Math.max(1, innerHeight));
+    if (shape !== this.shape) {
+      this.shape = shape;
+      if (this.focused || this.director.busy) this.pendingLayout = true;
+      else this.applySlots(this.computeSlots(), true);
+    }
+    if (this.planets.size && !this.focused && !this.director.busy && !this.rig.flying && !this.rig.drive) this.rig.jump(this.galaxyView());
   }
 }
+
+const _scr = new THREE.Vector3();
