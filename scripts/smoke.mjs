@@ -160,11 +160,12 @@ try {
 
   await step(`点进自己的星球（${you.id}）：作品全部摆上`, 'planet', async () => {
     const at = await clickable(page, `${you.id} 星球`, await page.evaluate((id) => window.__app.planetScreenPos(id), you.id));
-    // 先悬停：标签显示的是这颗星球，才点（前面有别的星球挡着时不会点进别人家）
+    // 先悬停：弹起来的名牌是这颗星球的，才点（前面有别的星球挡着时不会点进别人家）。
+    // H2：原来悬停时冒出来的 .float-label 换成了每颗星球下面一直挂着的名牌，悬停的那张加 is-hover
     await page.mouse.move(at.x, at.y);
-    await until(page, `悬停标签显示 ${you.name}`, (name) => {
-      const label = document.querySelector('.float-label');
-      return !!label && !label.hidden && label.querySelector('.display')?.textContent === name;
+    await until(page, `悬停时 ${you.name} 的名牌弹起来`, (name) => {
+      const tag = document.querySelector('.planet-tag.is-hover');
+      return !!tag && tag.querySelector('.pt-name')?.textContent === name;
     }, you.name);
     await page.mouse.click(at.x, at.y);
     await planetReady(page, you);

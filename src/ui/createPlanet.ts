@@ -3,11 +3,11 @@ import type { App, CreatorLayer } from '../app';
 import type { PlanetStore } from '../data/store';
 import type { PresetId, Team } from '../data/types';
 import { PRESETS, PRESET_IDS } from '../planet/presets';
-import { parseRoute } from '../router';
 import { CloudBurst, riseIntoGalaxy, type LaunchState } from './createPlanetLaunch';
 import { buildTeam, charCount, checkFriend, checkMotto, checkName, DEFAULT_MOTTO, inviteLink, LIMITS, newDraft, PRESET_BLURBS, randomSeed, teamIdFor, TEAM_COLORS, type Captain, type Check, type Draft } from './createPlanetModel';
 import { PlanetPreview } from './createPlanetPreview';
 import { el, initials } from './dom';
+import { setCreatePlanet } from './home';
 import { icon } from './icons';
 import { activeElement, animate, curve, EASE_IN, EASE_OUT, finished, focusQuietly, Presence, reducedMotion } from './motion';
 import { inkOn } from './sheet';
@@ -18,7 +18,9 @@ import { toast } from './toast';
 // 窗口收起、小星球「掉进云里」，主画面里新星球从云海升起来、镜头跟过去，然后进这颗星球（createPlanetLaunch.ts）。
 // 每个浏览器只能建一颗：建过以后按钮变成「Visit your planet」，#/create 直接带你去那颗星球。
 // 动效只动 transform / opacity；减弱动效时一律淡入淡出。整个窗口只用键盘也能走完（Tab 在窗口里循环、Enter 下一步、Esc 关）。
-// 给脚本的：.create-entry 按钮（data-create-entry），窗口 section.creator，window.__create（状态、预览的开销）
+// 入口是首页标题卡片里的「Create a planet」（H2 的按钮，ui/home.ts 的 setCreatePlanet 接到 openCreatePlanet）；建过以后藏起来，
+// 「Visit your planet」去你建的那颗（App.addTeam 把它设成你的星球）。
+// 给脚本的：窗口 section.creator，window.__create（状态、预览的开销）
 
 const STEPS = [
   { id: 'name', label: 'Name', title: 'Name your planet', lead: 'This is how your team shows up in the galaxy.' },
@@ -47,18 +49,16 @@ export function openCreatePlanet(): void {
   installed?.request();
 }
 
-// main.ts 调一次：装上按钮和窗口，接到 App（#/create）。队长就是演示身份（seed.you）那个成员
+// main.ts 调一次（在 installHome 之后）：装上窗口，接到 App（#/create）和首页的「Create a planet」。队长就是演示身份（seed.you）那个成员
 export function installCreatePlanet(app: App, store: PlanetStore): CreatePlanet {
   const me = app.teams.flatMap((t) => t.members).find((m) => m.id === app.you.memberId);
   installed = new CreatePlanet(app, store, { memberId: app.you.memberId, handle: me?.handle ?? 'you', displayName: me?.displayName ?? 'You' });
   app.creator = installed;
+  setCreatePlanet(openCreatePlanet); // 首页标题卡片里的「Create a planet」（H2，ui/home.ts）点了走这里
   return installed;
 }
 
 export class CreatePlanet implements CreatorLayer {
-  // 首页的按钮（标题区旁边；位置之后由 controller 和首页统一）
-  readonly entry = el('div', { className: 'create-entry', dataset: { createEntry: '' } });
-  private readonly entryButton = el('button', { className: 'primary create-entry-btn', type: 'button' });
   private readonly app: App;
   private readonly store: PlanetStore;
   private readonly captain: Captain;
@@ -118,11 +118,9 @@ export class CreatePlanet implements CreatorLayer {
     this.store = store;
     this.captain = captain;
     this.preview = new PlanetPreview(app.world);
-    this.buildEntry();
     this.buildWindow();
-    app.root.append(this.entry, this.node);
-    this.syncEntry();
-    addEventListener('hashchange', () => this.syncEntry());
+    app.root.append(this.node);
+    this.syncCreateButton();
     window.__create = {
       state: () => ({ open: this.open_, step: STEPS[this.step].id, launching: this.launching, launch: { ...this.launchState }, previewReady: this.preview.ready }),
       preview: () => ({ ...this.preview.stats, gpu: [...this.preview.stats.gpu] }),
@@ -131,28 +129,16 @@ export class CreatePlanet implements CreatorLayer {
 
   // —— 入口 ——
 
-  // 按钮：没建过是「Create a planet」，建过是「Visit your planet」
-  private buildEntry(): void {
-    this.entryButton.dataset.createPlanet = '';
-    this.entryButton.addEventListener('click', () => this.request());
-    this.entry.append(this.entryButton);
-  }
-
   private mine(): Team | undefined {
     return this.app.teams.find((t) => t.createdByYou);
   }
 
-  // 首页（星系、#/create）才显示按钮；文字跟着建没建过变
-  private syncEntry(): void {
-    const mine = this.mine();
-    const label = mine ? 'Visit your planet' : 'Create a planet';
-    if (this.entryButton.dataset.label !== label) {
-      this.entryButton.dataset.label = label;
-      this.entryButton.replaceChildren(icon(mine ? 'arrow' : 'planet', 'create-entry-icon'), el('span', { textContent: label }));
-      this.entryButton.title = mine ? `Fly to ${mine.name}` : 'Build a planet for your team';
-    }
-    const view = parseRoute(location.hash).view;
-    this.entry.hidden = !(view === 'galaxy' || view === 'create') || this.open_ || this.launching;
+  // 首页标题卡片里的「Create a planet」（H2 的按钮）：建过以后藏起来——每个浏览器只能建一颗，「Visit your planet」已经去你建的那颗了
+  private syncCreateButton(): void {
+    const bar = this.app.topbar;
+    if (!this.mine() || !bar.onCreate) return;
+    bar.onCreate = null;
+    bar.refreshVisit();
   }
 
   // 按钮、openCreatePlanet：建过的直接去那颗星球，没建过开 #/create
@@ -176,7 +162,6 @@ export class CreatePlanet implements CreatorLayer {
     if (this.open_) return;
     this.open_ = true;
     this.returnFocus = activeElement();
-    this.syncEntry();
     this.node.dataset.step = STEPS[this.step].id;
     this.refreshAll();
     this.preview.start();
@@ -193,8 +178,7 @@ export class CreatePlanet implements CreatorLayer {
     const back = this.returnFocus;
     this.returnFocus = null;
     void this.presence.hide(() => this.exit()).then(() => { if (!this.open_) this.preview.stop(); });
-    this.syncEntry();
-    focusQuietly(back?.isConnected ? back : this.entryButton);
+    focusQuietly(back?.isConnected ? back : null);
   }
 
   // 用户点关闭、按 Esc、点窗口外面：回星系（换掉 #/create 这条记录，后退不会又弹出来）。草稿留着，下次打开接着填
@@ -769,7 +753,7 @@ export class CreatePlanet implements CreatorLayer {
       const mine = await this.store.createdTeam();
       if (mine) {
         this.app.addTeam(mine);
-        this.syncEntry();
+        this.syncCreateButton();
         this.app.navigate({ view: 'planet', teamId: mine.id }, { replace: true });
       }
       return;
@@ -778,21 +762,18 @@ export class CreatePlanet implements CreatorLayer {
     this.launchState.phase = 'wait';
     this.say(`${created.name} is launching`);
     removeEventListener('keydown', this.onKey);
-    // 星球马上开始在后台准备（编译着色器），和窗口收起、镜头起飞同时进行
-    this.app.addTeam(created);
-    this.syncEntry();
     await this.burstReady;
     const collapse = this.collapse();
-    // 窗口收起到一半，镜头起飞
-    await new Promise((r) => setTimeout(r, reducedMotion() ? 120 : 220));
-    const rise = riseIntoGalaxy(this.app, created.id, reducedMotion() ? null : this.burst, this.launchState);
+    // 星球马上加进星系、开始在后台准备（编译着色器），和窗口收起同时进行；窗口收得差不多了镜头才起飞
+    const hold = new Promise((r) => setTimeout(r, reducedMotion() ? 0 : 360));
+    const rise = riseIntoGalaxy(this.app, created, reducedMotion() ? null : this.burst, this.launchState, hold);
+    this.syncCreateButton();
     await collapse;
     this.node.hidden = true;
     this.open_ = false;
     this.preview.dispose(); // 每个浏览器只建一颗：预览不会再用，放掉它的渲染器
     await rise;
     this.launching = false;
-    this.syncEntry();
     toast(saved ? `Welcome to ${created.name}! Press Edit to decorate it.` : `Welcome to ${created.name}! This browser can't save it, so it lasts until you close the tab.`, 4200);
   }
 

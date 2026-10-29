@@ -305,6 +305,46 @@ export class Coupons {
     return true;
   }
 
+  // —— 首页右边的翠宝（H2，fun/couponsHome.ts）：冷却、券、领券窗口都和星球页共用这一套 ——
+
+  // 还在冷却里（吐完 COUPONS.cooldown 秒内）：首页、星球页一样，点翠宝只摇头
+  get cooling(): boolean {
+    return this.clock < this.cooldownUntil;
+  }
+
+  cooldownLeft(): number {
+    return Math.max(0, this.cooldownUntil - this.clock);
+  }
+
+  // 首页的翠宝吐一张券：不落地，从嘴里直接飞到画面中间（领券窗口上那张券的位置），卡片接手、纸往下翻开。
+  // 冷却从这一刻算起（和星球页的吐券一样）。减弱动效：不飞，窗口直接淡入
+  spitHome(mouth: THREE.Vector3, quat: THREE.Quaternion, size: number, hop: THREE.Vector3, seconds: number, reduced: boolean): void {
+    const ticket = drawCoupons(this.rand, 1)[0];
+    this.cooldownUntil = this.clock + COUPONS.cooldown;
+    this.counts.spits++;
+    play('pop', 0.95 + this.rand() * 0.1);
+    play('sparkle', 0.98 + this.rand() * 0.06);
+    this.measure();
+    const at = this.card.prepare(ticket, 'claim');
+    if (reduced || !this.fxReady) {
+      this.card.show(true);
+      return;
+    }
+    const id = this.field.launchTo(ticket, mouth, quat, size, hop, this.world.rig.camera.position, seconds);
+    this.picking = { id, x: at.x, y: at.y, width: at.width };
+  }
+
+  // 首页的翠宝冷却中被点：记一次摇头、「嗯嗯」一声（动作由首页的翠宝自己做）
+  shakeHome(): void {
+    this.counts.shakes++;
+    play('nope', 0.97 + this.rand() * 0.06);
+  }
+
+  // 首页的翠宝开始蓄力：和星球页一样的声音
+  chargeHome(): void {
+    play('charge');
+  }
+
   // 戳一下翠宝：冷却中摇头，否则吐券。正在吐、正在摇头时不打断动作：吐完以后还在冷却里就接着摇一下头
   poke(who: Who): boolean {
     if (!this.interactive()) return false;

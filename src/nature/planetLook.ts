@@ -41,7 +41,13 @@ const U = {
   cloudShadow: uniform(PLANET_LOOK.cloudShadow).setGroup(renderGroup),
   seaShadow: uniform(PLANET_LOOK.seaShadow).setGroup(renderGroup),
   rimLight: uniform(PLANET_LOOK.rimLight).setGroup(renderGroup),
+  haze: uniform(new THREE.Color(0.62, 0.6, 0.55)).setGroup(renderGroup), // 首页里「淡」往哪个颜色靠：地平线的雾色（线性、曝光前，跟着天空预设）
 };
+
+// 首页（H2）：建设中的星球往天色里淡一些（PlanetLookParts.dim）。颜色取天空预设的地平线色，World 换预设时调
+export function setGalaxyHaze(c: THREE.Color): void {
+  U.haze.value.copy(c);
+}
 
 export function applyPlanetLook(): void {
   U.atmosphere.value = PLANET_LOOK.atmosphere;
@@ -148,10 +154,15 @@ export function planetSurfaceLook(radius: number | F, offset: THREE.UniformNode<
   const rimEdge = pow(float(1).sub(saturate(dot(n, view))), 5);
   const rimSide = smoothstep(-0.1, 0.6, mu);
   const rim = vec3(1, 0.78, 0.5).mul(rimEdge.mul(rimSide).mul(far).mul(U.rimLight).mul(0.12));
-  const haze = hazeCol.add(rim);
+  // 首页：这颗星球要淡多少（建设中的往天色里淡；按远看部件的 dim，星球视图里是 0）：地面颜色乘 1 − dim，再加上 dim 份的雾色
+  const dim = partsByOffset.get(offset)?.dim ?? float(0);
+  const haze = hazeCol.add(rim).mul(float(1).sub(dim)).add(U.haze.mul(dim));
   const darkLimb = float(1).sub(rimEdge.mul(float(1).sub(rimSide)).mul(far).mul(U.rimLight).mul(0.35));
-  return { shade: shade.mul(darkLimb), haze };
+  return { shade: shade.mul(darkLimb).mul(float(1).sub(dim)), haze };
 }
+
+// 地表着色器只拿到远看部件的云层偏移（uniform）：按它找回是哪颗星球的远看部件（取 dim）
+const partsByOffset = new WeakMap<object, PlanetLookParts>();
 
 // 「俯瞰」系数 0..1：镜头离星球中心 1.4 个半径以内（漫游、贴地）是 0，2 个半径以外（星球视图、星系）是 1。
 // 地表着色器里只在俯瞰时才有的东西（一片片的草色、花田、冷暖）乘它：贴地时交给 3D 的草和花，地面颜色和草叶对得上
@@ -404,6 +415,8 @@ export class PlanetLookParts {
   readonly accentAmount = uniform(0);
   // 建设中：团队色的花海只铺一半（还没装饰完），工地的空地是浅色的沙土
   readonly construction = uniform(0);
+  // 首页（H2）：往天色里淡多少 0..1（建设中的星球在后排、淡一些）。World 逐帧逼近，星球视图里回到 0
+  readonly dim = uniform(0);
   private accentHex: string | null = null;
   radius = 1;
   ring: THREE.Object3D | null = null; // 石头带（名字叫 ring：PlanetObject 的光环浓淡照旧开关它）
@@ -418,6 +431,7 @@ export class PlanetLookParts {
   constructor() {
     this.group.name = 'planet-look';
     parts.add(this);
+    partsByOffset.set(this.cloudOffset, this);
   }
 
   // 团队色（十六进制）。null：不染（演示页、测试）。下一次 build 时大气和石头带用上；地面的 uniform 立刻生效
@@ -664,7 +678,7 @@ export function installPlanetLookTune(folder: TuneFolder, rebuildRocks: () => vo
 export function updatePlanetLook(dt: number, sunDir: THREE.Vector3, camera: THREE.Camera, focused: PlanetLookParts | null = null, atmo: Atmosphere | null = null): void {
   // 云面：云海圆盘放在「云底 + 厚度 + 堆云 + 0.5」（atmosphere.ts 的 discTop），云顶的平均高度在云底以上 0.6 个厚度
   let seaY: number | null = null;
-  if (atmo && atmo.objects.sea.visible) seaY = atmo.objects.sea.position.y - PLANET_RADIUS * (0.45 + 0.4 * atmo.params.seaThickness) - 0.5;
+  if (atmo && atmo.objects.sea.visible) seaY = atmo.seaTop; // 首页把云海放安静时厚度会变：直接取云顶的高度（H2）
   U.sun.value.copy(sunDir);
   U.drift.value = (U.drift.value + dt * 0.012 * PLANET_LOOK.cloudSpeed) % (Math.PI * 2);
   const k = 1 - Math.exp(-6 * dt);

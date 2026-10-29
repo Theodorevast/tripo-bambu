@@ -1,16 +1,6 @@
-/* 「建一颗星球」（P3）：首页的入口按钮 + 造星窗口。和 Members / Museum 的新纸面一个调子：
+/* 「建一颗星球」（P3）：造星窗口（入口是首页标题卡片里 H2 的「Create a planet」）。和 Members / Museum 的新纸面一个调子：
    暖白纸面、灰紫墨色、翠宝黄点缀，粗圆角、底下一道「厚度」，标签像贴纸。变量都来自 styles.css。
    动效只用 transform / opacity；减弱动效时只淡入淡出（文件末尾） */
-
-/* —— 入口：标题区下面一颗黄色的玩具按钮（位置之后由 controller 和首页统一：选择器 #app > .create-entry）—— */
-#app > .create-entry { position: absolute; left: 18px; top: 94px; z-index: 6; animation: cp-entry-in 0.6s var(--bounce) 0.2s both; }
-:where(#app) .create-entry-btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 17px 12px 13px; font-size: 14px; border-radius: 16px; }
-.create-entry-icon { width: 20px; height: 20px; transition: transform 0.5s var(--bounce); }
-.create-entry-btn:hover .create-entry-icon { transform: rotate(-18deg) scale(1.12); }
-/* 隔一会儿小星球轻轻晃一下：告诉人这里能点 */
-.create-entry-btn[data-label='Create a planet'] .create-entry-icon { animation: cp-wiggle 7s ease-in-out 3s infinite; }
-@keyframes cp-entry-in { from { opacity: 0; transform: translateY(-10px) scale(0.85); } }
-@keyframes cp-wiggle { 0%, 88%, 100% { rotate: 0deg; } 91% { rotate: -16deg; } 94% { rotate: 12deg; } 97% { rotate: -5deg; } }
 
 /* —— 窗口 —— */
 #app > .creator { position: fixed; inset: 0; z-index: 12; display: grid; place-items: center; padding: 24px; overflow-y: auto; overscroll-behavior: contain; }
@@ -192,8 +182,6 @@
 
 /* —— 窄屏、手机竖屏：窗口铺满，预览放到上面（小一点，名牌、Reroll 在旁边），内容在下面滚，按钮贴底 —— */
 @media (max-width: 760px) {
-  #app > .create-entry { left: 10px; top: 76px; }
-  :where(#app) .create-entry-btn { padding: 9px 14px 10px 11px; font-size: 13px; }
   #app > .creator { padding: 8px; place-items: stretch; }
   .cp-card { max-height: calc(100dvh - 16px); padding: 16px 16px 14px; border-radius: 24px; }
   .cp-head h1 { font-size: 28px; }
@@ -229,9 +217,8 @@
 
 /* —— 减弱动效：只留淡入淡出 —— */
 @media (prefers-reduced-motion: reduce) {
-  #app > .create-entry { animation: fade-in 0.2s ease-out both; }
-  .create-entry-btn .create-entry-icon, .cp-next[data-launch='true'] { animation: none !important; }
-  .cp-preset, .cp-color-dot, .cp-switch-track i, .cp-close .icon, .cp-next .icon, .create-entry-icon { transition-duration: 0.01ms !important; }
+  .cp-next[data-launch='true'] { animation: none !important; }
+  .cp-preset, .cp-color-dot, .cp-switch-track i, .cp-close .icon, .cp-next .icon { transition-duration: 0.01ms !important; }
   .cp-preset:hover, .cp-color:hover .cp-color-dot { translate: none; transform: none; }
-  .cp-close:hover .icon, .create-entry-btn:hover .create-entry-icon, .cp-next:hover .icon { transform: none; }
+  .cp-close:hover .icon, .cp-next:hover .icon { transform: none; }
 }

@@ -115,12 +115,17 @@ export class App {
   }
 
   // 新团队加入（P3：「Create a planet」建好以后，ui/createPlanetLaunch.ts 调）：记进团队列表，星系里加一颗星球（World.addPlanet：
-  // 马上登记，着色器在后台编好才挂进场景）。是「你」建的就成了你的团队（编辑、Visit your planet 都认它）。在星系页时顶栏的数字跟着变
+  // 马上登记，着色器在后台编好才挂进场景，首页版式跟着重排）。是「你」建的就成了「你的星球」：首页把它放到前排正中
+  // （别的星球慢慢挪开）、名牌写 You，Visit your planet 也去它那里（ui/home.ts 读 app.you）
   addTeam(team: Team): void {
     if (this.teams.some((t) => t.id === team.id)) return;
     this.teams = [...this.teams, team];
-    if (team.createdByYou) this.you.teamId = team.id;
     this.world.addPlanet(team);
+    if (team.createdByYou) {
+      this.you.teamId = team.id;
+      this.world.setYou(team.id, true);
+      this.galaxyUi.setYou(team.id);
+    }
     if (!this.currentTeamId) this.topbar.showGalaxy(this.teams.length, this.teams.reduce((n, t) => n + t.works.length, 0));
   }
 

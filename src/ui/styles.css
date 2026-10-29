@@ -121,6 +121,84 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
   .tb-actions > button { padding: 8px 11px 9px; font-size: 12.5px; border-radius: 12px; }
 }
 
+/* —— 首页（星系视图，H2）——
+   左上角一块大一点的纸片：标题、一句说明、「Visit your planet」（翠宝黄的主按钮）。
+   每颗星球下面一张圆角小名牌（位置由 galaxyUi.ts 每帧写在 transform 里）：团队色的小星球、团队名、作品数；
+   你的星球带黄色的「You」、描一圈黄边；建设中的小一号、淡一点，写 building。悬停（星球或名牌）时名牌弹起来，按下去沉一下 */
+.tb-title[data-home] { max-width: min(430px, 40vw); padding: 14px 20px 16px 20px; border-radius: 24px; rotate: -0.8deg; }
+.tb-title[data-home] .tb-name { margin: 0; font-size: 34px; line-height: 1.02; letter-spacing: -0.005em; }
+.tb-tagline { margin: 7px 0 13px; font: 700 15px/1.38 var(--font-ui); color: var(--ink-dim); text-wrap: pretty; }
+.tb-ctas { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+:where(#app) .tb-visit { display: inline-flex; align-items: center; gap: 7px; padding: 11px 16px 12px 18px; border-radius: 16px; font-size: 15px; }
+:where(#app) .tb-create { display: inline-flex; align-items: center; gap: 6px; padding: 11px 15px 12px 12px; border-radius: 16px; font-size: 14.5px; }
+.tb-create-icon { width: 1.15em; height: 1.15em; color: var(--yolk-ledge); }
+.tb-visit-arrow { width: 1.1em; height: 1.1em; transition: transform 0.35s var(--bounce); }
+.tb-visit:hover .tb-visit-arrow { transform: translateX(3px); }
+
+#app > .planet-tags { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+:where(#app) .planet-tag {
+  position: absolute; left: 0; top: 0; padding: 0; border: 0; border-radius: 999px; background: none; box-shadow: none;
+  translate: none; font: inherit; color: var(--ink); pointer-events: auto; will-change: transform;
+  transition: opacity 0.3s ease-out, visibility 0s linear 0s;
+}
+:where(#app) .planet-tag:hover, :where(#app) .planet-tag:active { translate: none; box-shadow: none; }
+:where(#app) .planet-tag:focus-visible { outline: none; }
+.planet-tags:not(.is-shown) .planet-tag, .planet-tag.is-off { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.18s ease-in, visibility 0s linear 0.18s; }
+.pt-card {
+  display: flex; align-items: center; gap: 7px; padding: 6px 12px 7px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--grain), var(--paper);
+  box-shadow: 0 0 0 2px var(--frame), 0 3.5px 0 var(--frame-ledge), 0 8px 18px rgba(60, 45, 30, 0.18);
+  transform-origin: 50% 0; transition: transform 0.4s var(--bounce), box-shadow 0.2s;
+}
+/* 名牌出场：镜头落定后依次弹出来（--i：你的星球先，然后前排、后排）；在飞、转场时收起来 */
+.planet-tags.is-shown .planet-tag:not(.is-off) .pt-card { animation: pt-in 0.5s var(--bounce) calc(var(--i, 0) * 40ms) both; }
+@keyframes pt-in { from { opacity: 0; transform: translateY(-6px) scale(0.6); } }
+.pt-dot {
+  flex: none; width: 13px; height: 13px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, rgba(255, 255, 255, 0.75) 0 18%, transparent 46%), var(--team, var(--yolk));
+  box-shadow: inset -1.5px -2px 0 rgba(40, 30, 50, 0.18), 0 0 0 1.5px rgba(74, 64, 88, 0.14);
+}
+.pt-name { font: 800 14.5px/1.1 var(--font-display); letter-spacing: 0.005em; color: var(--ink); }
+.pt-count, .pt-soon { display: inline-flex; align-items: center; gap: 3px; font: 800 12.5px/1 var(--font-ui); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.pt-count svg, .pt-soon svg { width: 14px; height: 14px; flex: none; }
+.pt-soon { color: var(--ink-faint); font-weight: 700; }
+.pt-you { margin-left: 1px; padding: 2px 7px 3px; border-radius: 8px; background: var(--yolk); color: var(--ink); font: 800 11.5px/1.1 var(--font-ui); rotate: -4deg; box-shadow: 0 2px 0 var(--yolk-ledge); }
+.planet-tag[data-tier='you'] .pt-card { padding: 7px 12px 8px 9px; box-shadow: 0 0 0 2.5px var(--yolk), 0 4px 0 var(--yolk-ledge), 0 10px 22px rgba(60, 45, 30, 0.22); }
+.planet-tag[data-tier='you'] .pt-name { font-size: 16px; }
+.planet-tag[data-tier='building'] .pt-card { gap: 6px; padding: 4px 10px 5px 7px; background: rgba(251, 245, 232, 0.86); box-shadow: 0 0 0 1.5px rgba(240, 221, 182, 0.9), 0 2.5px 0 rgba(226, 205, 162, 0.9), 0 6px 14px rgba(60, 45, 30, 0.12); }
+.planet-tag[data-tier='building'] .pt-name { font-size: 12.5px; color: var(--ink-dim); }
+.planet-tag[data-tier='building'] .pt-dot { width: 10px; height: 10px; opacity: 0.8; }
+.planet-tag[data-tier='building'] .pt-soon { font-size: 11px; }
+.planet-tag[data-tier='building'] .pt-soon svg { width: 12px; height: 12px; }
+/* 建设中的名牌平时只画一个小锤子（窄一点，后排挤得下），悬停时才写出 building */
+.planet-tag[data-tier='building']:not(.is-hover) .pt-soon-text { display: none; }
+/* 悬停（星球或名牌）、键盘选中：名牌弹起来、压在别的名牌上面 */
+.planet-tag.is-hover { z-index: 1; }
+.planet-tag.is-hover .pt-card { transform: translateY(-3px) scale(1.12); box-shadow: 0 0 0 2.5px var(--yolk), 0 4px 0 var(--yolk-ledge), 0 12px 24px rgba(60, 45, 30, 0.24); }
+.planet-tag[data-tier='building'].is-hover .pt-card { background: var(--grain), var(--paper); transform: translateY(-3px) scale(1.2); }
+.planet-tag:active .pt-card { transform: translateY(1px) scale(1.04); transition-duration: 0.08s; }
+.planet-tag:focus-visible .pt-card { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+@media (max-width: 760px) {
+  .tb-title[data-home] { max-width: calc(100vw - 20px); padding: 10px 14px 12px 14px; border-radius: 18px; }
+  .tb-title[data-home] .tb-name { font-size: 24px; }
+  .tb-tagline { margin: 4px 0 9px; font-size: 13px; }
+  :where(#app) .tb-visit { padding: 9px 13px 10px 14px; font-size: 13.5px; border-radius: 13px; }
+  :where(#app) .tb-create { padding: 9px 12px 10px 10px; font-size: 13px; border-radius: 13px; }
+  .tb-ctas { gap: 8px; }
+  .pt-card { gap: 4px; padding: 3px 8px 4px 5px; }
+  .pt-dot { width: 10px; height: 10px; }
+  .pt-name { font-size: 11.5px; }
+  .planet-tag[data-tier='you'] .pt-name { font-size: 13.5px; }
+  .pt-count, .pt-soon { font-size: 10.5px; }
+  .pt-count svg { display: none; } /* 窄屏：作品数只写数字（前面一个点隔开），名牌窄一点，一排三颗也放得下 */
+  .pt-count::before { content: '·'; margin-right: 2px; }
+  .planet-tag[data-tier='you'] .pt-count svg { display: block; }
+  .planet-tag[data-tier='you'] .pt-count::before { content: none; }
+  .planet-tag[data-tier='building'] .pt-soon { display: none; }
+  .planet-tag[data-tier='building'] .pt-name { font-size: 11px; }
+}
+
 /* —— 悬浮标签：跟着 3D 物体走（位置由脚本每帧写在 transform 里），不挡鼠标；底下一个小尖角指着物体 ——
    纸片画在 ::before 上，每次出现从尖角那里弹出来（不碰脚本写的 transform） */
 #app > .float-label { position: absolute; left: 0; top: 0; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 14px 9px; white-space: nowrap; color: var(--ink); translate: 0 -10px; }
@@ -403,5 +481,9 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
   #app > .center-note { animation-name: fade-in; }
   #app > .toast { transform: translate(-50%, 0); transition: opacity 0.2s; }
   .dots i, .mc-preview:not(.ready)::after { animation: none; }
+  /* 首页（H2）：名牌只淡入淡出，悬停不弹、按下不沉 */
+  .planet-tags.is-shown .planet-tag:not(.is-off) .pt-card { animation: fade-in 0.25s ease-out both; }
+  .pt-card, .tb-visit-arrow { transition: none !important; }
+  .planet-tag.is-hover .pt-card, .planet-tag[data-tier='building'].is-hover .pt-card, .planet-tag:active .pt-card, .tb-visit:hover .tb-visit-arrow { transform: none; }
 }
 @keyframes fade-in { from { opacity: 0; } }

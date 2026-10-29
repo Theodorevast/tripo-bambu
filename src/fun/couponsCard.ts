@@ -2,13 +2,19 @@ import './coupons.css';
 import { COUPON_KINDS, COUPONS_LIVE, type CouponTicket } from '../data/coupons';
 import { el } from '../ui/dom';
 import { TRIPO_URL } from '../ui/badge';
+import { cobrandLockup } from '../ui/cobrand';
 import { drawCardTicket } from './couponsArt';
 import { play } from './couponsAudio';
 
 // 捡到的券展开成的卡片（coupons）：共享元素过渡——3D 的券飞到镜头前，正好停在卡片上那张券的位置、一样大，
 // 这时卡片上的券（同一个函数画的 canvas）叠上来接手，3D 的那张淡掉；接着券下面的纸像折着的一样往下翻开，露出
 // 券名、面额、说明、兑换码和「Copy code」、「Use on Tripo」。关掉时纸先往上折回去，券再缩没。
-// 减弱动效时只淡入淡出。卡片的样式先自己写（coupons.css，暖白纸面，和「Made with Tripo」徽章一套），界面统一时再并过去
+// 减弱动效时只淡入淡出。卡片的样式先自己写（coupons.css，暖白纸面，和「Made with Tripo」徽章一套），界面统一时再并过去。
+// 两种用法（prepare 的 mode）：星球上捡到的券（code：兑换码、Copy code、Use on Tripo）；
+// 首页右边的翠宝吐的券（claim，H2）：领券窗口——券名、面额、一句说明、一个大的「Claim on Tripo」（新标签页打开 tripo3d.ai）
+
+export type CardMode = 'code' | 'claim';
+export const CLAIM_URL = 'https://www.tripo3d.ai';
 
 const TICKET_CSS_WIDTH = 360;
 const pixelRatio = () => Math.min(3, Math.max(1, devicePixelRatio || 1));
@@ -28,6 +34,13 @@ export class CouponCard {
   private readonly copyButton: HTMLButtonElement;
   private readonly status: HTMLSpanElement;
   private readonly backdrop: HTMLDivElement;
+  private readonly codeRow: HTMLDivElement;
+  private readonly sample: HTMLParagraphElement;
+  private readonly use: HTMLAnchorElement;
+  private readonly claim: HTMLAnchorElement; // 首页领券窗口的大按钮（链接，不是 window.open）
+  private readonly claimNote: HTMLParagraphElement;
+  private readonly cobrand: HTMLDivElement; // 领券窗口顶上的联名小标志（tripo × MakerWorld）
+  private modeNow: CardMode = 'code';
   private current: CouponTicket | null = null;
   private state: 'closed' | 'pending' | 'open' | 'closing' = 'closed';
   private revert = 0;
@@ -45,16 +58,26 @@ export class CouponCard {
     this.copyButton.addEventListener('click', () => void this.copy());
     const sample = el('p', { className: 'cc-sample', textContent: 'Sample code · live coupons are on their way' });
     sample.hidden = COUPONS_LIVE;
+    this.sample = sample;
     const use = el('a', { className: 'cc-use', href: TRIPO_URL, target: '_blank', rel: 'noopener noreferrer', textContent: 'Use on Tripo' });
     use.append(el('span', { className: 'cc-arrow', textContent: ' ↗' }));
     use.setAttribute('aria-label', 'Use on Tripo (opens tripo3d.ai in a new tab)');
+    this.use = use;
+    // 领券（首页）：一个大的黄色按钮，就是一个 <a target="_blank" rel="noopener">，点了以后窗口留着（用户回来还能看到券）
+    this.claim = el('a', { className: 'cc-use cc-claim', href: CLAIM_URL, target: '_blank', rel: 'noopener', textContent: 'Claim on Tripo' });
+    this.claim.append(el('span', { className: 'cc-arrow', textContent: ' ↗' }));
+    this.claim.setAttribute('aria-label', 'Claim on Tripo (opens tripo3d.ai in a new tab)');
+    this.claim.addEventListener('click', () => play('tick'));
+    this.claimNote = el('p', { className: 'cc-sample cc-claim-note', textContent: 'Sample coupon · live coupons are on their way' });
     this.status = el('span', { className: 'cc-status' });
     this.status.setAttribute('role', 'status');
     this.status.setAttribute('aria-live', 'polite');
+    this.codeRow = el('div', { className: 'cc-code-row' }, this.code, this.copyButton);
+    this.cobrand = el('div', { className: 'cc-cobrand' }, cobrandLockup('sm'));
     this.fold = el('div', { className: 'cc-fold' },
-      this.title, this.value, this.blurb,
-      el('div', { className: 'cc-code-row' }, this.code, this.copyButton),
-      sample, use, this.status);
+      this.cobrand, this.title, this.value, this.blurb,
+      this.codeRow,
+      sample, use, this.claim, this.claimNote, this.status);
     const close = el('button', { className: 'cc-close', type: 'button', textContent: '×' });
     close.setAttribute('aria-label', 'Close coupon');
     close.addEventListener('click', () => this.hide());
@@ -82,20 +105,26 @@ export class CouponCard {
     return this.state === 'open' ? this.current : null;
   }
 
-  // 开场时把每种券都画好、排一次版（第一次捡券时不在那一帧里做）
+  // 开场时把每种券都画好、两种用法各排一次版（第一次捡券、第一次在首页领券时不在那一帧里做）
   warm(): void {
     this.drawTickets();
-    this.fill({ kind: 0, code: 'TRIBOO-0000-0000' });
     this.layer.hidden = false;
     this.layer.classList.add('cc-measure');
-    void this.card.offsetHeight;
+    for (const mode of ['claim', 'code'] as const) {
+      this.fill({ kind: 0, code: 'TRIBOO-0000-0000' }, mode);
+      void this.card.offsetHeight;
+    }
     this.layer.classList.remove('cc-measure');
     this.layer.hidden = true;
   }
 
+  get mode(): CardMode {
+    return this.modeNow;
+  }
+
   // 3D 的券起飞时调：填好内容、排好版（看不见），返回卡片上那张券的中心和宽度（CSS 像素），3D 的券就往那里飞
-  prepare(ticket: CouponTicket): { x: number; y: number; width: number } {
-    this.fill(ticket);
+  prepare(ticket: CouponTicket, mode: CardMode = 'code'): { x: number; y: number; width: number } {
+    this.fill(ticket, mode);
     this.state = 'pending';
     this.layer.hidden = false;
     this.layer.classList.add('cc-measure');
@@ -130,7 +159,7 @@ export class CouponCard {
         { duration: 560, easing: 'cubic-bezier(0.3, 0.9, 0.35, 1)', delay: 170, fill: 'backwards' },
       );
     }
-    this.copyButton.focus({ preventScroll: true });
+    (this.modeNow === 'claim' ? this.claim : this.copyButton).focus({ preventScroll: true });
   }
 
   hide(): void {
@@ -175,9 +204,18 @@ export class CouponCard {
     this.canvasDpr = dpr;
   }
 
-  private fill(ticket: CouponTicket): void {
+  private fill(ticket: CouponTicket, mode: CardMode = 'code'): void {
     this.resetAnimations();
     this.current = ticket;
+    this.modeNow = mode;
+    const claim = mode === 'claim';
+    this.card.dataset.mode = mode;
+    this.codeRow.hidden = claim;
+    this.sample.hidden = claim || COUPONS_LIVE;
+    this.use.hidden = claim;
+    this.claim.hidden = !claim;
+    this.claimNote.hidden = !claim || COUPONS_LIVE;
+    this.cobrand.hidden = !claim;
     const kind = COUPON_KINDS[ticket.kind] ?? COUPON_KINDS[0];
     if (this.canvasDpr !== pixelRatio()) this.drawTickets(); // 窗口拖到另一块屏幕上了
     const canvas = this.ticketCanvases[ticket.kind] ?? this.ticketCanvases[0];

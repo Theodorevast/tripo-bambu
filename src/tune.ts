@@ -9,6 +9,7 @@ import { addLookTune, LOOK_TUNE } from './scenes/postTune';
 import { SHOTS } from './scenes/shots';
 import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
 import { addTransitionTune, TRANSITION_TUNE } from './scenes/transitionTune';
+import { addHomeTune, HOME_TUNE } from './scenes/homeTune';
 import { SKY, WEATHER, type World } from './scenes/world';
 import { installPlanetLookTune, planetLookParams } from './nature/planetLook';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
@@ -65,6 +66,7 @@ export function tuneJson(world?: World): string {
       water: { ...WATER, colors: WATER_COLORS, ice: WATER_ICE },
       stage: STAGE_TUNE,
       coupons: COUPONS,
+      home: HOME_TUNE,
       ...TRANSITION_TUNE,
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
@@ -167,19 +169,12 @@ export function installTune(world: World): void {
   const fx = lf.addFolder({ title: 'Effects', expanded: false });
   for (const k of LIFE_EFFECTS) fx.addBinding(effects, k).on('change', () => world.life.setEnabled(k, effects[k]));
 
+  addHomeTune(pane, world); // —— Home ——（scenes/homeTune.ts，H2：首页的版式、镜头、安静的云海、星球悬停和回弹、右边的翠宝）
   addTransitionTune(pane, world); // —— Transitions ——（scenes/transitionTune.ts：转场的分镜表、开场探头、演示按钮）
   addCouponsTune(pane); // —— Coupons ——（fun/couponsTune.ts：点翠宝吐券每一步的时长、券的飞行和寿命、捡券）
 
-  // —— Camera ——
+  // —— Camera ——（首页 = 星系视图的镜头在「Home」组里：H2 改成按版式取景）
   const cam = pane.addFolder({ title: 'Camera', expanded: false });
-  const galaxy = cam.addFolder({ title: 'Galaxy', expanded: false });
-  galaxy.addBinding(SHOTS.galaxy, 'distance', { min: 80, max: 900, step: 1 });
-  galaxy.addBinding(SHOTS.galaxy, 'elevation', { label: 'elevation°', min: 0, max: 89, step: 0.5 });
-  galaxy.addBinding(SHOTS.galaxy, 'lift', { min: -150, max: 100, step: 0.5 });
-  galaxy.addBinding(SHOTS.galaxy, 'fov', { label: 'fov°', min: 10, max: 100, step: 1 });
-  galaxy.addBinding(SHOTS.galaxy, 'minDistance', { label: 'min distance', min: 10, max: 900, step: 1 });
-  galaxy.addBinding(SHOTS.galaxy, 'maxDistance', { label: 'max distance', min: 50, max: 2000, step: 1 });
-  galaxy.on('change', () => world.applyShots());
   const planetCam = cam.addFolder({ title: 'Planet (× radius)' });
   planetCam.addBinding(SHOTS.planet, 'distance', { label: 'distance ×R', min: 1.1, max: 6, step: 0.01 });
   planetCam.addBinding(SHOTS.planet, 'elevation', { label: 'elevation°', min: 0, max: 89, step: 0.5 });
