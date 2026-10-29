@@ -3,7 +3,7 @@ import type { App, CreatorLayer } from '../app';
 import type { PlanetStore } from '../data/store';
 import type { PresetId, Team } from '../data/types';
 import { PRESETS, PRESET_IDS } from '../planet/presets';
-import { CloudBurst, LaunchWarmer, riseIntoGalaxy, type LaunchState } from './createPlanetLaunch';
+import { CloudBurst, LaunchWarmer, riseIntoGalaxy, worldDelay, type LaunchState } from './createPlanetLaunch';
 import { buildTeam, charCount, checkFriend, checkMotto, checkName, DEFAULT_MOTTO, inviteLink, LIMITS, newDraft, PRESET_BLURBS, randomSeed, teamIdFor, TEAM_COLORS, type Captain, type Check, type Draft } from './createPlanetModel';
 import { PlanetPreview } from './createPlanetPreview';
 import { el, initials } from './dom';
@@ -110,7 +110,7 @@ export class CreatePlanet implements CreatorLayer {
   private open_ = false;
   private launching = false;
   private returnFocus: HTMLElement | null = null;
-  private copyTimer = 0;
+  private copyToken = 0; // 复制后「Copied!」过一会儿变回去：每复制一次加一，晚到的不算
   readonly launchState: LaunchState = { phase: 'wait', t: 0 };
   private readonly onKey = (e: KeyboardEvent) => this.key(e);
 
@@ -533,12 +533,12 @@ export class CreatePlanet implements CreatorLayer {
         ok = false;
       }
     }
-    clearTimeout(this.copyTimer);
+    const token = ++this.copyToken;
     if (ok) {
       this.setCopyLabel(true);
       this.say('Invite link copied');
       if (!reducedMotion()) animate(this.copyButton, [{ transform: 'scale(1)' }, { transform: 'scale(1.12) rotate(-3deg)', offset: 0.35 }, { transform: 'scale(1)' }], { duration: 480, easing: EASE_OUT });
-      this.copyTimer = window.setTimeout(() => this.setCopyLabel(false), 2200);
+      void worldDelay(this.app.world, 2.2).then(() => { if (token === this.copyToken) this.setCopyLabel(false); });
     } else {
       this.say('Press Ctrl+C to copy the link');
       toast('Press Ctrl+C (or Cmd+C) to copy the link');
@@ -773,10 +773,9 @@ export class CreatePlanet implements CreatorLayer {
     // 替身一般进第三步时就备好了；还在编（很快就点了 Launch）就先等它编完（最多 1.5 秒，窗口照常收起），
     // 真的星球再加进来：两边的着色器不挤在一起编。镜头等窗口收得差不多、预览手上正在编的也编完了才起飞
     // （WebGL2 上预览的链接会和主画面抢 GPU 进程）
-    const t0 = performance.now();
+    const collapsed = worldDelay(this.app.world, reducedMotion() ? 0 : 0.36);
     await Promise.race([this.warmer.warm(this.look()), new Promise((r) => setTimeout(r, 1500))]);
-    const rest = Math.max(0, (reducedMotion() ? 0 : 360) - (performance.now() - t0));
-    const hold = Promise.all([new Promise((r) => setTimeout(r, rest)), this.preview.settled()]);
+    const hold = Promise.all([collapsed, this.preview.settled()]);
     const rise = riseIntoGalaxy(this.app, created, reducedMotion() ? null : this.burst, this.launchState, hold);
     this.syncCreateButton();
     await collapse;
