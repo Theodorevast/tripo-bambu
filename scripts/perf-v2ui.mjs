@@ -56,7 +56,7 @@ const rows = [];
 const measure = async (label, during) => {
   for (const on of [false, true]) {
     await theme(on);
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(1500); // 换样式表那一下整页重算样式：等它过去再量
     const r = await record(FRAMES, during);
     rows.push({ label, ui: on ? 'v2' : 'v1 样式', ...r });
   }

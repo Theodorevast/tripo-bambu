@@ -183,6 +183,7 @@ kbd { padding: 3px 6px; border-radius: 3px; background: rgba(15, 21, 48, 0.6); b
 /* 右上角的 Tune 小按钮（?tune 才有）：没有底色的细线图标 */
 :where(#app) .tb-tune { top: 8px; right: 8px; width: 30px; height: 30px; border-radius: 3px; color: var(--v2-text-faint); background: transparent; box-shadow: none; transition: opacity 0.3s; }
 :where(#app) .tb-tune .icon { width: 16px; height: 16px; }
+:where(#app) .tb-tune { --icon-fill: #141a3b; }
 :where(#app) .tb-tune:hover { color: var(--v2-star); background: transparent; scale: none; }
 :where(#app) .tb-tune:active { scale: none; box-shadow: none; }
 :where(#app) .tb-tune[aria-pressed='true'] { color: var(--v2-gold); background: rgba(216, 192, 142, 0.12); box-shadow: inset 0 0 0 1px var(--v2-hair); }
@@ -292,7 +293,7 @@ kbd { padding: 3px 6px; border-radius: 3px; background: rgba(15, 21, 48, 0.6); b
 .planet-tag.is-hover .pt-name { color: #fffaf0; }
 .planet-tag[data-tier='building'].is-hover .pt-card { background: none; transform: translateY(-3px); }
 .planet-tag:active .pt-card { transform: translateY(-1px); transition-duration: 0.2s; }
-.planet-tag:focus-visible .pt-card { outline: 1px solid var(--v2-star); outline-offset: 4px; }
+.planet-tag:focus-visible .pt-card { outline: 1.5px solid var(--v2-star); outline-offset: 4px; }
 
 /* —— 悬浮标签（星球上指着作品、漫游时靠近作品）：深色小面板、细金线，下面一道往下淡掉的细线指着作品 —— */
 #app > .float-label { gap: 2px; padding: 8px 15px 9px; color: var(--v2-star); translate: 0 -14px; }

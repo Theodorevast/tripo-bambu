@@ -4,6 +4,7 @@ import { icon, iconSvg, type IconName } from './icons';
 import { animate, curve, EASE_IN, EASE_OUT, finished, reducedMotion } from './motion';
 import { friendlyLabel } from './tuneLabels';
 import './tune.css';
+import './tune-v2.css'; // 第二版的外观（深色面板、细金线），盖在 tune.css 上面
 
 // 调参面板的外壳：浮在右边的一本小手账。头部能拖、能收成一个小按钮；左边一列贴纸标签，每个顶层分组一页；底部复制参数。
 // 各模块照旧往「面板」上 addFolder：这里的 root 收到顶层 addFolder 时新开一页（每页一个 Tweakpane），返回那一页，
