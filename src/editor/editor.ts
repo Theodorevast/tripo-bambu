@@ -106,7 +106,7 @@ export class Editor {
 
   activate(): void {
     const team = this.view.team;
-    if (this.active || !team || team.id !== this.app.you.teamId) return;
+    if (this.active || !team) return; // 演示：每颗星球都能编辑，不只是你的（H2）
     this.active = true;
     this.screen.setInteractive(false);
     this.app.topbar.setEditing(true);

@@ -1,5 +1,6 @@
 import type { Team } from '../data/types';
 import { el } from './dom';
+import { cobrandHeader } from './cobrand';
 import { icon } from './icons';
 
 export interface TopbarActions {
@@ -21,6 +22,7 @@ export class Topbar {
   private readonly visitButton: HTMLButtonElement;
   private readonly createButton: HTMLButtonElement;
   private readonly ctas: HTMLDivElement;
+  private readonly cobrand = cobrandHeader(); // 联名（tripo × MakerWorld，GBN）：首页标题上面
   private readonly actions = el('nav', { className: 'tb-actions' });
   private readonly editButton: HTMLButtonElement;
   private readonly walkButton: HTMLButtonElement;
@@ -52,6 +54,7 @@ export class Topbar {
   showGalaxy(_teamCount: number, _workCount: number): void {
     this.refreshVisit();
     this.title.replaceChildren(
+      this.cobrand,
       el('h1', { className: 'display tb-name', textContent: 'Community Planets' }),
       el('p', { className: 'tb-tagline', textContent: 'Build a planet with friends. Decorate it with your 3D works.' }),
       this.ctas,
@@ -66,14 +69,15 @@ export class Topbar {
     this.createButton.hidden = !this.onCreate;
   }
 
-  showTeam(team: Team, isYours: boolean): void {
+  // _isYours：演示里每颗星球都能编辑（H2），参数留着，以后接上真实的权限再用
+  showTeam(team: Team, _isYours: boolean): void {
     delete this.title.dataset.home;
     this.title.replaceChildren(
       el('div', { className: 'display tb-name', textContent: team.name }),
       el('div', { className: 'tb-motto', textContent: team.motto }),
     );
     this.actions.hidden = false;
-    this.editButton.hidden = !isYours;
+    this.editButton.hidden = false;
     this.setEditing(false);
     this.setWalking(false);
   }
