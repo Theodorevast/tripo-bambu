@@ -128,7 +128,7 @@ export class Director {
     this.veil = createVeil();
     world.scene.add(this.veil);
     // 翠宝的模型现在就开始加载，加载完在后台编译好（不挡开场）；开场飞行落定时还没好就不探
-    this.peek = new TribooPeek((o) => world.stage.precompile(o));
+    this.peek = new TribooPeek((o) => world.stage.precompile(o), world.models);
     // 预编译完的东西在 WebGL2 上先画一次（gatedStager.ts）：只在这一帧真的会画出来的时候做（开场预热完、Museum 没盖着）
     world.stage.drawGate = () => this.warmed && !world.paused;
     void world.warm.then(() => {
