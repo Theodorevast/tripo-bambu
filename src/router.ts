@@ -1,6 +1,7 @@
-// hash 路由：#/、#/t/<teamId>、#/t/<teamId>/members、#/t/<teamId>/museum[/<workId>]
+// hash 路由：#/、#/t/<teamId>、#/t/<teamId>/members、#/t/<teamId>/museum[/<workId>]、#/create（建一颗星球，P3）
 export type Route =
   | { view: 'galaxy' }
+  | { view: 'create' }
   | { view: 'planet'; teamId: string }
   | { view: 'members'; teamId: string }
   | { view: 'museum'; teamId: string; workId?: string };
@@ -17,6 +18,7 @@ function decodeSegment(segment: string): string {
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeSegment);
+  if (parts[0] === 'create' && parts.length === 1) return { view: 'create' };
   if (parts[0] !== 't' || !parts[1]) return { view: 'galaxy' };
   const teamId = parts[1];
   if (parts.length === 2) return { view: 'planet', teamId };
@@ -31,6 +33,8 @@ export function toHash(route: Route): string {
   switch (route.view) {
     case 'galaxy':
       return '#/';
+    case 'create':
+      return '#/create';
     case 'planet':
       return team(route.teamId);
     case 'members':

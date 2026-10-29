@@ -43,8 +43,9 @@ export function installHome(app: App): HomeDebug {
   const you = app.you.teamId;
   app.world.setYou(you);
   app.galaxyUi.setYou(you);
-  app.topbar.onVisit = () => app.galaxyUi.visitTeam(you);
-  app.topbar.onVisitHover = (on) => app.galaxyUi.hoverTeam(on ? you : null);
+  // 按钮按下时才读「你的星球」：用「Create a planet」建了新星球以后（P3，App.addTeam）就去新的那颗
+  app.topbar.onVisit = () => app.galaxyUi.visitTeam(app.you.teamId);
+  app.topbar.onVisitHover = (on) => app.galaxyUi.hoverTeam(on ? app.you.teamId : null);
   app.topbar.onCreate = openCreate;
   app.topbar.refreshVisit();
   // 标题卡片多高（字体到了、窗口变了、加了联名标志都会变）：首页取景让开它
@@ -60,7 +61,7 @@ export function installHome(app: App): HomeDebug {
   }
   const debug: HomeDebug = {
     state: () => ({
-      you,
+      you: app.you.teamId,
       shape: app.world.homeShape,
       tags: app.galaxyUi.snapshot(),
       intro: debug.intro?.() ?? false,

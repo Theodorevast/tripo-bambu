@@ -22,6 +22,7 @@ import { installWater } from './nature/water';
 import { installCoupons } from './fun/coupons';
 import { installHomeTriboo } from './fun/couponsHome';
 import { installHome } from './ui/home';
+import { installCreatePlanet } from './ui/createPlanet';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 // 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后云散开；Nunito 的几个字重从这里开始在后台预加载
@@ -40,6 +41,7 @@ const editor = new Editor(app, planetScreen);
 const walk = new WalkMode(app, planetScreen);
 const coupons = installCoupons(app, planetScreen, walk, editor); // 点翠宝吐优惠券（fun/coupons.ts）：站桩和漫游的翠宝能点，模型、着色器在后台预热
 installHomeTriboo(app, coupons, home); // 首页右下角躲着的翠宝（H2）：点它吐一张券，展开成领券窗口
+installCreatePlanet(app, store); // P3：#/create 造星窗口、首页标题卡片的「Create a planet」接上 openCreatePlanet、新星球从云海升起来（ui/createPlanet*.ts）
 app.planetLayer = {
   enter: (team) => {
     planetScreen.enter(team); // 立即返回：展台马上摆好，模型在后台加载

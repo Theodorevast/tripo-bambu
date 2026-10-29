@@ -43,6 +43,8 @@ export interface Team {
   members: Member[];
   works: Work[];
   planet: PlanetRecipe;
+  // 这个浏览器里用「Create a planet」建的团队（存在本地，不在 seed.json 里），归「你」：可以编辑。种子里的团队没有这个字段
+  createdByYou?: boolean;
 }
 
 export interface Seed {

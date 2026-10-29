@@ -220,16 +220,17 @@ export class World {
     this.applySlots(this.computeSlots(), true); // 位置、大小、淡不淡按首页的版式（homeLayout.ts）
   }
 
-  // 「你的星球」（main.ts 在开场前调一次）：首页把它放在前排正中、大一点，重新排
-  setYou(teamId: string | null): void {
+  // 「你的星球」（main.ts 在开场前调一次）：首页把它放在前排正中、大一点，重新排。
+  // glide（P3：刚建好的星球成了你的）：别的星球慢慢挪过去、不跳，镜头不动（建星球的动画接着管镜头）
+  setYou(teamId: string | null, glide = false): void {
     if (this.you === teamId) return;
     this.you = teamId;
     if (this.focused || this.director.busy) {
       this.pendingLayout = true;
       return;
     }
-    this.applySlots(this.computeSlots(), true);
-    if (!this.rig.flying && !this.rig.drive) this.rig.jump(this.galaxyView());
+    this.applySlots(this.computeSlots(), !glide, glide);
+    if (!glide && !this.rig.flying && !this.rig.drive) this.rig.jump(this.galaxyView());
   }
 
   // 首页的版式：按团队、「你的星球」、宽屏 / 竖屏、星球半径算每颗星球的槽位（和 planets 同样的顺序）
