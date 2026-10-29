@@ -70,6 +70,7 @@ export class MuseumPage implements Sheet {
   private previewing = false; // 卡片预览的渲染循环该不该跑（Museum 开着、预览已经开始）
   private watchingVisibility = false;
   private canvasFade: Animation | null = null;
+  private hideTimer: ReturnType<typeof setTimeout> | undefined;
   private returnFocus: HTMLElement | null = null;
   private readonly onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !this.viewer.isOpen) this.onClose(); };
 
@@ -81,9 +82,12 @@ export class MuseumPage implements Sheet {
     this.node.setAttribute('aria-label', 'Museum');
     this.canvas.hidden = true;
     this.node.addEventListener('click', (e) => { if (e.target === this.node) this.onClose(); });
-    // 预览 canvas 在最上层：查看器打开时要藏起来，否则卡片会画到查看器上面
+    // 预览 canvas 在最上层：查看器打开后藏起来（被整屏盖住了，不用再画）。打开时晚一点再藏：舞台从卡片放大、背景淡入的这一下，
+    // 别的卡片里的模型还在，不会先空掉
     this.viewer = new Viewer(root, () => this.onSelect(null), (open) => {
-      this.canvas.hidden = open || !LIVE_CARD_PREVIEWS || this.teamId === null;
+      clearTimeout(this.hideTimer);
+      if (open && !this.canvas.hidden && !reducedMotion()) this.hideTimer = setTimeout(() => { if (this.viewer.isOpen) this.canvas.hidden = true; }, 320);
+      else this.canvas.hidden = open || !LIVE_CARD_PREVIEWS || this.teamId === null;
     }, (workId) => this.cards.get(workId)?.preview ?? null);
     root.append(this.node, this.canvas);
   }
@@ -107,6 +111,7 @@ export class MuseumPage implements Sheet {
 
   close(): void {
     if (this.teamId === null) return;
+    const showing = !this.canvas.hidden; // 卡片预览这时看得见（查看器没开着）：下面让它淡掉
     this.token++;
     this.teamId = null;
     delete this.node.dataset.ready;
@@ -122,9 +127,11 @@ export class MuseumPage implements Sheet {
     this.returnFocus = null;
     // 预览画布（停在最后一帧）先很快淡掉，卡片和展板再收走
     this.canvasFade?.cancel();
-    const fade = reducedMotion() ? null : animate(this.canvas, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: 'ease-in', fill: 'forwards' });
+    clearTimeout(this.hideTimer);
+    const fade = showing && !reducedMotion() ? animate(this.canvas, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: 'ease-in', fill: 'forwards' }) : null;
     this.canvasFade = fade;
     if (fade) {
+      this.canvas.hidden = false; // viewer.close() 刚把它藏了（teamId 已经清掉）：淡完再藏
       void finished([fade]).then(() => {
         if (this.canvasFade !== fade) return;
         this.canvas.hidden = true;

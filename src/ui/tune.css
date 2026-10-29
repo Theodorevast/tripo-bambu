@@ -527,6 +527,10 @@
 .tune-pane .tp-grlv .tp-ttv { background-color: var(--ink); border-radius: 6px; font-weight: 800; }
 .tune-pane .tp-grlv .tp-ttv::before { border-top-color: var(--ink); }
 .tune-pane .tp-sprv_r { height: 0; background: none; border-top: 2px dashed var(--line); }
+/* Tweakpane 自带的几处小过渡会动尺寸、位置（数字拖动把手、曲线的提示框）：关掉，界面动画只留 transform / opacity */
+.tune-pane .tp-txtv_k::before, .tune-pane .tp-grlv_t { transition: none; }
+/* 内嵌取色器、二维取点的展开和抽屉一样靠高度过渡结束的事件收尾：压成 1ms，不能直接关掉 */
+.tune-pane .tp-colv_p, .tune-pane .tp-p2dv_p { transition: height 1ms linear, opacity 1ms linear, margin 1ms linear; }
 
 /* —— 手机竖屏：贴底的半屏抽屉，标签横排；收起时右下角一个小按钮。不能拖 —— */
 @media (max-width: 640px) {
