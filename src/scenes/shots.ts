@@ -3,19 +3,19 @@ import { SHOWCASE_POLE } from '../planet/placement';
 import { PLANET_RADIUS } from '../planet/presets';
 import type { Framing } from './camera';
 import type { Bezier } from './ease';
-import { galaxyScale } from './layout';
+import type { HomeCamera } from './homeLayout';
 
 // 镜头表：星系全景和星球近景的取景参数。?tune 面板直接改这张表，World.applyShots() 让当前视图立刻按新参数取景；
 // 调好后用面板的「Copy parameters」把 JSON 发回来，写回这里的默认值。
-// 距离都按星球半径换算（星系的按星系放大倍数 radius / 10，星球的按半径的倍数），拖半径滑块时取景跟着变
+// 距离都按星球半径换算（星球的按半径的倍数），拖半径滑块时取景跟着变
 
+// 首页（星系视图，H2）：镜头按版式取景（homeLayout.ts 的 fitHomeCamera：仰角、视角、画面里的安全区在 HOME_FIT），
+// 这里只管手动拖动的范围。版式是正对镜头排好的：左右、上下都只让转一点点（看得到一点侧面），滚轮远近也只给一点
 export interface GalaxyShot {
-  distance: number; // 镜头离星系中心（星球半径 10 时的值，按 galaxyScale 放大）
-  elevation: number; // 仰角（度）
-  lift: number; // 画面中心比星系中心高多少（同上，按 galaxyScale 放大；负数是往下压）
-  fov: number; // 竖直视角（度）
-  minDistance: number; // 滚轮拉近、推远的限制（按到星系中心的距离，同上）
-  maxDistance: number;
+  zoomIn: number; // 滚轮最多拉近到取景距离的几倍
+  zoomOut: number; // 最多推远到几倍
+  orbit: number; // 左右最多转多少度
+  tilt: number; // 上下最多转多少度
 }
 
 export interface PlanetShot {
@@ -30,9 +30,7 @@ export interface PlanetShot {
 }
 
 export const SHOTS: { galaxy: GalaxyShot; planet: PlanetShot } = {
-  // 星系全景：离中心 270、仰角 30°，画面中心压到星系中心下方 25（lift 为负）——
-  // 离镜头近的星球在画面里偏低，整片星系往上提一点，上下才匀称。都是星球半径 10 时的数，按 galaxyScale 放大
-  galaxy: { distance: 270, elevation: 30, lift: -25, fov: 45, minDistance: 140, maxDistance: 500 },
+  galaxy: { zoomIn: 0.84, zoomOut: 1.14, orbit: 14, tilt: 6 },
   // 星球视图：沿展示方向的方位角、从斜上方 30° 看，离星球中心 2.8 个半径；画面中心比星球中心高 0.2 个半径（look 调的）：
   // 整颗星球坐在云海上，左右和下面都留出一圈云，作品那一带在画面中上部
   planet: { distance: 2.8, elevation: 30, lift: 0.2, fov: 45, minDistance: 1.35, maxDistance: 4, minElevation: 8, maxElevation: 80 },
@@ -170,21 +168,24 @@ export const INTRO: IntroShot = { seconds: 2.4, distance: 2.6 };
 
 export const PEEK: PeekShot = { delay: 0.2, rise: 0.55, wave: 1.2, waves: 3, duck: 0.42, size: 0.15, lean: 12, swing: 34 };
 
-const GALAXY_ASPECT = 1.6; // 星系全景是按这个宽高比调的；更窄的窗口把镜头按比例拉远，左右两边的星球才不出画
 const POLE = new THREE.Vector3(...SHOWCASE_POLE);
 const AZIMUTH = Math.atan2(POLE.x, POLE.z); // 展示方向的方位角（从 +Z 转向 +X）
 
-export function galaxyFraming(aspect: number, shot: GalaxyShot = SHOTS.galaxy, radius = PLANET_RADIUS): Framing {
-  const k = Math.max(1, GALAXY_ASPECT / aspect) * galaxyScale(radius);
-  const el = THREE.MathUtils.degToRad(shot.elevation);
+// 首页的取景：位置、看的点、视角来自 fitHomeCamera；不自转（版式正对镜头），上下只让转 tilt 度、远近只让拉一点。
+// 左右转的范围（orbit）CameraRig 不管：World 在首页时直接设到 OrbitControls 上，离开首页时放开
+export function homeFraming(cam: HomeCamera, shot: GalaxyShot = SHOTS.galaxy): Framing {
+  const offset = cam.position.clone().sub(cam.target);
+  const polar = Math.acos(THREE.MathUtils.clamp(offset.y / Math.max(1e-6, offset.length()), -1, 1));
+  const tilt = THREE.MathUtils.degToRad(shot.tilt);
   return {
-    target: new THREE.Vector3(0, 0, 0),
-    position: new THREE.Vector3(0, Math.sin(el), Math.cos(el)).multiplyScalar(shot.distance * k),
-    lift: shot.lift * galaxyScale(radius),
-    fov: shot.fov,
-    minDistance: shot.minDistance * k,
-    maxDistance: shot.maxDistance * k,
-    autoRotate: true,
+    target: cam.target.clone(),
+    position: cam.position.clone(),
+    fov: cam.fov,
+    minDistance: cam.distance * Math.min(1, shot.zoomIn),
+    maxDistance: cam.distance * Math.max(1, shot.zoomOut),
+    minPolar: Math.max(0.05, polar - tilt),
+    maxPolar: Math.min(Math.PI / 2, polar + tilt),
+    autoRotate: false,
   };
 }
 

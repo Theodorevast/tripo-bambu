@@ -20,6 +20,7 @@ import { WalkMode } from './play/walkMode';
 import { startBoot } from './ui/boot';
 import { installWater } from './nature/water';
 import { installCoupons } from './fun/coupons';
+import { installHome } from './ui/home';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 // 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后云散开；Nunito 的几个字重从这里开始在后台预加载
@@ -32,6 +33,7 @@ await boot.phase('sky');
 const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!).catch(boot.fail);
 installWater(world); // 水面每帧取雨量、角色涉水放波纹
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
+installHome(app); // 首页（H2）：你的星球放前排正中、名牌写 You、「Visit your planet」
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
 const walk = new WalkMode(app, planetScreen);
