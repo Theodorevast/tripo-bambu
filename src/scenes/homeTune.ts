@@ -50,6 +50,7 @@ function rowsFolder(parent: HomeTuneFolder, title: string, rows: HomeRows, apply
     ['backRowBack', 0, 8, 0.05, 'building next row back'],
     ['backRowUp', 0, 6, 0.05, 'building next row up'],
     ['arc', 0, 4, 0.01, 'arc (ends back) ×R'],
+    ['arcY', 0, 3, 0.01, 'smile (ends down) ×R'],
     ['wobble', 0, 1, 0.01, 'hand-made wobble ×R'],
   ]);
   f.on('change', apply);

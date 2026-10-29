@@ -27,6 +27,7 @@ export interface HomeRows {
   backRowBack: number; // 建设中的每多一排往后退多少
   backRowUp: number; // 每多一排抬高多少
   arc: number; // 每排两头往后弯多少（× 半径，按「离中间多远 / 半排宽」的平方）
+  arcY: number; // 每排两头往下弯多少（同上）：一排像一道微笑，相邻两颗的名牌一高一低，窄屏上也不挤在一起
   wobble: number; // 高低错落（× 半径）
 }
 
@@ -34,9 +35,9 @@ export const HOME_LAYOUT: { backScale: number; backDim: number; wide: HomeRows; 
   backScale: 0.6, // 建设中的星球缩到多大
   backDim: 0.24, // 建设中的星球往天色里淡多少（0..1）
   // 宽屏：你的星球站在正中最前面，别的建好的在它后面排成一道平缓的弧（左右对称），建设中的在更后、更高的地方
-  wide: { youAlone: true, youForward: 2.6, youDown: 0.95, youScale: 1.12, peek: 1.5, frontMax: 6, gap: 1.3, rowBack: 3.0, rowUp: 2.2, backMax: 6, backGap: 3.3, backDepth: 5.2, backUp: 3.1, backRowBack: 2.6, backRowUp: 1.25, arc: 1.4, wobble: 0.2 },
+  wide: { youAlone: true, youForward: 2.6, youDown: 0.95, youScale: 1.12, peek: 1.5, frontMax: 6, gap: 1.3, rowBack: 3.0, rowUp: 2.2, backMax: 6, backGap: 3.3, backDepth: 5.2, backUp: 3.1, backRowBack: 2.6, backRowUp: 1.25, arc: 1.4, arcY: 0, wobble: 0.2 },
   // 竖屏：一排排主要往上叠（rowUp 大、rowBack 小），镜头差不多平着看：每排都离镜头差不多远，星球在小屏幕上也够大；你的星球在最下面
-  tall: { youAlone: true, youForward: 0.9, youDown: 3.1, youScale: 1.15, peek: 0, frontMax: 3, gap: 1.0, rowBack: 0.9, rowUp: 2.75, backMax: 4, backGap: 1.1, backDepth: 1.6, backUp: 2.9, backRowBack: 0.8, backRowUp: 2.15, arc: 0.4, wobble: 0.1 },
+  tall: { youAlone: true, youForward: 0.9, youDown: 3.1, youScale: 1.15, peek: 0, frontMax: 3, gap: 1.0, rowBack: 0.9, rowUp: 2.75, backMax: 4, backGap: 1.1, backDepth: 1.6, backUp: 2.9, backRowBack: 0.8, backRowUp: 2.15, arc: 0.4, arcY: 0.95, wobble: 0.1 },
 };
 
 // 竖屏：宽高比小于这个用竖排
@@ -124,7 +125,7 @@ export function homeLayout(teams: HomeTeam[], youId: string | null, shape: HomeS
       // 你的星球单独站在前面时，正后面那颗（奇数颗的中间）抬高一点，从它上面露出来
       const peek = alone && row === 0 && i === mid ? p.peek * R : 0;
       const z = -row * p.rowBack * R - p.arc * R * u * u + (isYou ? p.youForward * R * 0.35 : 0);
-      const y = row * p.rowUp * R + peek + (isYou ? 0 : wob(index));
+      const y = row * p.rowUp * R + peek + (isYou ? 0 : wob(index)) - p.arcY * R * u * u;
       out.set(t.id, { id: t.id, pos: [xs[i], y, z], scale: isYou ? p.youScale : 1, dim: 0, tier: isYou ? 'you' : 'built', row: row + first });
       index++;
     });
@@ -149,7 +150,7 @@ export function homeLayout(teams: HomeTeam[], youId: string | null, shape: HomeS
     members.forEach((t, i) => {
       const u = xs[i] / half;
       const z = z0 - k * p.backRowBack * R - p.arc * 0.6 * R * u * u;
-      const y = y0 + k * p.backRowUp * R + wob(index) * 0.8;
+      const y = y0 + k * p.backRowUp * R + wob(index) * 0.8 - p.arcY * 0.8 * R * u * u;
       out.set(t.id, { id: t.id, pos: [xs[i], y, z], scale: s, dim: HOME_LAYOUT.backDim, tier: 'building', row: first + builtRows.length + k });
       index++;
     });

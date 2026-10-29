@@ -31,7 +31,7 @@ interface Slot {
   phase: CouponPhase;
   ticket: CouponTicket;
   t: number; // 进这个阶段以后多久了（wait：还要等多久）
-  T: number; // 飞多久
+  T: number; // 飞多久（pickup：飞向镜头用多久）
   origin: THREE.Vector3;
   up: THREE.Vector3;
   fwd: THREE.Vector3;
@@ -201,8 +201,38 @@ export class CouponField {
     s.hop.copy(s.normal.lengthSq() > 0 ? s.normal : s.up).multiplyScalar(0.55 * Math.max(1, s.spawnHero) * COUPONS.size);
     s.phase = 'pickup';
     s.t = 0;
+    s.T = COUPONS.pickup;
     s.hovered = false;
     return true;
+  }
+
+  // 首页（H2，fun/couponsHome.ts）：一张券从翠宝嘴里出来，不落地，直接（先往 hop 那边拱一下）飞到镜头前、交给领券窗口。
+  // from：嘴（世界坐标）；quat：刚出来时的朝向；size：刚出来时的长边；seconds：飞多久。走的是捡券那一段（pickup → held → onArrive）
+  launchTo(ticket: CouponTicket, from: THREE.Vector3, quat: THREE.Quaternion, size: number, hop: THREE.Vector3, camPos: THREE.Vector3, seconds: number): number {
+    const s = this.take();
+    s.id = this.nextId++;
+    s.ticket = ticket;
+    s.reduced = false;
+    s.phase = 'pickup';
+    s.t = 0;
+    s.T = Math.max(0.15, seconds);
+    s.spawnHero = 1;
+    s.hero = -1;
+    s.pos.copy(from);
+    s.from.copy(from);
+    s.quat.copy(quat);
+    s.fromQuat.copy(quat);
+    s.size = size;
+    s.fromSize = size;
+    s.fromDist = from.distanceTo(camPos);
+    s.hop.copy(hop);
+    s.normal.set(0, 0, 0);
+    s.phase0 = this.rand() * Math.PI * 2;
+    s.highlight = 0;
+    s.hovered = false;
+    s.opacity = 1;
+    this.syncVisible();
+    return s.id;
   }
 
   // 卡片接手以后：停在镜头前的那张淡掉、收回池子
@@ -293,7 +323,7 @@ export class CouponField {
         this.release(s);
         continue;
       }
-      if (s.phase === 'pickup' && s.t >= (s.reduced ? 0.25 : COUPONS.pickup)) {
+      if (s.phase === 'pickup' && s.t >= (s.reduced ? 0.25 : s.T)) {
         s.phase = 'held';
         s.t = 0;
         this.onArrive?.(s.id);
@@ -390,7 +420,7 @@ export class CouponField {
           s.opacity = 1 - smooth(Math.min(1, s.t / 0.25));
           break;
         }
-        const u = Math.min(1, s.t / COUPONS.pickup);
+        const u = Math.min(1, s.t / s.T);
         const e = pickupProgress(u, s.fromDist, pickTarget.pos.distanceTo(camPos));
         // 二次贝塞尔：起点 → 起点上方 → 镜头前
         _b.copy(s.from).add(s.hop);

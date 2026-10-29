@@ -27,12 +27,25 @@ declare global {
   }
 }
 
+// 「Create a planet」：建星球的流程（另一个任务做的 openCreatePlanet）装上以后调 setCreatePlanet 接过来；
+// 还没装上时去 #/create（路由还不认识它时就留在首页）
+let createPlanet: (() => void) | null = null;
+export function setCreatePlanet(fn: (() => void) | null): void {
+  createPlanet = fn;
+}
+
+export function openCreate(): void {
+  if (createPlanet) createPlanet();
+  else location.hash = '#/create';
+}
+
 export function installHome(app: App): HomeDebug {
   const you = app.you.teamId;
   app.world.setYou(you);
   app.galaxyUi.setYou(you);
   app.topbar.onVisit = () => app.galaxyUi.visitTeam(you);
   app.topbar.onVisitHover = (on) => app.galaxyUi.hoverTeam(on ? you : null);
+  app.topbar.onCreate = openCreate;
   app.topbar.refreshVisit();
   const debug: HomeDebug = {
     state: () => ({

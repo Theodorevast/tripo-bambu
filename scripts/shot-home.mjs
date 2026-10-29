@@ -10,7 +10,8 @@ const out = process.argv[2] ?? 'shots/home';
 mkdirSync(out, { recursive: true });
 const WEBGL2 = process.env.WEBGL2 === '1';
 const TEAMS = Number(process.env.TEAMS ?? 0);
-const tag = (WEBGL2 ? 'webgl2' : 'webgpu') + (TEAMS ? `-t${TEAMS}` : '');
+const ACTIVE = Number(process.env.ACTIVE ?? 0);
+const tag = (WEBGL2 ? 'webgl2' : 'webgpu') + (TEAMS ? `-t${TEAMS}` : '') + (ACTIVE ? `-a${ACTIVE}` : '');
 const { server, base } = await startServer({ cacheDir: process.env.VITE_CACHE_DIR ?? '.tmp/vite-home' });
 const browser = await launch();
 const errors = [];
@@ -20,10 +21,12 @@ async function open(viewport, dpr) {
   const page = await ctx.newPage();
   errors.push(watchErrors(page)); // 数组之后还会被填：最后再 flat
   if (WEBGL2) await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
-  // TEAMS=n：团队数换成 n 个（看版式能不能跟着团队数变）：种子 JSON 模块换成只留前 n 个团队的版本
-  if (TEAMS) await page.route(/\/src\/data\/seed\.json/, (route) => {
+  // TEAMS=n：团队数换成 n 个；ACTIVE=n：前 n 个团队都算建好了（看版式能不能跟着团队数、建好的数量变）。
+  // 种子 JSON 模块换成改过的版本（不改 seed.json 本身）
+  if (TEAMS || ACTIVE) await page.route(/\/src\/data\/seed\.json/, (route) => {
     const seed = JSON.parse(readFileSync('src/data/seed.json', 'utf8'));
-    seed.teams = seed.teams.slice(0, TEAMS);
+    if (TEAMS) seed.teams = seed.teams.slice(0, TEAMS);
+    seed.teams.forEach((t, i) => { if (i < ACTIVE) t.status = 'active'; });
     return route.fulfill({ status: 200, contentType: 'text/javascript', body: `export default ${JSON.stringify(seed)};` });
   });
   await page.goto(`${base}/?nolocal`);
@@ -41,6 +44,18 @@ try {
     const { ctx, page } = await open({ width: 1440, height: 900 }, 1);
     await frames(page);
     await page.screenshot({ path: join(out, `home-1440-${tag}.png`) });
+    // ADD=1：运行时加一颗星球（「Create a planet」建好以后 World.addPlanet）：挪到一半、挪完各截一张
+    if (process.env.ADD === '1') {
+      await page.evaluate(() => {
+        const w = window.__world;
+        const src = [...w.planets.values()][0].team;
+        w.addPlanet({ ...structuredClone(src), id: 'new-planet', name: 'Brand New Crew', status: 'active', color: '#e7799f' });
+      });
+      await page.waitForTimeout(450);
+      await page.screenshot({ path: join(out, `home-add-mid-${tag}.png`) });
+      await page.waitForTimeout(2000);
+      await page.screenshot({ path: join(out, `home-add-${tag}.png`) });
+    }
     const home = await page.evaluate(() => !!window.__home);
     if (home) {
       // 悬停「你的星球」：名牌弹出来、星球放大慢慢转

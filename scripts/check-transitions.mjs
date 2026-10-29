@@ -48,7 +48,7 @@ async function openPage({ reduced = false } = {}) {
         r.frames.push(t - r.last);
         r.last = t;
         const s = window.__trans?.state();
-        if (s) r.samples.push({ at: t, kind: s.transition?.kind ?? null, t: s.transition?.t ?? null, veil: s.veil, flash: s.flash, queued: s.queued, holding: s.holding, peek: s.peek, placed: window.__app?.placedIds().length ?? 0 });
+        if (s) r.samples.push({ at: t, kind: s.transition?.kind ?? null, t: s.transition?.t ?? null, veil: s.veil, flash: s.flash, queued: s.queued, holding: s.holding, peek: s.peek || (window.__home?.state().intro ?? false), placed: window.__app?.placedIds().length ?? 0 });
       }
       requestAnimationFrame(tick);
     };
@@ -134,7 +134,7 @@ try {
     await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
     if (process.env.SKY) {
       await page.evaluate((p) => window.__world.setSkyPreset(p), process.env.SKY);
-      await page.waitForFunction(() => !window.__trans.state().peek, null, { timeout: 8000 });
+      await page.waitForFunction(() => !window.__trans.state().peek && !window.__home?.state().intro, null, { timeout: 8000 });
       await page.waitForTimeout(2200); // 天空预设 2 秒过渡完
       await page.evaluate(() => window.__trans.peek());
     }
@@ -166,13 +166,15 @@ try {
     await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
     const backend = await page.evaluate(() => window.__app.backend());
     await startRec(page);
-    const peeked = await until(page, () => window.__trans.state().peek, null, 3000);
-    const peekEnded = await until(page, () => !window.__trans.state().peek, null, 6000);
+    // H2：开场的探头从「星球后面」改到首页右下角躲着的翠宝（fun/couponsHome.ts 接过 director.peekIntro）：看 window.__home.state().intro
+    const peeking = () => window.__trans.state().peek || window.__home?.state().intro === true;
+    const peeked = await until(page, peeking, null, 3000);
+    const peekEnded = await until(page, () => !window.__trans.state().peek && !window.__home?.state().intro, null, 6000);
     const peekRec = await stopRec(page);
     const peekFrames = peekRec.frames.slice(1);
     const peekMax = Math.max(...peekFrames);
     table.push({ name: '开场：翠宝探头', kind: 'peek', frames: peekFrames.length, max: peekMax, worstAt: '探头', p95: pct(peekFrames, 0.95), p50: pct(peekFrames, 0.5), over33: peekFrames.filter((f) => f > 33.4).length, flashMs: 0, gaps: [] });
-    check('开场：飞行落定后翠宝从星球后面探头、挥手、缩回去', peeked && peekEnded && peekRec.samples.some((x) => x.peek), `${peekRec.samples.filter((x) => x.peek).length} 帧`);
+    check('开场：飞行落定后翠宝从右下角探出来、挥手、缩回去', peeked && peekEnded && peekRec.samples.some((x) => x.peek), `${peekRec.samples.filter((x) => x.peek).length} 帧`);
     check('开场探头期间最长帧间隔 < 50 ms', peekMax < 50, `${backend}，最长 ${ms(peekMax)}，p95 ${ms(pct(peekFrames, 0.95))}`);
 
     // —— 2. 星系 → 星球：穿云（真的点星球）——
@@ -262,7 +264,7 @@ try {
     await reduced.page.goto(`${base}/${QUERY}`);
     await reduced.page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
     await reduced.page.waitForTimeout(500);
-    const noPeek = !(await reduced.page.evaluate(() => window.__trans.state().peek));
+    const noPeek = !(await reduced.page.evaluate(() => window.__trans.state().peek || window.__home?.state().intro === true));
     const rEnter = await measure(reduced.page, `减少动态效果：星系 → ${you.id}`, { kind: 'fade', trigger: () => reduced.page.evaluate((id) => { location.hash = `#/t/${id}`; }, you.id), done: () => planetReady(reduced.page, you.id) });
     const rLeave = await measure(reduced.page, '减少动态效果：回星系', { kind: 'fade', trigger: () => reduced.page.evaluate(() => { location.hash = '#/'; }), done: () => galaxyIdle(reduced.page) });
     check('减少动态效果：转场都是淡入淡出（不飞、不闪、不探头）', noPeek && rEnter.row.kind === 'fade' && rLeave.row.kind === 'fade' && rEnter.row.flashMs === 0 && rLeave.row.flashMs === 0);

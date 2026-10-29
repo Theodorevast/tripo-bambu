@@ -20,6 +20,7 @@ import { WalkMode } from './play/walkMode';
 import { startBoot } from './ui/boot';
 import { installWater } from './nature/water';
 import { installCoupons } from './fun/coupons';
+import { installHomeTriboo } from './fun/couponsHome';
 import { installHome } from './ui/home';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
@@ -33,11 +34,12 @@ await boot.phase('sky');
 const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!).catch(boot.fail);
 installWater(world); // 水面每帧取雨量、角色涉水放波纹
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
-installHome(app); // 首页（H2）：你的星球放前排正中、名牌写 You、「Visit your planet」
+const home = installHome(app); // 首页（H2）：你的星球放前排正中、名牌写 You、「Visit your planet」
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
 const walk = new WalkMode(app, planetScreen);
-installCoupons(app, planetScreen, walk, editor); // 点翠宝吐优惠券（fun/coupons.ts）：站桩和漫游的翠宝能点，模型、着色器在后台预热
+const coupons = installCoupons(app, planetScreen, walk, editor); // 点翠宝吐优惠券（fun/coupons.ts）：站桩和漫游的翠宝能点，模型、着色器在后台预热
+installHomeTriboo(app, coupons, home); // 首页右下角躲着的翠宝（H2）：点它吐一张券，展开成领券窗口
 app.planetLayer = {
   enter: (team) => {
     planetScreen.enter(team); // 立即返回：展台马上摆好，模型在后台加载

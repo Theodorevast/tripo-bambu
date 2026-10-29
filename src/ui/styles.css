@@ -128,7 +128,10 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
 .tb-title[data-home] { max-width: min(430px, 40vw); padding: 14px 20px 16px 20px; border-radius: 24px; rotate: -0.8deg; }
 .tb-title[data-home] .tb-name { margin: 0; font-size: 34px; line-height: 1.02; letter-spacing: -0.005em; }
 .tb-tagline { margin: 7px 0 13px; font: 700 15px/1.38 var(--font-ui); color: var(--ink-dim); text-wrap: pretty; }
+.tb-ctas { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 :where(#app) .tb-visit { display: inline-flex; align-items: center; gap: 7px; padding: 11px 16px 12px 18px; border-radius: 16px; font-size: 15px; }
+:where(#app) .tb-create { display: inline-flex; align-items: center; gap: 6px; padding: 11px 15px 12px 12px; border-radius: 16px; font-size: 14.5px; }
+.tb-create-icon { width: 1.15em; height: 1.15em; color: var(--yolk-ledge); }
 .tb-visit-arrow { width: 1.1em; height: 1.1em; transition: transform 0.35s var(--bounce); }
 .tb-visit:hover .tb-visit-arrow { transform: translateX(3px); }
 
@@ -181,6 +184,8 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
   .tb-title[data-home] .tb-name { font-size: 24px; }
   .tb-tagline { margin: 4px 0 9px; font-size: 13px; }
   :where(#app) .tb-visit { padding: 9px 13px 10px 14px; font-size: 13.5px; border-radius: 13px; }
+  :where(#app) .tb-create { padding: 9px 12px 10px 10px; font-size: 13px; border-radius: 13px; }
+  .tb-ctas { gap: 8px; }
   .pt-card { gap: 4px; padding: 3px 8px 4px 5px; }
   .pt-dot { width: 10px; height: 10px; }
   .pt-name { font-size: 11.5px; }
