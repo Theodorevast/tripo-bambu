@@ -14,14 +14,15 @@ export const LIMITS = {
 
 // 团队色：绘本里的几种糖果色（和界面的翠宝黄、莓红、天蓝、叶绿一个调子），每个带一个名字（读屏、悬停提示用）
 export const TEAM_COLORS: ReadonlyArray<{ name: string; hex: string }> = [
-  { name: 'Sunflower', hex: '#f2b705' },
-  { name: 'Peach', hex: '#ef9550' },
-  { name: 'Berry', hex: '#e7799f' },
-  { name: 'Lilac', hex: '#9a80dc' },
-  { name: 'Sky', hex: '#4b9fe0' },
-  { name: 'Lagoon', hex: '#3aa9a0' },
-  { name: 'Leaf', hex: '#62b357' },
-  { name: 'Clay', hex: '#c4895a' },
+  // 第二版（v2-ui）：同样的八种色相，饱和度降下来，和夜空、香槟金放在一起不刺眼（不要糖果色）
+  { name: 'Sunflower', hex: '#d6b35e' },
+  { name: 'Peach', hex: '#dea283' },
+  { name: 'Berry', hex: '#b9868f' },
+  { name: 'Lilac', hex: '#8e84b6' },
+  { name: 'Sky', hex: '#6f8db0' },
+  { name: 'Lagoon', hex: '#5f8f8c' },
+  { name: 'Leaf', hex: '#8d9c6c' },
+  { name: 'Clay', hex: '#b48766' },
 ];
 
 // 每种星球一句话（第二步预设旁边的小字）

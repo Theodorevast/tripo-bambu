@@ -1,72 +1,43 @@
 import { COUPON_KINDS, type CouponKind } from '../data/coupons';
 import { mulberry32 } from '../planet/rng';
 
-// 券面（canvas 画的，不用外部图片）：带小锯齿边的纸票，翠宝黄配奶油白，左上角小翠宝和 Tripo 字样，中间大大的面额，
-// 右边一截票根（虚线撕口、上下两个半圆缺口）。3D 的券用一张图集（每种券一行，最后一行是背面），
-// 卡片上的大券用同一个函数按卡片的像素画一张，飞到镜头前交给界面时两边看起来是同一张。
+// 券面（canvas 画的，不用外部图片）。第二版（v2-ui）：一张烫金卡片——深色的底（两种：Indigo、Dusk violet 轮着用），
+// 两道香槟金细线的边框、四角的小星，左上角小翠宝（黑色圆身子描一圈细金边）和 Tripo 字样，中间金色渐变的大面额（Cinzel），
+// 下面 Cormorant 斜体的券名；右边一截用金色点线隔开：一个小小的天体仪环、竖着的 TRIBOO。不再是带锯齿的卡通票根。
+// 3D 的券用一张图集（每种券一行，最后一行是背面），卡片上的大券用同一个函数按卡片的像素画一张，
+// 飞到镜头前交给界面时两边看起来是同一张（形状靠透明度：圆角外面是透明的，3D 那边按 alpha 裁）。
 
 export const TICKET_W = 512; // 图集里一格的大小（像素）
 export const TICKET_H = 256;
 export const ATLAS_ROWS = COUPON_KINDS.length + 1; // 最后一行是背面
 export const BACK_ROW = COUPON_KINDS.length;
 
-export const YELLOW = '#f2b705'; // 翠宝黄
-export const CREAM = '#fbf3df';
-export const INK = '#2b2233';
-const FONT = "'Nunito', ui-rounded, system-ui, sans-serif";
+export const YELLOW = '#f2b705'; // Tripo 黄：只用在小翠宝的 T 上
+export const GOLD = '#d8c08e'; // 香槟金：细线、星、面额
+export const GOLD_DEEP = '#a8894f';
+export const STAR = '#f6f1e7'; // 最亮的字
+export const CREAM = STAR; // 第一版的名字（奶油白），留着
+export const INK = '#0f1530'; // 第一版的名字（券面上的深色字）：第二版是 Midnight
+const CAPS = "'Cinzel', 'Cormorant Garamond', Georgia, serif";
+const SERIF = "'Cormorant Garamond', Georgia, serif";
+const SANS = "'Inter', system-ui, sans-serif";
 
 type Ctx = CanvasRenderingContext2D;
 
-// 券的外形（x, y, w, h 是整格，s 是缩放：格宽 512 时 = 1）：圆角矩形，左右两头一排小锯齿，票根撕口上下各一个半圆缺口。
-// mirror：背面（从背后看，票根在左边）
-function ticketPath(ctx: Ctx, x: number, y: number, w: number, h: number, s: number, mirror: boolean): void {
+// 券的外形（x, y, w, h 是整格，s 是缩放：格宽 512 时 = 1）：四周留 10 的边，圆角 14
+function cardPath(ctx: Ctx, x: number, y: number, w: number, h: number, s: number): void {
   const pad = 10 * s;
-  const l = x + pad;
-  const r = x + w - pad;
-  const t = y + pad;
-  const b = y + h - pad;
-  const tooth = 9 * s; // 锯齿的深度
-  const teeth = 9; // 一边几个齿
-  const notch = 15 * s;
-  const stub = stubX(x, w, s, mirror);
-  const corner = 10 * s;
-  ctx.beginPath();
-  // 上边：左上角 → 缺口 → 右上角
-  ctx.moveTo(l + tooth + corner, t);
-  ctx.lineTo(stub - notch, t);
-  ctx.arc(stub, t, notch, Math.PI, 0, true);
-  ctx.lineTo(r - tooth - corner, t);
-  ctx.quadraticCurveTo(r - tooth, t, r - tooth, t + corner);
-  // 右边：锯齿
-  const step = (b - t - 2 * corner) / teeth;
-  for (let i = 0; i < teeth; i++) {
-    const y0 = t + corner + i * step;
-    ctx.lineTo(r, y0 + step / 2);
-    ctx.lineTo(r - tooth, y0 + step);
-  }
-  ctx.quadraticCurveTo(r - tooth, b, r - tooth - corner, b);
-  // 下边：右下角 → 缺口 → 左下角
-  ctx.lineTo(stub + notch, b);
-  ctx.arc(stub, b, notch, 0, Math.PI, true);
-  ctx.lineTo(l + tooth + corner, b);
-  ctx.quadraticCurveTo(l + tooth, b, l + tooth, b - corner);
-  // 左边：锯齿
-  for (let i = 0; i < teeth; i++) {
-    const y0 = b - corner - i * step;
-    ctx.lineTo(l, y0 - step / 2);
-    ctx.lineTo(l + tooth, y0 - step);
-  }
-  ctx.quadraticCurveTo(l + tooth, t, l + tooth + corner, t);
-  ctx.closePath();
+  roundRect(ctx, x + pad, y + pad, w - 2 * pad, h - 2 * pad, 14 * s);
 }
 
-// 票根撕口的 x：正面在右边四分之一处，背面镜像
+// 票根的分隔线的 x：正面在右边，背面（从背后看）镜像到左边
 function stubX(x: number, w: number, s: number, mirror: boolean): number {
   const at = w - 122 * s;
   return mirror ? x + w - at : x + at;
 }
 
-// 小翠宝（和「Made with Tripo」徽章、3D 翠宝胸前同一套线段）：黑色圆球、白色 V、翠宝黄的 T。cx, cy 圆心，r 半径
+// 小翠宝（和「Made with Tripo」徽章、3D 翠宝胸前同一套线段）：黑色圆球、白色 V、Tripo 黄的 T，外面一圈细金边（深色底上看得出圆）。
+// cx, cy 圆心，r 半径
 export function drawMark(ctx: Ctx, cx: number, cy: number, r: number): void {
   ctx.save();
   ctx.translate(cx, cy);
@@ -75,6 +46,11 @@ export function drawMark(ctx: Ctx, cx: number, cy: number, r: number): void {
   ctx.beginPath();
   ctx.arc(0, 0, 1, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = 'rgba(216, 192, 142, 0.8)';
+  ctx.lineWidth = 0.08;
+  ctx.beginPath();
+  ctx.arc(0, 0, 1.04, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = '#f4f1ea';
@@ -95,14 +71,14 @@ export function drawMark(ctx: Ctx, cx: number, cy: number, r: number): void {
   ctx.restore();
 }
 
-// 四角的小星星（票根上、背面的花纹）
+// 四角小星（四个尖、细腰）
 function sparkle(ctx: Ctx, cx: number, cy: number, r: number, color: string): void {
   ctx.save();
   ctx.fillStyle = color;
   ctx.beginPath();
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
-    const rr = i % 2 === 0 ? r : r * 0.32;
+    const rr = i % 2 === 0 ? r : r * 0.22;
     ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
   }
   ctx.closePath();
@@ -110,132 +86,230 @@ function sparkle(ctx: Ctx, cx: number, cy: number, r: number, color: string): vo
   ctx.restore();
 }
 
-// 纸的质感：一层淡淡的斑点 + 四周稍暗（固定的随机数，每次画出来一样）
-function paperGrain(ctx: Ctx, x: number, y: number, w: number, h: number, s: number, seed: number): void {
+// 深色卡面的质感：很淡的浅色斑点（像胶片颗粒），右上角一团很淡的暖光（像烫金反光）。固定的随机数，每次画出来一样
+function surface(ctx: Ctx, x: number, y: number, w: number, h: number, s: number, seed: number): void {
   const rand = mulberry32(seed);
   ctx.save();
-  for (let i = 0; i < 260; i++) {
-    ctx.fillStyle = rand() < 0.5 ? 'rgba(90, 60, 20, 0.07)' : 'rgba(255, 255, 255, 0.12)';
-    const r = (0.6 + rand() * 1.4) * s;
+  for (let i = 0; i < 220; i++) {
+    ctx.fillStyle = rand() < 0.7 ? 'rgba(246, 241, 231, 0.05)' : 'rgba(216, 192, 142, 0.08)';
+    const r = (0.4 + rand() * 1.1) * s;
     ctx.beginPath();
     ctx.arc(x + rand() * w, y + rand() * h, r, 0, Math.PI * 2);
     ctx.fill();
   }
-  const g = ctx.createRadialGradient(x + w * 0.45, y + h * 0.45, h * 0.2, x + w / 2, y + h / 2, w * 0.62);
-  g.addColorStop(0, 'rgba(255, 250, 235, 0.10)');
-  g.addColorStop(1, 'rgba(110, 70, 20, 0.12)');
+  const g = ctx.createRadialGradient(x + w * 0.78, y + h * 0.12, 0, x + w * 0.78, y + h * 0.12, w * 0.55);
+  g.addColorStop(0, 'rgba(230, 194, 166, 0.16)');
+  g.addColorStop(1, 'rgba(230, 194, 166, 0)');
   ctx.fillStyle = g;
   ctx.fillRect(x, y, w, h);
   ctx.restore();
 }
 
-// 一张券的正面，画进 (x, y, w, h) 这一格（宽高比 2:1）
-export function drawTicket(ctx: Ctx, kind: CouponKind, x: number, y: number, w: number, h: number): void {
-  const s = w / TICKET_W;
-  const main = kind.paper === 'yellow' ? YELLOW : CREAM;
-  const side = kind.paper === 'yellow' ? CREAM : YELLOW;
-  const stub = stubX(x, w, s, false);
+// 两道细金线的边框，四角的小星压在内框的角上
+function frame(ctx: Ctx, x: number, y: number, w: number, h: number, s: number): void {
+  const pad = 10 * s;
+  const l = x + pad;
+  const t = y + pad;
+  const iw = w - 2 * pad;
+  const ih = h - 2 * pad;
   ctx.save();
-  ticketPath(ctx, x, y, w, h, s, false);
-  ctx.clip();
-  ctx.fillStyle = main;
-  ctx.fillRect(x, y, stub - x, h);
-  ctx.fillStyle = side;
-  ctx.fillRect(stub, y, x + w - stub, h);
-  paperGrain(ctx, x, y, w, h, s, 7 + kind.id.length * 13);
-  // 内圈的细线（印刷的边框）
-  ctx.strokeStyle = 'rgba(70, 45, 15, 0.28)';
+  ctx.strokeStyle = GOLD;
+  ctx.globalAlpha = 0.85;
   ctx.lineWidth = 2 * s;
-  ctx.setLineDash([]);
-  roundRect(ctx, x + 34 * s, y + 24 * s, stub - x - 46 * s, h - 48 * s, 12 * s);
+  roundRect(ctx, l + 9 * s, t + 9 * s, iw - 18 * s, ih - 18 * s, 8 * s);
   ctx.stroke();
-  // 撕口的虚线
-  ctx.strokeStyle = 'rgba(70, 45, 15, 0.5)';
-  ctx.lineWidth = 3 * s;
-  ctx.setLineDash([7 * s, 7 * s]);
-  ctx.beginPath();
-  ctx.moveTo(stub, y + 30 * s);
-  ctx.lineTo(stub, y + h - 30 * s);
+  ctx.globalAlpha = 0.38;
+  ctx.lineWidth = 1.2 * s;
+  roundRect(ctx, l + 16 * s, t + 16 * s, iw - 32 * s, ih - 32 * s, 4 * s);
   ctx.stroke();
-  ctx.setLineDash([]);
-  // 左上：小翠宝 + Tripo
-  drawMark(ctx, x + 66 * s, y + 58 * s, 17 * s);
-  ctx.fillStyle = INK;
-  ctx.textBaseline = 'alphabetic';
-  ctx.font = `800 ${30 * s}px ${FONT}`;
-  ctx.fillText('Tripo', x + 92 * s, y + 69 * s);
-  ctx.font = `800 ${15 * s}px ${FONT}`;
-  ctx.globalAlpha = 0.62;
-  ctx.textAlign = 'right';
-  ctx.fillText('COUPON', stub - 24 * s, y + 66 * s);
-  ctx.textAlign = 'left';
   ctx.globalAlpha = 1;
-  // 面额：大字 + 单位
-  ctx.font = `800 ${86 * s}px ${FONT}`;
-  const vx = x + 50 * s;
-  const vy = y + 168 * s;
-  ctx.fillText(kind.value, vx, vy);
-  const vw = ctx.measureText(kind.value).width;
-  ctx.font = `800 ${22 * s}px ${FONT}`;
-  ctx.fillText(kind.unit.toUpperCase(), vx + vw + 10 * s, vy - 8 * s);
-  // 券名
-  ctx.font = `700 ${19 * s}px ${FONT}`;
-  ctx.globalAlpha = 0.78;
-  ctx.fillText(kind.title, x + 52 * s, y + 210 * s);
-  ctx.globalAlpha = 1;
-  // 票根：一颗星星 + 竖着的 TRIBOO
-  const sx = (stub + x + w - 10 * s) / 2;
-  sparkle(ctx, sx, y + 70 * s, 20 * s, kind.paper === 'yellow' ? YELLOW : CREAM);
-  ctx.save();
-  ctx.translate(sx + 6 * s, y + 160 * s);
-  ctx.rotate(-Math.PI / 2);
-  ctx.font = `800 ${17 * s}px ${FONT}`;
-  ctx.fillStyle = INK;
-  ctx.globalAlpha = 0.7;
-  ctx.textAlign = 'center';
-  ctx.fillText('TRIBOO', 0, 0);
-  ctx.restore();
+  for (const [cx, cy] of [[l + 16 * s, t + 16 * s], [l + iw - 16 * s, t + 16 * s], [l + 16 * s, t + ih - 16 * s], [l + iw - 16 * s, t + ih - 16 * s]]) sparkle(ctx, cx, cy, 6 * s, GOLD);
   ctx.restore();
 }
 
-// 背面：奶油色的纸，斜着排的小翠宝花纹，中间 Tripo；外形是正面的镜像（从背后看票根在左边）
+// 金色的点线（票根的分隔）
+function dottedLine(ctx: Ctx, x: number, y0: number, y1: number, s: number): void {
+  ctx.save();
+  ctx.strokeStyle = GOLD;
+  ctx.globalAlpha = 0.75;
+  ctx.lineWidth = 2.2 * s;
+  ctx.lineCap = 'round';
+  ctx.setLineDash([0.1, 7 * s]);
+  ctx.beginPath();
+  ctx.moveTo(x, y0);
+  ctx.lineTo(x, y1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// 小小的天体仪环：一圈细线、一圈刻度、中间一颗星（票根上）
+function orrery(ctx: Ctx, cx: number, cy: number, r: number, s: number): void {
+  ctx.save();
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 1.4 * s;
+  ctx.globalAlpha = 0.8;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1 * s;
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const r0 = r * (i % 6 === 0 ? 0.7 : 0.82);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+    ctx.lineTo(cx + Math.cos(a) * r * 0.94, cy + Math.sin(a) * r * 0.94);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.45;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r * 1.35, r * 0.42, -0.35, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  sparkle(ctx, cx, cy, r * 0.42, GOLD);
+  ctx.restore();
+}
+
+// 字距（Chrome 99+ 的 ctx.letterSpacing；不认的浏览器照常画，只是没有字距）
+function spacing(ctx: Ctx, px: number): void {
+  (ctx as Ctx & { letterSpacing?: string }).letterSpacing = `${px}px`;
+}
+
+// 一张券的正面，画进 (x, y, w, h) 这一格（宽高比 2:1）
+export function drawTicket(ctx: Ctx, kind: CouponKind, x: number, y: number, w: number, h: number): void {
+  const s = w / TICKET_W;
+  const deep = kind.paper === 'yellow'; // 第一版的黄券 → Indigo 底，奶油券 → Dusk violet 底
+  const stub = stubX(x, w, s, false);
+  ctx.save();
+  cardPath(ctx, x, y, w, h, s);
+  ctx.clip();
+  const g = ctx.createLinearGradient(x, y, x + w, y + h);
+  if (deep) {
+    g.addColorStop(0, '#29336e');
+    g.addColorStop(0.55, '#1b2348');
+    g.addColorStop(1, '#111733');
+  } else {
+    g.addColorStop(0, '#47427a');
+    g.addColorStop(0.55, '#322f5e');
+    g.addColorStop(1, '#1e1d42');
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+  surface(ctx, x, y, w, h, s, 7 + kind.id.length * 13);
+  frame(ctx, x, y, w, h, s);
+  dottedLine(ctx, stub, y + 40 * s, y + h - 40 * s, s);
+  // 左上：小翠宝 + Tripo；主区右上角：COUPON
+  drawMark(ctx, x + 68 * s, y + 64 * s, 15 * s);
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = STAR;
+  ctx.font = `600 ${25 * s}px ${SANS}`;
+  spacing(ctx, 0);
+  ctx.fillText('Tripo', x + 92 * s, y + 73 * s);
+  ctx.font = `500 ${11.5 * s}px ${SANS}`;
+  spacing(ctx, 3 * s);
+  ctx.fillStyle = GOLD;
+  ctx.textAlign = 'right';
+  ctx.fillText('COUPON', stub - 30 * s, y + 70 * s);
+  ctx.textAlign = 'left';
+  // 面额：金色渐变的大字（Cinzel）+ 单位（Inter 小号大写）；太长时缩小，不压到票根
+  const vx = x + 52 * s;
+  const vy = y + 168 * s;
+  const unit = kind.unit.toUpperCase();
+  ctx.font = `500 ${15 * s}px ${SANS}`;
+  spacing(ctx, 3 * s);
+  const uw = ctx.measureText(unit).width;
+  let size = 74;
+  spacing(ctx, 0);
+  for (; size > 40; size -= 4) {
+    ctx.font = `600 ${size * s}px ${CAPS}`;
+    if (vx + ctx.measureText(kind.value).width + 12 * s + uw < stub - 22 * s) break;
+  }
+  const vw = ctx.measureText(kind.value).width;
+  const foil = ctx.createLinearGradient(0, vy - size * 0.8 * s, 0, vy + 4 * s);
+  foil.addColorStop(0, '#f8ecc8');
+  foil.addColorStop(0.5, GOLD);
+  foil.addColorStop(1, GOLD_DEEP);
+  ctx.fillStyle = foil;
+  ctx.fillText(kind.value, vx, vy);
+  ctx.font = `500 ${15 * s}px ${SANS}`;
+  spacing(ctx, 3 * s);
+  ctx.fillStyle = GOLD;
+  ctx.fillText(unit, vx + vw + 12 * s, vy - 9 * s);
+  // 券名：Cormorant 斜体
+  spacing(ctx, 0);
+  ctx.font = `italic 500 ${23 * s}px ${SERIF}`;
+  ctx.fillStyle = STAR;
+  ctx.globalAlpha = 0.82;
+  ctx.fillText(kind.title, x + 54 * s, y + 208 * s);
+  ctx.globalAlpha = 1;
+  // 票根：小天体仪 + 竖着的 TRIBOO
+  const sx = (stub + x + w - 10 * s) / 2;
+  orrery(ctx, sx, y + 76 * s, 19 * s, s);
+  ctx.save();
+  ctx.translate(sx + 5 * s, y + 168 * s);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = `600 ${13 * s}px ${CAPS}`;
+  spacing(ctx, 4 * s);
+  ctx.fillStyle = GOLD;
+  ctx.textAlign = 'center';
+  ctx.fillText('TRIBOO', 0, 0);
+  ctx.restore();
+  spacing(ctx, 0);
+  ctx.restore();
+}
+
+// 背面：更深的 Midnight 底，一片淡淡的星座（星点和细线），两道细金线的边框；中间一块细线框的小牌子写 Tripo。
+// 从背后看票根在左边（分隔线镜像）
 export function drawBack(ctx: Ctx, x: number, y: number, w: number, h: number): void {
   const s = w / TICKET_W;
   ctx.save();
-  ticketPath(ctx, x, y, w, h, s, true);
+  cardPath(ctx, x, y, w, h, s);
   ctx.clip();
-  ctx.fillStyle = '#f6ecd4';
+  const g = ctx.createLinearGradient(x, y, x + w, y + h);
+  g.addColorStop(0, '#1d2450');
+  g.addColorStop(1, '#0d1230');
+  ctx.fillStyle = g;
   ctx.fillRect(x, y, w, h);
-  paperGrain(ctx, x, y, w, h, s, 99);
-  ctx.globalAlpha = 0.16;
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col < 8; col++) {
-      const cx = x + (col + (row % 2) * 0.5) * 70 * s + 20 * s;
-      const cy = y + 34 * s + row * 62 * s;
-      if ((row + col) % 2 === 0) drawMark(ctx, cx, cy, 11 * s);
-      else sparkle(ctx, cx, cy, 10 * s, '#c98f00');
+  surface(ctx, x, y, w, h, s, 99);
+  // 星座：几组星点，用细线连起来
+  const rand = mulberry32(404);
+  ctx.strokeStyle = GOLD;
+  ctx.fillStyle = STAR;
+  for (let c = 0; c < 5; c++) {
+    const cx = x + (60 + c * 92 + rand() * 30) * s;
+    const cy = y + (60 + rand() * 140) * s;
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i < 4; i++) pts.push([cx + (rand() - 0.5) * 80 * s, cy + (rand() - 0.5) * 70 * s]);
+    ctx.globalAlpha = 0.22;
+    ctx.lineWidth = 1 * s;
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    ctx.stroke();
+    ctx.globalAlpha = 0.6;
+    for (const [px, py] of pts) {
+      ctx.beginPath();
+      ctx.arc(px, py, (1 + rand() * 1.2) * s, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
   ctx.globalAlpha = 1;
-  const stub = stubX(x, w, s, true);
-  ctx.strokeStyle = 'rgba(70, 45, 15, 0.45)';
-  ctx.lineWidth = 3 * s;
-  ctx.setLineDash([7 * s, 7 * s]);
-  ctx.beginPath();
-  ctx.moveTo(stub, y + 30 * s);
-  ctx.lineTo(stub, y + h - 30 * s);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  // 中间一块奶油底，压着字
-  const cx = (stub + x + w) / 2;
-  ctx.fillStyle = 'rgba(251, 243, 223, 0.9)';
-  roundRect(ctx, cx - 120 * s, y + 92 * s, 240 * s, 72 * s, 36 * s);
+  frame(ctx, x, y, w, h, s);
+  dottedLine(ctx, stubX(x, w, s, true), y + 40 * s, y + h - 40 * s, s);
+  // 中间的小牌子：深色底、细金线框，小翠宝 + Tripo
+  const cx = x + w / 2 + 40 * s;
+  ctx.fillStyle = 'rgba(13, 18, 48, 0.9)';
+  roundRect(ctx, cx - 112 * s, y + 96 * s, 224 * s, 64 * s, 6 * s);
   ctx.fill();
-  drawMark(ctx, cx - 70 * s, y + 128 * s, 20 * s);
-  ctx.fillStyle = INK;
-  ctx.font = `800 ${36 * s}px ${FONT}`;
+  ctx.strokeStyle = GOLD;
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = 1.4 * s;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  drawMark(ctx, cx - 62 * s, y + 128 * s, 18 * s);
+  ctx.fillStyle = STAR;
+  ctx.font = `600 ${32 * s}px ${SANS}`;
   ctx.textBaseline = 'middle';
-  ctx.fillText('Tripo', cx - 42 * s, y + 130 * s);
+  ctx.fillText('Tripo', cx - 36 * s, y + 130 * s);
   ctx.restore();
 }
 
@@ -269,19 +343,24 @@ export function drawCardTicket(canvas: HTMLCanvasElement, kind: CouponKind, cssW
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, w, h);
   ctx.save();
-  ctx.shadowColor = 'rgba(70, 45, 15, 0.32)';
-  ctx.shadowBlur = 6 * dpr;
-  ctx.shadowOffsetY = 3 * dpr;
-  ticketPath(ctx, 0, 0, w, h, w / TICKET_W, false);
-  ctx.fillStyle = '#d9b46a';
+  ctx.shadowColor = 'rgba(4, 6, 18, 0.5)';
+  ctx.shadowBlur = 8 * dpr;
+  ctx.shadowOffsetY = 4 * dpr;
+  cardPath(ctx, 0, 0, w, h, w / TICKET_W);
+  ctx.fillStyle = '#141a3a';
   ctx.fill();
   ctx.restore();
   drawTicket(ctx, kind, 0, 0, w, h);
 }
 
-// 画字之前等 Nunito 下好（canvas 不会等字体：没下好就用后备字体画了）。最多等 ms 毫秒
+// 画字之前等字体下好（canvas 不会等字体：没下好就用后备字体画了）：Cinzel（面额、TRIBOO）、Inter（Tripo、COUPON、单位）、
+// Cormorant 斜体（券名）。启动画面一开始就在预加载这几种（ui/boot.ts），到这里一般早就到了。最多等 ms 毫秒
 export async function fontsReady(ms = 2500): Promise<void> {
   if (typeof document === 'undefined' || !document.fonts) return;
-  const load = Promise.all([document.fonts.load(`800 40px ${FONT}`), document.fonts.load(`700 20px ${FONT}`)]).then(() => {});
+  const load = Promise.all([
+    document.fonts.load(`600 40px ${CAPS}`),
+    document.fonts.load(`500 20px ${SANS}`),
+    document.fonts.load(`italic 500 20px ${SERIF}`),
+  ]).then(() => {});
   await Promise.race([load, new Promise<void>((r) => setTimeout(r, ms))]).catch(() => {});
 }

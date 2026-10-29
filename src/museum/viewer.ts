@@ -14,7 +14,7 @@ import { fitDistance, frameModel } from './framing';
 // 大图查看器：独立的 canvas 和渲染器（不依赖分区渲染），拖动 360° 旋转、滚轮缩放
 // open() 不等模型：信息面板立刻换好，模型在后台加载（不占住路由队列）；
 // 模型画出第一帧之前舞台显示 Loading，.viewer-stage 加上 ready 类之后才露出画布（脚本也等这个类）
-// 动效（U1）：从被点的卡片（或成员卡背面的小图）放大成舞台——共用元素过渡，只动 transform；信息卡从右边滑进来，关闭按钮弹出来；
+// 动效（U1，第二版改成柔和的缓动、不歪不弹）：从被点的卡片（或成员卡背面的小图）放大成舞台——共用元素过渡，只动 transform；信息卡从右边滑进来，关闭按钮淡入；
 // 模型准备好时从舞台上「蹦」出来。关掉时舞台缩回 Museum 里那张卡片（卡片不在屏幕上就原地缩小淡出），放完才藏起来、拿掉模型。
 // 减弱动效时只淡入淡出
 export class Viewer {
@@ -110,8 +110,8 @@ export class Viewer {
     const grow = from ? flipFrom(this.stage, from, { duration: 640, easing: curve('settle'), fill: 'backwards' }) : null;
     list.push(
       grow ?? animate(this.stage, [{ opacity: 0, transform: 'scale(0.9)' }, { opacity: 1, transform: 'none' }], { duration: 560, easing: curve('spring'), fill: 'backwards' }),
-      animate(this.info, [{ opacity: 0, transform: 'translateX(48px) rotate(2deg)' }, { opacity: 1, transform: 'none' }], { duration: 560, delay: 140, easing: curve('spring'), fill: 'backwards' }),
-      animate(this.closeButton, [{ opacity: 0, transform: 'scale(0.2) rotate(-120deg)' }, { opacity: 1, transform: 'none' }], { duration: 600, delay: 280, easing: curve('bounce'), fill: 'backwards' }),
+      animate(this.info, [{ opacity: 0, transform: 'translateX(24px)' }, { opacity: 1, transform: 'none' }], { duration: 640, delay: 140, easing: curve('spring'), fill: 'backwards' }),
+      animate(this.closeButton, [{ opacity: 0, transform: 'scale(0.9)' }, { opacity: 1, transform: 'none' }], { duration: 520, delay: 280, easing: curve('settle'), fill: 'backwards' }),
     );
     return list;
   }
@@ -125,7 +125,7 @@ export class Viewer {
     ];
     const outs: Array<[HTMLElement, Keyframe[], number]> = reduce
       ? [[this.stage, [{ opacity: 1 }, { opacity: 0 }], 200], [this.info, [{ opacity: 1 }, { opacity: 0 }], 200], [this.closeButton, [{ opacity: 1 }, { opacity: 0 }], 160]]
-      : [[this.info, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(40px)' }], 220], [this.closeButton, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.3) rotate(90deg)' }], 200]];
+      : [[this.info, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(40px)' }], 220], [this.closeButton, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.9)' }], 200]];
     for (const [n, frames, duration] of outs) list.push(animate(n, frames, { duration, easing: EASE_IN, fill: 'forwards' }));
     if (reduce) return list;
     const to = target?.getBoundingClientRect();

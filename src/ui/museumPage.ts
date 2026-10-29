@@ -36,13 +36,11 @@ interface Parts {
 const SPIN_IDLE = 0.45;
 const SPIN_HOVER = 2.1;
 
-// 作品第一次出现在卡片里时「蹦」出来：阻尼弹簧，0 → 1，带一点过冲（约 0.55 秒停稳）
+// 作品第一次出现在卡片里时慢慢长出来：0 → 1，先快后慢、不过冲（0.7 秒停稳）。第二版不再用带过冲的阻尼弹簧
 function pop(t: number): number {
-  if (t >= 0.6) return 1;
-  const w = 15;
-  const z = 0.48;
-  const wd = w * Math.sqrt(1 - z * z);
-  return 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + ((z * w) / wd) * Math.sin(wd * t));
+  if (t >= 0.7) return 1;
+  const k = 1 - t / 0.7;
+  return 1 - k * k * k;
 }
 
 // Museum：团队作品挂在一块「展板」上，每张卡片里一个慢慢自转的模型；点开进入大图查看器
@@ -181,16 +179,16 @@ export class MuseumPage implements Sheet {
     }
     list.push(
       animate(p.panel, [
-        { opacity: 0, transform: 'translateY(-70px) rotate(-3.5deg)', transformOrigin: '50% -120px' },
-        { opacity: 1, transform: 'none', transformOrigin: '50% -120px' },
-      ], { duration: 820, easing: curve('spring'), fill: 'backwards' }),
+        { opacity: 0, transform: 'translateY(-22px)' },
+        { opacity: 1, transform: 'none' },
+      ], { duration: 720, easing: curve('spring'), fill: 'backwards' }),
       animate(p.head, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: 220, easing: EASE_OUT, fill: 'backwards' }),
     );
     p.cards.forEach((c, i) => {
       list.push(animate(c, [
-        { opacity: 0, transform: `translateY(34px) scale(0.8) rotate(${i % 2 ? 4 : -4}deg)` },
+        { opacity: 0, transform: 'translateY(20px)' },
         { opacity: 1, transform: 'none' },
-      ], { duration: 660, delay: 300 + i * 70, easing: curve('spring'), fill: 'backwards' }));
+      ], { duration: 700, delay: 300 + i * 70, easing: curve('spring'), fill: 'backwards' }));
     });
     return list;
   }
@@ -202,8 +200,8 @@ export class MuseumPage implements Sheet {
     if (reduce || !p) return [fadeAll];
     return [
       fadeAll,
-      ...p.cards.map((c) => animate(c, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.9)' }], { duration: 150, easing: EASE_IN, fill: 'forwards' })),
-      animate(p.panel, [{ transform: 'none' }, { transform: 'translateY(-46px) rotate(2deg)' }], { duration: 320, delay: 40, easing: EASE_IN, fill: 'forwards' }),
+      ...p.cards.map((c) => animate(c, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-6px)' }], { duration: 160, easing: EASE_IN, fill: 'forwards' })),
+      animate(p.panel, [{ transform: 'none' }, { transform: 'translateY(-18px)' }], { duration: 320, delay: 40, easing: EASE_IN, fill: 'forwards' }),
     ];
   }
 
@@ -304,7 +302,7 @@ export class MuseumPage implements Sheet {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
         // 键盘也有「按下去」的感觉：先压一下再打开
-        if (!reducedMotion()) animate(layer, [{ transform: 'none' }, { transform: 'scale(0.95)', offset: 0.4 }, { transform: 'none' }], { duration: 260, easing: EASE_OUT, composite: 'add' });
+        if (!reducedMotion()) animate(layer, [{ transform: 'none' }, { transform: 'scale(0.985)', offset: 0.4 }, { transform: 'none' }], { duration: 320, easing: EASE_OUT, composite: 'add' });
         select();
       },
     }, layer);
