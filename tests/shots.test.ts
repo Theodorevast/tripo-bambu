@@ -21,8 +21,8 @@ describe('镜头表：距离都按星球半径换算', () => {
     expect(f.maxDistance).toBeCloseTo(cam.distance * SHOTS.galaxy.zoomOut, 9);
     const polar = Math.acos(42 / cam.distance);
     const tilt = THREE.MathUtils.degToRad(SHOTS.galaxy.tilt);
-    expect(f.minPolar).toBeCloseTo(polar - tilt, 9);
-    expect(f.maxPolar).toBeCloseTo(polar + tilt, 9);
+    expect(f.minPolar).toBeCloseTo(Math.max(0.05, polar - tilt), 9);
+    expect(f.maxPolar).toBeCloseTo(Math.min(Math.PI / 2, polar + tilt), 9); // 往下最多到水平面
   });
 
   it('星球视图：沿展示方向的方位角、按镜头表的仰角和距离（× 半径）；抬头、远近限制都按半径；镜头不压到水平面 8° 以下', () => {
