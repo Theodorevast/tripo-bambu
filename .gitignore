@@ -7,3 +7,6 @@ models-in/
 .tmp/
 model/
 Tripo/
+assets/generated/
+public/models/
+public/thumbs/

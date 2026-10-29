@@ -1,16 +1,170 @@
 [
-  { "id": "ph-01", "title": "Brass Lantern", "author": "mia_makes", "file": "", "thumb": "", "tris": 12840 },
-  { "id": "ph-02", "title": "Tidal Shrine", "author": "mia_makes", "file": "", "thumb": "", "tris": 48210 },
-  { "id": "ph-03", "title": "Paper Crane Mk II", "author": "kenji_polys", "file": "", "thumb": "", "tris": 6420 },
-  { "id": "ph-04", "title": "Rusty Courier Bot", "author": "zoe_sculpts", "file": "", "thumb": "", "tris": 88730 },
-  { "id": "ph-05", "title": "Moss Golem", "author": "zoe_sculpts", "file": "", "thumb": "", "tris": 132400 },
-  { "id": "ph-06", "title": "Lighthouse at Dusk", "author": "arno_builds", "file": "", "thumb": "", "tris": 21950 },
-  { "id": "ph-07", "title": "Tea House", "author": "sana_vertex", "file": "", "thumb": "", "tris": 35600 },
-  { "id": "ph-08", "title": "Orbital Kiosk", "author": "felix_uv", "file": "", "thumb": "", "tris": 17330 },
-  { "id": "ph-09", "title": "Clockwork Owl", "author": "felix_uv", "file": "", "thumb": "", "tris": 64120 },
-  { "id": "ph-10", "title": "Desert Rover", "author": "noor_mesh", "file": "", "thumb": "", "tris": 41890 },
-  { "id": "ph-11", "title": "Glass Greenhouse", "author": "liam_lowpoly", "file": "", "thumb": "", "tris": 9480 },
-  { "id": "ph-12", "title": "Fox Spirit", "author": "ivy_retopo", "file": "", "thumb": "", "tris": 27710 },
-  { "id": "ph-13", "title": "Windmill No. 9", "author": "ivy_retopo", "file": "", "thumb": "", "tris": 15260 },
-  { "id": "ph-14", "title": "Coral Throne", "author": "otto_bevel", "file": "", "thumb": "", "tris": 72050 }
+  {
+    "id": "artimus-builder-of-the-keep",
+    "title": "Artimus, Builder of the Keep",
+    "author": "ember_sculpts",
+    "file": "artimus-builder-of-the-keep.glb",
+    "thumb": "artimus-builder-of-the-keep.webp",
+    "tris": 299998
+  },
+  {
+    "id": "athena-statue",
+    "title": "Athena Statue",
+    "author": "frostbyte",
+    "file": "athena-statue.glb",
+    "thumb": "athena-statue.webp",
+    "tris": 299996
+  },
+  {
+    "id": "castle",
+    "title": "Castle",
+    "author": "castle_keeper",
+    "file": "castle.glb",
+    "thumb": "castle.webp",
+    "tris": 299998
+  },
+  {
+    "id": "demon-armor",
+    "title": "Demon Armor",
+    "author": "ember_sculpts",
+    "file": "demon-armor.glb",
+    "thumb": "demon-armor.webp",
+    "tris": 299993
+  },
+  {
+    "id": "dinosaur-skeleton",
+    "title": "Dinosaur Skeleton",
+    "author": "pumpkin_patch",
+    "file": "dinosaur-skeleton.glb",
+    "thumb": "dinosaur-skeleton.webp",
+    "tris": 17237
+  },
+  {
+    "id": "dragon-head",
+    "title": "Dragon Head",
+    "author": "ember_sculpts",
+    "file": "dragon-head.glb",
+    "thumb": "dragon-head.webp",
+    "tris": 299997
+  },
+  {
+    "id": "fantasy-beehive-cottage",
+    "title": "Fantasy Beehive Cottage",
+    "author": "castle_keeper",
+    "file": "fantasy-beehive-cottage.glb",
+    "thumb": "fantasy-beehive-cottage.webp",
+    "tris": 299995
+  },
+  {
+    "id": "fantasy-castle",
+    "title": "Fantasy Castle",
+    "author": "castle_keeper",
+    "file": "fantasy-castle.glb",
+    "thumb": "fantasy-castle.webp",
+    "tris": 299999
+  },
+  {
+    "id": "fantasy-sorcerer",
+    "title": "Fantasy Sorcerer",
+    "author": "ember_sculpts",
+    "file": "fantasy-sorcerer.glb",
+    "thumb": "fantasy-sorcerer.webp",
+    "tris": 299998
+  },
+  {
+    "id": "ice-golem",
+    "title": "Ice Golem",
+    "author": "frostbyte",
+    "file": "ice-golem.glb",
+    "thumb": "ice-golem.webp",
+    "tris": 299987
+  },
+  {
+    "id": "ice-toad",
+    "title": "Ice Toad",
+    "author": "frostbyte",
+    "file": "ice-toad.glb",
+    "thumb": "ice-toad.webp",
+    "tris": 299998
+  },
+  {
+    "id": "jade-guardian-lion",
+    "title": "Jade Guardian Lion",
+    "author": "frostbyte",
+    "file": "jade-guardian-lion.glb",
+    "thumb": "jade-guardian-lion.webp",
+    "tris": 299999
+  },
+  {
+    "id": "medic-knight",
+    "title": "Medic Knight",
+    "author": "pumpkin_patch",
+    "file": "medic-knight.glb",
+    "thumb": "medic-knight.webp",
+    "tris": 299999
+  },
+  {
+    "id": "military-tank",
+    "title": "Military Tank",
+    "author": "rust_and_rivet",
+    "file": "military-tank.glb",
+    "thumb": "military-tank.webp",
+    "tris": 299998
+  },
+  {
+    "id": "post-apocalyptic-lighthouse",
+    "title": "Post-Apocalyptic Lighthouse",
+    "author": "castle_keeper",
+    "file": "post-apocalyptic-lighthouse.glb",
+    "thumb": "post-apocalyptic-lighthouse.webp",
+    "tris": 300000
+  },
+  {
+    "id": "post-apocalyptic-robot",
+    "title": "Post-Apocalyptic Robot",
+    "author": "rust_and_rivet",
+    "file": "post-apocalyptic-robot.glb",
+    "thumb": "post-apocalyptic-robot.webp",
+    "tris": 299994
+  },
+  {
+    "id": "pumpkin-girl",
+    "title": "Pumpkin Girl",
+    "author": "pumpkin_patch",
+    "file": "pumpkin-girl.glb",
+    "thumb": "pumpkin-girl.webp",
+    "tris": 48566
+  },
+  {
+    "id": "tufted-armchair",
+    "title": "Tufted Armchair",
+    "author": "old_time_garage",
+    "file": "tufted-armchair.glb",
+    "thumb": "tufted-armchair.webp",
+    "tris": 34780
+  },
+  {
+    "id": "vintage-car",
+    "title": "Vintage Car",
+    "author": "old_time_garage",
+    "file": "vintage-car.glb",
+    "thumb": "vintage-car.webp",
+    "tris": 299998
+  },
+  {
+    "id": "vintage-luggage-cart",
+    "title": "Vintage Luggage Cart",
+    "author": "old_time_garage",
+    "file": "vintage-luggage-cart.glb",
+    "thumb": "vintage-luggage-cart.webp",
+    "tris": 300000
+  },
+  {
+    "id": "weathered-rocket",
+    "title": "Weathered Rocket",
+    "author": "rust_and_rivet",
+    "file": "weathered-rocket.glb",
+    "thumb": "weathered-rocket.webp",
+    "tris": 299998
+  }
 ]
