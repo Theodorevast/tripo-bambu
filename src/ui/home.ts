@@ -6,6 +6,21 @@ import type { TagSnapshot } from './galaxyUi';
 // - 「Visit your planet」：你的星球先压一下、回弹，再走现有的穿云转场；指着按钮时你的星球跟着放大、名牌弹出来
 // - window.__home：自查脚本用（名牌在哪、你的星球是哪颗；翠宝那部分由 fun/couponsHome.ts 接上）
 
+export interface CloudPeekState {
+  ready: boolean;
+  phase: string; // idle / bulge / rise / stay / sink / close
+  active: boolean;
+  at: { x: number; y: number } | null; // 身体中心在画面上（CSS 像素），点得到的时候才有
+  rect: { left: number; top: number; right: number; bottom: number } | null; // 露出来那一块在画面上
+  hover: boolean;
+  act: string | null; // spit / shake
+  nextIn: number; // 还有多久冒下一次（秒）
+  since: number; // 开场演完以后过了多久（秒；-1：还没演完）。第一次在开场后 since + nextIn 秒冒出来（≥ 8）
+  count: number; // 开页以来冒了几次
+  mode: string; // timer（定时冒出来）/ guide（悬停时带路）
+  guideFor: string | null; // 带路时指着哪颗星球
+}
+
 export interface HomeDebug {
   state(): {
     you: string;
@@ -14,11 +29,14 @@ export interface HomeDebug {
     intro: boolean; // 开场：翠宝在右边缘探头打招呼（还在演）
     triboo: { ready: boolean; shown: boolean; at: { x: number; y: number } | null; phase: string; hover: boolean; cooldown: number } | null;
     card: { open: boolean; shown: boolean; title: string | null; claim: string | null };
+    cloud: CloudPeekState | null; // 云里探头的翠宝（fun/cloudPeek.ts）
   };
   // 翠宝（fun/couponsHome.ts）接上以后填
   triboo?: () => ReturnType<HomeDebug['state']>['triboo'];
   intro?: () => boolean;
   card?: () => ReturnType<HomeDebug['state']>['card'];
+  cloud?: () => CloudPeekState;
+  peekCloud?: () => boolean; // 马上让云里的翠宝冒出来（?tune 的 Peek now、自查脚本）；不能冒（转场、领券窗口开着、减弱动效）时返回 false
 }
 
 declare global {
@@ -68,6 +86,7 @@ export function installHome(app: App): HomeDebug {
       intro: debug.intro?.() ?? false,
       triboo: debug.triboo?.() ?? null,
       card: debug.card?.() ?? { open: false, shown: false, title: null, claim: null },
+      cloud: debug.cloud?.() ?? null,
     }),
   };
   window.__home = debug;

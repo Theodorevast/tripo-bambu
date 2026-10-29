@@ -152,6 +152,22 @@ export class GalaxyUi {
     else this.onPick(teamId);
   }
 
+  // 显示着的名牌在画面上的位置（CSS 像素，按缓存的大小、这一帧写进去的位置，不读布局）：云里探头的翠宝挑位置时躲开它们
+  tagRects(out: Array<{ left: number; top: number; right: number; bottom: number }>): number {
+    let n = 0;
+    if (!this.shown) return 0;
+    for (const t of this.order) {
+      if (!t.shown || !Number.isFinite(t.tx)) continue;
+      const r = (out[n] ??= { left: 0, top: 0, right: 0, bottom: 0 });
+      r.left = t.tx;
+      r.top = t.ty;
+      r.right = t.tx + t.w;
+      r.bottom = t.ty + t.h;
+      n++;
+    }
+    return n;
+  }
+
   snapshot(): TagSnapshot[] {
     return [...this.tags.values()].map((t) => ({
       id: t.entry.team.id,

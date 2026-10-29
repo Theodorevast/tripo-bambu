@@ -6,10 +6,12 @@ import type { World } from '../scenes/world';
 import { el } from '../ui/dom';
 import type { HomeDebug } from '../ui/home';
 import type { Coupons } from './coupons';
+import { addCloudPeekTune, CloudPeek } from './cloudPeek';
 import { CLAIM_URL } from './couponsCard';
 import { COUPONS, restPose, shakePose, spitPose, spitTimes, stepHover, type TribooPose } from './couponsMath';
 import { logoGlow } from './couponsStand';
 import { greetPose, HOME_TRIBOO, leanFor, nextPeek, peekPose, placeTriboo, stepOut, type Placement } from './homeTribooMath';
+import { findArms, type Arm } from './tribooRig';
 
 // 首页右下角躲着的翠宝（H2）：和星球页站桩的同一个 3D 翠宝（开场探头 scenes/peek.ts 加载、编译好的那一份，克隆一个：
 // 几何、材质共用，不用再编着色器）。它挂在主场景里、每帧按镜头摆在画面右下角（多几次绘制，不加渲染通道）。
@@ -19,30 +21,6 @@ import { greetPose, HOME_TRIBOO, leanFor, nextPeek, peekPose, placeTriboo, stepO
 // - 开场：飞行落定后在右边缘探出来挥两下手（代替原来从星球后面探头：App.start 照旧调 director.peekIntro，这里接过去）
 // - 转场、星球视图里缩到边外；减弱动效时不探头、不挥手、不蹦，点了只亮一下 logo，领券窗口淡入
 // - 键盘：一个看不见的按钮（Tab 能选到，回车吐券），选中时翠宝探出来
-
-interface Arm {
-  pivot: THREE.Object3D;
-  side: 1 | -1; // +1：模型的 +X 那只（面朝镜头时在画面右边）
-  rest: number;
-}
-
-// 手臂的转轴：开场探头（scenes/peek.ts 的 rigArms）已经在肩膀上套好了 peek-shoulder-L / R（GLB）；替身是挂着磨砂手臂的肩膀 Group
-function findArms(root: THREE.Object3D): Arm[] {
-  const arms: Arm[] = [];
-  for (const [suffix, side] of [['L', 1], ['R', -1]] as const) {
-    const pivot = root.getObjectByName(`peek-shoulder-${suffix}`);
-    if (pivot) arms.push({ pivot, side, rest: pivot.rotation.z });
-  }
-  if (arms.length) return arms;
-  root.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh || (mesh.material as THREE.Material).name !== 'triboo-frosted' || !mesh.parent || mesh.parent === root) return;
-    const g = mesh.parent;
-    if (arms.some((a) => a.pivot === g)) return;
-    arms.push({ pivot: g, side: g.position.x >= 0 ? 1 : -1, rest: g.rotation.z });
-  });
-  return arms;
-}
 
 type Phase = 'away' | 'idle' | 'peek' | 'near' | 'greet' | 'spit' | 'shake';
 
@@ -69,6 +47,8 @@ const _sphere = new THREE.Sphere();
 
 export class HomeTriboo {
   ready = false; // 模型准备好了（克隆、编译好）
+  // 云里探头的翠宝正在露头（cloudPeek.ts）：这只就不自己探头（场上同一时间只有一只在演）
+  quiet: (() => boolean) | null = null;
   private readonly world: World;
   private readonly coupons: Coupons;
   private readonly root = new THREE.Group();
@@ -278,7 +258,7 @@ export class HomeTriboo {
     this.near = home && this.started && !reduced && !this.coupons.card.open
       && (this.focused || (this.pointer.inside && s.visible && Math.hypot(this.pointer.x - s.x, this.pointer.y - s.y) < p.reach));
     // 偶尔探头：只在没事干的时候
-    const idle = home && this.started && !this.act && this.greetT < 0 && !this.near && !reduced;
+    const idle = home && this.started && !this.act && this.greetT < 0 && !this.near && !reduced && !this.quiet?.();
     if (this.peekT >= 0) {
       this.peekT += dt;
       if (this.peekT >= p.peekHold || !idle) this.peekT = -1;
@@ -413,8 +393,18 @@ export class HomeTriboo {
     };
   }
 
+  // 正在演点什么（打招呼、探头、靠近挥手、吐券、摇头）：云里的那只就先不冒出来
+  get busy(): boolean {
+    return this.greetT >= 0 || this.greetPending || this.peekT >= 0 || this.near || this.act !== null || this.hovering;
+  }
+
   get greeting(): boolean {
     return this.greetT >= 0 || this.greetPending;
+  }
+
+  // 开场演完了（打过招呼，或者直接从星球页回到首页）：云里的那只从这时开始计时
+  get opened(): boolean {
+    return this.started && !this.greeting;
   }
 }
 
@@ -464,6 +454,13 @@ export function installHomeTriboo(app: App, coupons: Coupons, debug: HomeDebug):
     };
   };
   addHomeTuneExtra(addTribooTune);
+  // 云里探头的那只（cloudPeek.ts）：星球不接指在它身上的那一下；它露头时右下角这只不探头
+  const cloud = new CloudPeek(app, coupons, triboo);
+  app.galaxyUi.blocker = (x, y) => triboo.hits(x, y) || cloud.hits(x, y);
+  triboo.quiet = () => cloud.active;
+  debug.cloud = () => cloud.debug();
+  debug.peekCloud = () => cloud.peek(true);
+  addHomeTuneExtra((f) => addCloudPeekTune(f, cloud));
   return triboo;
 }
 
