@@ -180,6 +180,9 @@
 /* 读屏用的播报：看不见 */
 .cp-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+/* 减弱动效时 Launch 用的幕：云色，淡入、淡出（createPlanetLaunch.ts） */
+#app > .cp-veil { position: fixed; inset: 0; z-index: 11; pointer-events: none; opacity: 0; background: radial-gradient(120% 90% at 50% 40%, #fffaf0, #f3e4d2 60%, #e6d6e2); }
+
 /* —— 窄屏、手机竖屏：窗口铺满，预览放到上面（小一点，名牌、Reroll 在旁边），内容在下面滚，按钮贴底 —— */
 @media (max-width: 760px) {
   #app > .creator { padding: 8px; place-items: stretch; }

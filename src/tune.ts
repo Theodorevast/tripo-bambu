@@ -18,6 +18,7 @@ import { toast } from './ui/toast';
 import { addCouponsTune } from './fun/couponsTune';
 import { COUPONS } from './fun/couponsMath';
 import { TuneShell, type TuneFolder } from './ui/tuneShell';
+import { createTuneParams, tuneCreate } from './ui/createPlanetTune';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
 // 分组（I1 整理）：
@@ -54,6 +55,7 @@ export function tuneJson(world?: World): string {
       decor: DECOR,
       ground: GROUND,
       planetLook: planetLookParams(), // planet：远看的样子（云层、大气、外沿、星系点缀）
+      create: createTuneParams(), // P3：星球从云里冲出来的节奏、手感
       palette: ground,
       weather: WEATHER,
       skyGame: SKY,
@@ -119,6 +121,7 @@ export function installTune(world: World): TuneShell {
   }
 
   tuneWater(pane); // —— Water ——（nature/water.ts）
+  tuneCreate(pane); // —— Create ——（P3：ui/createPlanetTune.ts，星球从云里冲出来的每一段时长、Replay）
   addStageTune(pane); // —— Works & gardens ——（scenes/stageTune.ts：地标放大、间距、花园、摆放反馈）
 
   // —— Grass ——

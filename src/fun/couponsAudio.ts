@@ -57,6 +57,11 @@ export function audioReady(): boolean {
   return ctx !== null && armed;
 }
 
+// 借用这一个 AudioContext（P3 造星的「呼——」）：不另外建（建一次主线程 37 ms），用户交互过以后才给
+export function sharedAudio(): { ctx: AudioContext; out: GainNode; noise: AudioBuffer } | null {
+  return ctx && master && noise && armed && COUPONS.volume > 0 ? { ctx, out: master, noise } : null;
+}
+
 function tone(type: OscillatorType, from: number, to: number, at: number, length: number, peak: number, attack = 0.004): void {
   if (!ctx || !master) return;
   const osc = ctx.createOscillator();
