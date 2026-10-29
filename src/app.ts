@@ -97,7 +97,8 @@ export class App {
     await this.queue(first);
     window.__ready = true;
     // 开场的品牌露出：飞行落定、还停在星系全景上时，翠宝从一颗星球后面探头挥手（不等它，路由照常）
-    if (first.view === 'galaxy' && !this.currentTeamId && !this.routing) this.world.director.peekIntro();
+    // 开场的星尘拼标志放完了才探头（两个不同时出现）
+    if (first.view === 'galaxy') void (this.world.galaxy?.shapeDone() ?? Promise.resolve()).then(() => { if (!this.currentTeamId && !this.routing) this.world.director.peekIntro(); });
   }
 
   // replace：替换当前这条历史记录（重定向用），后退时不会回到出错的地址又被弹回来

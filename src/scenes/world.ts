@@ -14,7 +14,7 @@ import { GatedStager } from './gatedStager';
 import { Dressing } from './dressing';
 import { fitHomeCamera, HOME_FIT, HOME_SPIRAL, homeLayout, homeShape, type HomeCard, type HomeShape, type HomeSlot } from './homeLayout';
 import { PlanetMotion } from './homeMotion';
-import { GalaxyDecor } from './homeGalaxy';
+import { GalaxyDecor, STARDUST_TRIBOO } from './homeGalaxy';
 import { reducedMotion } from './transition';
 import { MainPost } from './post';
 import { homeFraming, INTRO, planetFraming, SHOTS } from './shots';
@@ -481,6 +481,8 @@ export class World {
     // 从同一个方向、INTRO.distance 倍远的地方开始（首页看的点不一定在原点：按看的点放大）
     const from = view.position.clone().sub(view.target).multiplyScalar(INTRO.distance).add(view.target);
     this.rig.jump({ ...view, position: from, maxDistance: Infinity });
+    // 开场：星尘快落定时拼出 Tripo 的标志、再流回螺旋臂（homeGalaxy.ts 的 playShape；右边的翠宝等它放完才探头，见 App.start）
+    void this.galaxy.playShape({ position: view.position, target: view.target, fov: view.fov ?? this.rig.camera.fov }, INTRO.seconds * STARDUST_TRIBOO.at);
     return this.rig.fly(view, INTRO.seconds);
   }
 
