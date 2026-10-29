@@ -80,9 +80,14 @@ export class App {
     return this.teams.find((t) => t.id === this.currentTeamId) ?? null;
   }
 
-  // 有跳转正在处理（或排着）；自查脚本用它等路由处理完
+  // navigate 已经改了地址栏、hashchange 还没派发（还没进路由队列）的那一下（hashchange 是异步派发的）
+  private navPending = false;
+
+  // 有跳转正在处理（或排着）；自查脚本用它等路由处理完。
+  // navigate 改了地址、hashchange 还没到的那一下也算：不然地址已经是新的、队列却还空着，
+  // 等「路由空闲」的人会在转场开始之前就当它到了（check-home：键盘进星球后马上点 Edit，星球还没进，编辑器什么都不做）
   get routing(): boolean {
-    return this.routes.busy;
+    return this.routes.busy || this.navPending;
   }
 
   async start(): Promise<void> {
@@ -98,9 +103,16 @@ export class App {
   // replace：替换当前这条历史记录（重定向用），后退时不会回到出错的地址又被弹回来
   navigate(route: Route, opts: { replace?: boolean } = {}): void {
     const hash = toHash(route);
-    if (location.hash === hash || (hash === '#/' && location.hash === '')) void this.queue(route);
-    else if (opts.replace) location.replace(hash);
+    const before = location.hash;
+    if (before === hash || (hash === '#/' && before === '')) {
+      void this.queue(route);
+      return;
+    }
+    this.navPending = true; // hashchange 到了、进了队列（queue）才清掉
+    if (opts.replace) location.replace(hash);
     else location.hash = hash;
+    // 地址其实没变（编码以后和原来一样）：不会有 hashchange，直接排进队列，免得一直算在跳转
+    if (location.hash === before) void this.queue(route);
   }
 
   // Members / Museum 关闭后回到当前星球
@@ -135,6 +147,7 @@ export class App {
 
   // 返回的 Promise 在这次跳转（或取代它的更新的那次）处理完时 resolve
   private queue(route: Route): Promise<void> {
+    this.navPending = false;
     return this.routes.push(route);
   }
 
