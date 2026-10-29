@@ -259,6 +259,35 @@ export class World {
     e.planet.setRecipe(team.planet);
   }
 
+  // 运行时加一颗星球（P3：「Create a planet」建好以后，App.addTeam 调）：按现在的星系版式排在最后一个位置
+  // （layout.ts 的螺旋：每颗的位置只看自己的序号，前面的星球都不动；版式本身不在这里改）。马上登记（路由、悬停、拾取都认它），
+  // 星球先不挂进场景：着色器在后台编好（GatedStager.precompile，实测不卡帧）以后才挂上。
+  // 从云里升起来、镜头跟过去由调用方接着做（ui/createPlanetLaunch.ts）。已经有这个团队时只更新数据
+  addPlanet(team: Team): PlanetEntry {
+    const old = this.planets.get(team.id);
+    if (old) {
+      this.updateTeam(team);
+      return old;
+    }
+    const i = this.planets.size;
+    const home = new THREE.Vector3(...galaxyPositions(i + 1)[i]);
+    const planet = new PlanetObject(team.planet, team.color, team.status === 'under-construction');
+    planet.group.position.copy(home);
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicNodeMaterial());
+    hit.scale.setScalar(PLANET_RADIUS * 1.3);
+    hit.visible = false;
+    hit.position.copy(home);
+    hit.userData.teamId = team.id;
+    this.scene.add(hit);
+    const entry: PlanetEntry = { team, planet, hit, home };
+    this.planets.set(team.id, entry);
+    const show = () => {
+      if (this.planets.get(team.id) === entry && !planet.group.parent) this.scene.add(planet.group);
+    };
+    void this.stage.precompile(planet.group).then(show, show);
+    return entry;
+  }
+
   setSkyPreset(p: AtmospherePreset): void {
     this.skyPreset = p;
     this.atmosphere.setPreset(p);

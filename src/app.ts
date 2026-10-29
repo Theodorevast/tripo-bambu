@@ -24,6 +24,12 @@ export interface Sheet {
   close(): void;
 }
 
+// 「建一颗星球」的窗口（P3，ui/createPlanet.ts 装进来）：#/create 时盖在星系上打开，别的地址关掉
+export interface CreatorLayer {
+  open(): void;
+  close(): void;
+}
+
 export class App {
   readonly world: World;
   readonly root: HTMLElement;
@@ -35,6 +41,7 @@ export class App {
   planetLayer: PlanetLayer | null = null;
   members: Sheet | null = null;
   museum: Sheet | null = null;
+  creator: CreatorLayer | null = null;
   onEdit: () => void = () => {};
   onWalk: () => void = () => {};
   private currentTeamId: string | null = null;
@@ -48,7 +55,10 @@ export class App {
     this.world = world;
     this.root = root;
     this.store = store;
-    this.you = you;
+    // 这个浏览器建过团队（P3）：那个团队就是「你的」（编辑、Visit your planet 都认它）；没建过时是种子里的演示身份。
+    // 存一份副本：建好新团队时改的是它，不碰 seed.json 里的那个对象
+    const mine = teams.find((t) => t.createdByYou);
+    this.you = { ...you, ...(mine ? { teamId: mine.id } : {}) };
     this.teams = teams;
     const youHandle = teams.find((t) => t.id === you.teamId)?.members.find((m) => m.id === you.memberId)?.handle ?? 'you';
     this.topbar = new Topbar(root, youHandle, {
@@ -78,7 +88,7 @@ export class App {
   async start(): Promise<void> {
     addEventListener('hashchange', () => void this.queue(parseRoute(location.hash)));
     const first = parseRoute(location.hash);
-    if (first.view === 'galaxy') await this.world.intro();
+    if (first.view === 'galaxy' || first.view === 'create') await this.world.intro(); // #/create 的窗口盖在星系上：开场照样飞进星系
     await this.queue(first);
     window.__ready = true;
     // 开场的品牌露出：飞行落定、还停在星系全景上时，翠宝从一颗星球后面探头挥手（不等它，路由照常）
@@ -104,14 +114,26 @@ export class App {
     this.world.updateTeam(team);
   }
 
+  // 新团队加入（P3：「Create a planet」建好以后，ui/createPlanetLaunch.ts 调）：记进团队列表，星系里加一颗星球（World.addPlanet：
+  // 马上登记，着色器在后台编好才挂进场景）。是「你」建的就成了你的团队（编辑、Visit your planet 都认它）。在星系页时顶栏的数字跟着变
+  addTeam(team: Team): void {
+    if (this.teams.some((t) => t.id === team.id)) return;
+    this.teams = [...this.teams, team];
+    if (team.createdByYou) this.you.teamId = team.id;
+    this.world.addPlanet(team);
+    if (!this.currentTeamId) this.topbar.showGalaxy(this.teams.length, this.teams.reduce((n, t) => n + t.works.length, 0));
+  }
+
   // 返回的 Promise 在这次跳转（或取代它的更新的那次）处理完时 resolve
   private queue(route: Route): Promise<void> {
     return this.routes.push(route);
   }
 
   private async show(route: Route): Promise<void> {
-    const team = route.view === 'galaxy' ? null : this.teams.find((t) => t.id === route.teamId) ?? null;
-    if (route.view !== 'galaxy' && !team) {
+    // #/create（P3）：盖在星系上的造星窗口。别的地址先关掉它；#/create 本身按星系处理（在星球上就先回星系），落定后打开
+    if (route.view !== 'create') this.creator?.close();
+    const team = route.view === 'galaxy' || route.view === 'create' ? null : this.teams.find((t) => t.id === route.teamId) ?? null;
+    if (route.view !== 'galaxy' && route.view !== 'create' && !team) {
       toast('That team does not exist');
       // 地址栏已经换成别的了（用户在排队期间又去了别处，那次跳转已经排上）：只提示，不把新地址改回星系
       if (isCurrentRoute(route)) this.navigate({ view: 'galaxy' }, { replace: true });
@@ -136,6 +158,7 @@ export class App {
       }
       this.topbar.showGalaxy(this.teams.length, this.teams.reduce((n, t) => n + t.works.length, 0));
       this.galaxyUi.setEnabled(true);
+      if (route.view === 'create') this.creator?.open();
       return;
     }
     this.galaxyUi.setEnabled(false);

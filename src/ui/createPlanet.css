@@ -1,0 +1,237 @@
+/* 「建一颗星球」（P3）：首页的入口按钮 + 造星窗口。和 Members / Museum 的新纸面一个调子：
+   暖白纸面、灰紫墨色、翠宝黄点缀，粗圆角、底下一道「厚度」，标签像贴纸。变量都来自 styles.css。
+   动效只用 transform / opacity；减弱动效时只淡入淡出（文件末尾） */
+
+/* —— 入口：标题区下面一颗黄色的玩具按钮（位置之后由 controller 和首页统一：选择器 #app > .create-entry）—— */
+#app > .create-entry { position: absolute; left: 18px; top: 94px; z-index: 6; animation: cp-entry-in 0.6s var(--bounce) 0.2s both; }
+:where(#app) .create-entry-btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 17px 12px 13px; font-size: 14px; border-radius: 16px; }
+.create-entry-icon { width: 20px; height: 20px; transition: transform 0.5s var(--bounce); }
+.create-entry-btn:hover .create-entry-icon { transform: rotate(-18deg) scale(1.12); }
+/* 隔一会儿小星球轻轻晃一下：告诉人这里能点 */
+.create-entry-btn[data-label='Create a planet'] .create-entry-icon { animation: cp-wiggle 7s ease-in-out 3s infinite; }
+@keyframes cp-entry-in { from { opacity: 0; transform: translateY(-10px) scale(0.85); } }
+@keyframes cp-wiggle { 0%, 88%, 100% { rotate: 0deg; } 91% { rotate: -16deg; } 94% { rotate: 12deg; } 97% { rotate: -5deg; } }
+
+/* —— 窗口 —— */
+#app > .creator { position: fixed; inset: 0; z-index: 12; display: grid; place-items: center; padding: 24px; overflow-y: auto; overscroll-behavior: contain; }
+.cp-backdrop { position: fixed; inset: 0; background: radial-gradient(130% 100% at 50% 0%, rgba(58, 48, 72, 0.16), rgba(58, 48, 72, 0.44)); }
+.cp-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(980px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  padding: 26px 30px 22px;
+  border-radius: 30px;
+  background: var(--dots), var(--grain), var(--paper);
+  box-shadow: 0 0 0 3px var(--frame), 0 9px 0 var(--frame-ledge), 0 30px 60px rgba(40, 30, 50, 0.3);
+  transform-origin: 50% 60%;
+}
+.cp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.cp-titles { display: grid; justify-items: start; gap: 4px; }
+.cp-tag { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 7px 9px; border-radius: 11px; background: var(--ink); color: var(--paper); font: 800 13px/1.1 var(--font-ui); rotate: -3deg; box-shadow: 0 3px 0 rgba(40, 30, 50, 0.25); }
+.cp-tag::before { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--yolk); box-shadow: 0 0 0 2px var(--paper); }
+.cp-head h1 { margin: 4px 0 0; font-size: 38px; line-height: 1; color: var(--ink); }
+.cp-head h1::after { content: ''; display: block; width: 116px; height: 12px; margin-top: 6px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 116 12' fill='none' stroke='%23f2b705' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M3 7c6-5 12-5 18 0s12 5 18 0 12-5 18 0 12 5 18 0 12-5 18 0 12 5 18 0'/%3E%3C/svg%3E") no-repeat; }
+:where(#app) .cp-close { flex: none; width: 46px; height: 46px; padding: 0; display: grid; place-items: center; border-radius: 16px; }
+.cp-close .icon { width: 22px; height: 22px; transition: transform 0.5s var(--bounce); }
+.cp-close:hover .icon { transform: rotate(90deg); }
+
+/* 步骤：四张小贴纸，中间一道虚线连着；现在这步是翠宝黄，走过的打勾 */
+.cp-steps { list-style: none; margin: 16px 0 6px; padding: 0; display: flex; gap: 0; align-items: center; }
+.cp-steps li { position: relative; display: flex; align-items: center; }
+.cp-steps li + li::before { content: ''; width: clamp(14px, 3vw, 40px); height: 0; margin: 0 6px; border-top: 2.5px dashed var(--paper-3); }
+:where(#app) .cp-step { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 7px 6px; border-radius: 999px; background: transparent; box-shadow: none; color: var(--ink-faint); font-size: 13px; }
+:where(#app) .cp-step:hover { translate: none; color: var(--ink); }
+.cp-step-dot { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 2px var(--line), 0 3px 0 var(--paper-3); font: 800 13px/1 var(--font-ui); color: var(--ink-faint); }
+.cp-step-dot .icon { width: 16px; height: 16px; }
+.cp-step[data-state='now'] { color: var(--ink); }
+.cp-step[data-state='now'] .cp-step-dot { background: var(--yolk); color: var(--ink); box-shadow: 0 3px 0 var(--yolk-ledge); }
+.cp-step[data-state='done'] { color: var(--ink-dim); }
+.cp-step[data-state='done'] .cp-step-dot { background: var(--leaf); color: #fff; box-shadow: 0 3px 0 #3f8a37; }
+
+/* 主体：左边这一步的内容，右边预览 */
+.cp-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 28px; min-height: 0; padding-top: 10px; }
+.cp-pages { position: relative; min-height: 0; overflow-y: auto; padding: 6px 6px 10px 2px; margin: -6px -6px 0 -2px; scrollbar-width: thin; }
+.cp-page { display: grid; align-content: start; gap: 14px; }
+.cp-h { margin: 0; font-size: 26px; line-height: 1.1; }
+.cp-lead { margin: -6px 0 4px; font-weight: 700; color: var(--ink-dim); max-width: 46ch; }
+
+.cp-field { display: grid; gap: 6px; }
+.cp-label { display: flex; align-items: baseline; gap: 8px; font: 800 13.5px/1.2 var(--font-ui); color: var(--ink); }
+.cp-optional { font: 700 11.5px/1 var(--font-ui); color: var(--ink-faint); padding: 3px 7px; border-radius: 7px; background: var(--paper-2); }
+.cp-input-wrap { position: relative; display: flex; align-items: center; }
+.cp-input {
+  width: 100%;
+  padding: 12px 64px 13px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
+  font: 700 16px/1.2 var(--font-ui);
+  box-shadow: inset 0 0 0 2px var(--line), 0 3px 0 var(--paper-3);
+  transition: box-shadow 0.2s;
+}
+.cp-input::placeholder { color: var(--ink-faint); font-weight: 600; }
+.cp-input:focus { outline: none; box-shadow: inset 0 0 0 2.5px var(--yolk), 0 3px 0 var(--yolk-ledge); }
+.cp-input[aria-invalid='true'] { box-shadow: inset 0 0 0 2.5px var(--danger), 0 3px 0 rgba(217, 87, 74, 0.35); }
+.cp-count { position: absolute; right: 10px; padding: 3px 8px 4px; border-radius: 8px; background: var(--paper-2); font: 800 11.5px/1 var(--font-ui); color: var(--ink-faint); font-variant-numeric: tabular-nums; pointer-events: none; }
+.cp-count[data-tone='near'] { background: #ffe39a; color: var(--ink); }
+.cp-hint { margin: 0; min-height: 1.35em; font: 700 12.5px/1.35 var(--font-ui); color: var(--ink-faint); }
+.cp-hint[data-tone='error'] { color: var(--danger); }
+.cp-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cp-ideas-label { font: 800 12.5px/1 var(--font-ui); color: var(--ink-faint); }
+:where(#app) .cp-idea { padding: 7px 12px 8px; border-radius: 11px; font-size: 12.5px; background: #fff; rotate: calc((var(--i, 0) - 1) * 1.5deg); }
+:where(#app) .cp-idea:hover { rotate: 0deg; }
+
+/* 第二步：预设卡片、颜色圆点、开关。单选框本身透明地盖在整块上（键盘、读屏照常用），样子画在旁边的元素上 */
+.cp-group { display: grid; gap: 8px; }
+.cp-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.cp-radio { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.cp-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.cp-preset { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 11px 10px 9px; border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 2px var(--line), 0 4px 0 var(--paper-3); cursor: pointer; transition: translate 0.3s var(--bounce), box-shadow 0.2s; }
+.cp-preset:hover { translate: 0 -2px; }
+.cp-preset:has(.cp-radio:checked) { box-shadow: inset 0 0 0 2.5px var(--yolk), 0 4px 0 var(--yolk-ledge); background: #fffaf0; }
+.cp-preset:has(.cp-radio:focus-visible), .cp-color:has(.cp-radio:focus-visible), .cp-switch:has(input:focus-visible) { outline: 3px solid var(--ink); outline-offset: 3px; }
+/* 预设的小色球：远看的草色、朝阳的大片、水（没有水的用沙色）叠成一颗小星球 */
+.cp-preset-swatch { flex: none; width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.55), transparent 32%), radial-gradient(circle at 70% 72%, var(--c) 0 26%, transparent 27%), radial-gradient(circle at 40% 45%, var(--a), var(--b) 75%); box-shadow: 0 0 0 2px #fff, 0 3px 0 rgba(74, 64, 88, 0.15); }
+.cp-preset-text { display: grid; gap: 1px; min-width: 0; }
+.cp-preset-text b { font: 800 14px/1.15 var(--font-ui); }
+.cp-preset-text small { font: 700 11.5px/1.25 var(--font-ui); color: var(--ink-faint); }
+.cp-colors { display: flex; flex-wrap: wrap; gap: 10px; }
+.cp-color { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; }
+.cp-color-dot { width: 32px; height: 32px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--line), 0 4px 0 2px rgba(74, 64, 88, 0.12); transition: transform 0.35s var(--bounce), box-shadow 0.2s; pointer-events: none; }
+.cp-color:hover .cp-color-dot { transform: scale(1.08); }
+.cp-color:has(.cp-radio:checked) .cp-color-dot { transform: scale(1.14); box-shadow: 0 0 0 3px #fff, 0 0 0 5.5px var(--ink), 0 4px 0 2px rgba(74, 64, 88, 0.16); }
+.cp-color-dot.custom { display: grid; place-items: center; background: conic-gradient(from 20deg, #f2b705, #ef9550, #e7799f, #9a80dc, #4b9fe0, #3aa9a0, #62b357, #f2b705); color: #fff; }
+.cp-color[data-on='true'] .cp-color-dot.custom { background: var(--c); }
+.cp-color-dot.custom .icon { width: 17px; height: 17px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35)); }
+/* 系统取色器：透明地盖在自选圆点的右下角一小块（点圆点先选中自选，再点一下打开取色器）；键盘可以直接聚焦它 */
+.cp-custom-input { position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; opacity: 0.001; cursor: pointer; }
+.cp-custom-input:focus-visible { opacity: 1; outline: 3px solid var(--ink); }
+.cp-switch { position: relative; display: inline-flex; align-items: center; gap: 10px; font: 800 13.5px/1 var(--font-ui); cursor: pointer; padding: 4px 6px 4px 4px; border-radius: 12px; }
+.cp-switch-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.cp-switch-track { position: relative; width: 46px; height: 28px; border-radius: 999px; background: var(--paper-3); box-shadow: inset 0 2px 0 rgba(74, 64, 88, 0.12); transition: background 0.25s; }
+.cp-switch-track i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 2px 0 rgba(74, 64, 88, 0.2); transition: transform 0.35s var(--bounce); }
+.cp-switch-input:checked + .cp-switch-track { background: var(--leaf); }
+.cp-switch-input:checked + .cp-switch-track i { transform: translateX(18px); }
+
+/* 右边：圆形的小舷窗（天空 + 云），星球在里面转；下面一块名牌、Reroll */
+.cp-stage { display: grid; justify-items: center; align-content: start; gap: 12px; }
+.cp-porthole { position: relative; width: min(100%, 320px); aspect-ratio: 1; border-radius: 50%; overflow: hidden; isolation: isolate; box-shadow: 0 0 0 7px #fffaf0, 0 0 0 9.5px var(--frame), 0 13px 0 6px var(--frame-ledge), 0 26px 40px rgba(60, 45, 30, 0.22); }
+.cp-sky { position: absolute; inset: 0; z-index: -1; background:
+  radial-gradient(120% 60% at 50% 112%, #fff7ea 0 38%, rgba(255, 247, 234, 0) 39%),
+  radial-gradient(42% 22% at 18% 98%, #fff3e2 0 60%, transparent 61%),
+  radial-gradient(40% 20% at 84% 96%, #fff1df 0 60%, transparent 61%),
+  linear-gradient(180deg, #7fb2e0 0%, #a9cbe9 42%, #f6dcc4 82%, #f9e6cf 100%); }
+.cp-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cp-loading { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; font-weight: 800; color: rgba(74, 64, 88, 0.6); pointer-events: none; opacity: 0; transition: opacity 0.25s; }
+.cp-porthole[data-state='loading'] .cp-loading { opacity: 1; }
+/* 换地形时冒的一团云：几个白色的圆一起胀开、淡掉（脚本用 WAAPI 放） */
+.cp-poof { position: absolute; left: 50%; top: 50%; width: 46%; height: 46%; translate: -50% -50%; border-radius: 50%; opacity: 0; pointer-events: none; background:
+  radial-gradient(circle at 30% 55%, #fff 0 22%, transparent 23%),
+  radial-gradient(circle at 62% 40%, #fff 0 26%, transparent 27%),
+  radial-gradient(circle at 70% 66%, #fffaf0 0 20%, transparent 21%),
+  radial-gradient(circle at 45% 70%, #fff6e6 0 24%, transparent 25%); filter: drop-shadow(0 4px 0 rgba(150, 120, 90, 0.18)); }
+.cp-plate { position: relative; display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 8px 16px 10px 12px; border-radius: 16px; background: var(--grain), #fffaf0; box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--team, var(--yolk)) 45%, var(--frame)), 0 5px 0 color-mix(in srgb, var(--team, var(--yolk)) 50%, #b49a74); rotate: -1.5deg; }
+.cp-plate::before { content: ''; position: absolute; left: 50%; top: -9px; width: 2.5px; height: 10px; background: var(--frame-ledge); }
+.cp-plate-dot { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--team, var(--yolk)); box-shadow: 0 0 0 2px #fff; transition: background 0.3s; }
+.cp-plate-text { display: grid; min-width: 0; }
+.cp-plate-name { font-size: 18px; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+.cp-plate[data-empty='true'] .cp-plate-name { color: var(--ink-faint); }
+.cp-plate-motto { font: 700 12px/1.25 var(--font-ui); color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+:where(#app) .cp-reroll { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.cp-reroll .icon { width: 18px; height: 18px; }
+
+/* 第三步：邀请链接、加好友、成员小卡 */
+.cp-link { display: flex; gap: 8px; }
+.cp-link-input { padding-right: 14px; font: 700 13px/1.2 var(--font-ui); color: var(--ink-dim); text-overflow: ellipsis; }
+:where(#app) .cp-copy, :where(#app) .cp-add { flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 112px; justify-content: center; }
+:where(#app) .cp-copy[data-copied='true'] { background: var(--leaf); color: #fff; box-shadow: 0 4px 0 #3f8a37; }
+.cp-copy .icon, .cp-add .icon { width: 17px; height: 17px; }
+:where(#app) .cp-add { min-width: 86px; }
+.cp-add-row { display: flex; gap: 8px; }
+.cp-add-row .cp-input { padding-right: 14px; }
+.cp-crew { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-member { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 5px 5px; border-radius: 999px; background: #fff; box-shadow: inset 0 0 0 2px var(--line), 0 3px 0 var(--paper-3); }
+.cp-member.you { background: #fffaf0; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--yolk) 60%, var(--frame)), 0 3px 0 var(--yolk-ledge); }
+.cp-avatar { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; font: 800 12px/1 var(--font-display); box-shadow: 0 0 0 2px #fff; }
+.cp-member-name { display: grid; line-height: 1.1; padding-right: 4px; }
+.cp-member-name b { font: 800 13px/1.15 var(--font-ui); }
+.cp-member-name small { font: 700 11px/1.15 var(--font-ui); color: var(--ink-faint); }
+:where(#app) .cp-remove { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line); }
+.cp-remove .icon { width: 14px; height: 14px; }
+
+/* 第四步：一张登机牌：团队色的边、名字、几条要点、成员头像叠在一起 */
+.cp-summary { display: grid; gap: 10px; }
+.cp-ticket { position: relative; display: grid; gap: 6px; padding: 18px 20px 18px 26px; border-radius: 20px; background: var(--grain), #fffaf0; box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--team) 45%, var(--frame)), 0 6px 0 color-mix(in srgb, var(--team) 50%, #b49a74), 0 14px 26px rgba(60, 45, 30, 0.14); rotate: -0.6deg; overflow: hidden; }
+.cp-ticket::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.4) 1.6px, transparent 2.2px) 0 0 / 10px 10px, var(--team); }
+.cp-ticket-tag { justify-self: start; padding: 3px 9px 4px; border-radius: 8px; background: var(--paper-2); font: 800 11px/1 var(--font-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-dim); }
+.cp-ticket-name { font-size: 32px; line-height: 1.04; overflow-wrap: anywhere; }
+.cp-ticket-motto { font: 700 14px/1.3 var(--font-ui); color: var(--ink-dim); }
+.cp-facts { list-style: none; margin: 6px 0 0; padding: 10px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 14px; border-top: 2px dashed var(--line); }
+.cp-facts li { display: flex; align-items: center; gap: 7px; font: 800 13px/1.2 var(--font-ui); }
+.cp-facts .icon { width: 18px; height: 18px; color: color-mix(in srgb, var(--team) 60%, var(--ink)); }
+.cp-fact-swatch { width: 15px; height: 15px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--line); }
+.cp-ticket-crew { display: flex; gap: 4px; padding-top: 6px; }
+
+/* 底部：Back、第几步、Next / Launch */
+.cp-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; margin-top: 8px; border-top: 2px dashed var(--line); }
+:where(#app) .cp-back { display: inline-flex; align-items: center; gap: 6px; }
+.cp-back-icon { width: 17px; height: 17px; transform: scaleX(-1); }
+:where(#app) .cp-next { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; justify-content: center; font-size: 14.5px; padding: 12px 20px 13px; }
+.cp-next .icon { width: 18px; height: 18px; transition: transform 0.4s var(--bounce); }
+.cp-next:hover .icon { transform: translateX(3px); }
+:where(#app) .cp-next[data-launch='true'] { min-width: 150px; font-size: 16px; animation: cp-ready 2.4s ease-in-out infinite; }
+.cp-next[data-launch='true'] .icon { width: 20px; height: 20px; }
+.cp-next[data-launch='true']:hover .icon { transform: rotate(20deg) scale(1.15); }
+@keyframes cp-ready { 0%, 100% { box-shadow: 0 4px 0 var(--yolk-ledge), 0 0 0 0 rgba(242, 183, 5, 0.45); } 50% { box-shadow: 0 4px 0 var(--yolk-ledge), 0 0 0 9px rgba(242, 183, 5, 0); } }
+.cp-progress { color: var(--ink-faint); }
+/* 读屏用的播报：看不见 */
+.cp-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* —— 窄屏、手机竖屏：窗口铺满，预览放到上面（小一点，名牌、Reroll 在旁边），内容在下面滚，按钮贴底 —— */
+@media (max-width: 760px) {
+  #app > .create-entry { left: 10px; top: 76px; }
+  :where(#app) .create-entry-btn { padding: 9px 14px 10px 11px; font-size: 13px; }
+  #app > .creator { padding: 8px; place-items: stretch; }
+  .cp-card { max-height: calc(100dvh - 16px); padding: 16px 16px 14px; border-radius: 24px; }
+  .cp-head h1 { font-size: 28px; }
+  .cp-head h1::after { width: 92px; }
+  :where(#app) .cp-close { width: 40px; height: 40px; border-radius: 14px; }
+  .cp-steps { margin: 10px 0 2px; }
+  .cp-steps li + li::before { width: 10px; margin: 0 2px; }
+  :where(#app) .cp-step { padding: 4px 6px 5px 4px; gap: 5px; font-size: 12px; }
+  .cp-step:not([data-state='now']) .cp-step-label { display: none; }
+  .cp-step-dot { width: 24px; height: 24px; font-size: 12px; }
+  .cp-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 12px; padding-top: 6px; }
+  .cp-stage { order: -1; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'hole plate' 'hole reroll'; justify-items: start; align-items: center; gap: 8px 14px; }
+  .cp-porthole { grid-area: hole; width: clamp(118px, 34vw, 170px); box-shadow: 0 0 0 5px #fffaf0, 0 0 0 7px var(--frame), 0 9px 0 4px var(--frame-ledge); }
+  .cp-plate { grid-area: plate; align-self: end; }
+  .cp-plate::before { display: none; }
+  .cp-plate-name, .cp-plate-motto { max-width: 44vw; }
+  .cp-reroll { grid-area: reroll; align-self: start; }
+  .cp-h { font-size: 22px; }
+  .cp-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .cp-preset { padding: 7px 8px 8px 7px; gap: 8px; }
+  .cp-preset-swatch { width: 28px; height: 28px; }
+  .cp-preset-text small { display: none; }
+  .cp-link { flex-wrap: wrap; }
+  .cp-link .cp-input { flex: 1 1 100%; }
+  .cp-ticket-name { font-size: 26px; }
+  .cp-facts { grid-template-columns: minmax(0, 1fr); }
+  .cp-foot { padding-top: 10px; }
+  :where(#app) .cp-next { min-width: 104px; }
+}
+@media (max-width: 380px) {
+  .cp-progress { display: none; }
+}
+
+/* —— 减弱动效：只留淡入淡出 —— */
+@media (prefers-reduced-motion: reduce) {
+  #app > .create-entry { animation: fade-in 0.2s ease-out both; }
+  .create-entry-btn .create-entry-icon, .cp-next[data-launch='true'] { animation: none !important; }
+  .cp-preset, .cp-color-dot, .cp-switch-track i, .cp-close .icon, .cp-next .icon, .create-entry-icon { transition-duration: 0.01ms !important; }
+  .cp-preset:hover, .cp-color:hover .cp-color-dot { translate: none; transform: none; }
+  .cp-close:hover .icon, .create-entry-btn:hover .create-entry-icon, .cp-next:hover .icon { transform: none; }
+}
