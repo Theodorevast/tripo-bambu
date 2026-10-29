@@ -1,0 +1,561 @@
+/* 调参面板（地址带 ?tune 才加载，和 tune.ts、tuneShell.ts 一起打成单独的包）。
+   样子：浮在右边的一本小手账——暖白纸面、粗圆角、底下一道「厚度」，像一块玩具塑料板；
+   左边一列彩色贴纸标签，每组一页；底部一个翠宝黄的大按钮复制参数。
+   Tweakpane 的控件全部重画：糖果滑块、拨动开关、圆形色块、抽屉式的子分组。
+   动效只用 transform / opacity（Tweakpane 自己的「展开时改高度」压成 1ms，看不出来，改由每一行淡入接上）。
+   Tweakpane 的样式表在面板建出来时才插进 <head>，排在这份后面：这里的选择器都带 .tune-pane 前缀，权重比它高 */
+
+.tune-pane {
+  --paper: #fbf5e8;
+  --paper-2: #f3e9d4;
+  --paper-3: #e7d9bd;
+  --ink: #4a4058;
+  --ink-2: #6e6378;
+  --ink-3: #a095a6;
+  --yolk: #f2b705;
+  --ledge: rgba(110, 78, 20, 0.32);
+  --line: rgba(74, 64, 88, 0.13);
+  --c: #e9875f;
+  --t-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t-spring: cubic-bezier(0.3, 1.35, 0.5, 1);
+  position: fixed;
+  top: 76px;
+  right: 12px;
+  z-index: 30; /* 压在顶栏、Members / Museum、查看器（最高 20）上面 */
+  width: 352px;
+  font: 600 12.5px/1.3 'Nunito', ui-rounded, system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  transition: translate 0.55s var(--t-spring);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  .tune-pane {
+    --t-bounce: linear(0, 0.024 1.5%, 0.090 3.0%, 0.192 4.6%, 0.319 6.2%, 0.462 7.8%, 0.610 9.5%, 0.756 11.2%, 0.890 13.0%, 1.007 14.8%, 1.101 16.6%, 1.170 18.4%, 1.213 20.3%, 1.232 22.3%, 1.230 24.2%, 1.209 26.2%, 1.176 28.3%, 1.135 30.3%, 1.091 32.4%, 1.049 34.6%, 1.012 36.8%, 0.982 39.0%, 0.961 41.3%, 0.949 43.5%, 0.945 45.9%, 0.948 48.2%, 0.956 50.6%, 0.967 53.1%, 0.979 55.5%, 0.991 58.0%, 1.000 60.6%, 1.007 63.2%, 1.011 65.8%, 1.013 68.4%, 1.012 71.1%, 1.010 73.9%, 1.007 76.6%, 1.004 79.4%, 1.001 82.2%, 0.999 85.1%, 0.998 88.0%, 0.997 91.0%, 0.997 93.9%, 0.998 96.9%, 1);
+    --t-spring: linear(0, 0.015 1.5%, 0.059 3.0%, 0.125 4.6%, 0.209 6.2%, 0.306 7.8%, 0.411 9.5%, 0.519 11.2%, 0.625 13.0%, 0.727 14.8%, 0.819 16.6%, 0.901 18.4%, 0.971 20.3%, 1.028 22.3%, 1.071 24.2%, 1.100 26.2%, 1.118 28.3%, 1.126 30.3%, 1.125 32.4%, 1.116 34.6%, 1.103 36.8%, 1.087 39.0%, 1.069 41.3%, 1.051 43.5%, 1.034 45.9%, 1.019 48.2%, 1.007 50.6%, 0.997 53.1%, 0.990 55.5%, 0.986 58.0%, 0.984 60.6%, 0.984 63.2%, 0.985 65.8%, 0.988 68.4%, 0.990 71.1%, 0.993 73.9%, 0.995 76.6%, 0.998 79.4%, 0.999 82.2%, 1.001 85.1%, 1.002 88.0%, 1.002 91.0%, 1.002 93.9%, 1.002 96.9%, 1);
+  }
+}
+/* 拖动中：位置跟手，不过渡；面板轻轻歪一点，像被拎起来 */
+.tune-pane[data-drag='on'] { transition: none; }
+.tune-pane[data-drag='on'] .tune-card { rotate: -1.2deg; }
+.tune-pane[data-drag='on'] .tune-card::after { opacity: 1; }
+.tune-pane[data-drag='on'] .tune-fab { rotate: -8deg; scale: 1.06; }
+.tune-pane button { font-family: inherit; -webkit-tap-highlight-color: transparent; }
+.tune-pane :focus-visible { outline: 3px solid var(--yolk); outline-offset: 2px; }
+
+/* —— 面板本体 —— */
+.tune-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100vh - 88px);
+  max-height: calc(100dvh - 88px);
+  border-radius: 26px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.27 0 0 0 0 0.2 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E"),
+    var(--paper);
+  box-shadow: 0 0 0 2.5px #f0ddb6, 0 7px 0 #e2cda2, 0 22px 42px rgba(60, 45, 30, 0.24);
+  transform-origin: 92% 0;
+  transition: rotate 0.4s var(--t-spring);
+}
+/* 拎起来时多一层更深的投影（opacity 切换，不重画阴影） */
+.tune-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  box-shadow: 0 34px 60px rgba(60, 45, 30, 0.26);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+
+/* 头部：抓手、黄色小徽章、标题和当前这一页、收起按钮。整条都能拖；双击回到右上角 */
+.tune-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 11px 9px 10px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.tune-pane[data-drag='on'] .tune-head { cursor: grabbing; }
+.tune-grip { width: 16px; height: 22px; color: var(--ink-3); flex: none; }
+.tune-grip svg, .tune-badge svg, .tune-min svg, .tune-fab svg, .tune-tab svg, .tune-copy-icon svg { display: block; width: 100%; height: 100%; }
+.tune-badge {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--yolk);
+  color: var(--ink);
+  box-shadow: 0 3px 0 var(--ledge);
+  rotate: -7deg;
+  --icon-fill: var(--yolk);
+}
+.tune-badge .icon { width: 22px; height: 22px; }
+.tune-titles { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.tune-title { font: 800 17px/1.05 'Nunito', ui-rounded, sans-serif; letter-spacing: 0.01em; }
+.tune-sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-weight: 800;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--c) 70%, var(--ink));
+  white-space: nowrap;
+}
+.tune-sub::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.tune-sub span { overflow: hidden; text-overflow: ellipsis; }
+.tune-min {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink-2);
+  cursor: pointer;
+  box-shadow: 0 0 0 2px var(--line), 0 3px 0 var(--paper-3);
+  transition: transform 0.35s var(--t-bounce);
+}
+.tune-min .icon { width: 20px; height: 20px; }
+.tune-min:hover { transform: translateY(-1px) scale(1.06); color: var(--ink); }
+.tune-min:active { transform: translateY(2px) scale(0.94); transition-duration: 0.08s; }
+
+/* —— 左边一列贴纸标签 + 右边当前这一页 —— */
+.tune-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  min-height: 0;
+  border-top: 2px dashed var(--line);
+}
+.tune-rail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 7px 12px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.tune-rail::-webkit-scrollbar { display: none; }
+/* 选中的标签下面垫一块白色小板，切换时滑过去（transform） */
+.tune-plate {
+  position: absolute;
+  left: 6px;
+  top: 0;
+  width: 48px;
+  height: 48px;
+  margin-top: -4px;
+  border-radius: 17px;
+  background: #fff;
+  box-shadow: 0 4px 0 var(--paper-3), 0 0 0 2px var(--line);
+  transition: transform 0.5s var(--t-spring);
+  pointer-events: none;
+}
+.tune-plate[data-still] { transition: none; }
+.tune-tab {
+  --tc: #a58ab0;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: color-mix(in srgb, var(--tc) 78%, var(--ink));
+  cursor: pointer;
+}
+/* 两层圆角色块：平时一层淡色，选中时叠上实色（切换 opacity） */
+.tune-tab::before, .tune-tab::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--tc);
+  transition: opacity 0.2s;
+}
+.tune-tab::before { opacity: 0.17; }
+.tune-tab::after { opacity: 0; box-shadow: 0 3px 0 color-mix(in srgb, var(--tc) 60%, #4a3a20); }
+.tune-tab[aria-selected='true'] { color: #fff; }
+.tune-tab[aria-selected='true']::after { opacity: 1; }
+.tune-tab .icon {
+  position: relative;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  transition: transform 0.45s var(--t-bounce);
+}
+.tune-tab:hover .icon { transform: scale(1.16) rotate(-8deg); }
+.tune-tab:active .icon { transform: scale(0.86); transition-duration: 0.08s; }
+.tune-tab[aria-selected='true'] .icon { transform: scale(1.06); }
+.tune-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* 标签的名字：悬停 / 键盘聚焦时在面板左边冒出一个小纸条（面板拖到左边时冒在右边） */
+.tune-tip {
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 0;
+  z-index: 3;
+  padding: 7px 12px 8px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 800 12.5px/1 'Nunito', ui-rounded, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(8px, -50%) scale(0.9);
+  transform-origin: right center;
+  transition: opacity 0.15s, transform 0.3s var(--t-bounce);
+}
+.tune-tip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -5px;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 2px;
+  background: inherit;
+  rotate: 45deg;
+}
+.tune-tip[data-on] { opacity: 1; transform: translate(0, -50%) scale(1); }
+.tune-pane[data-side='right'] .tune-tip { right: auto; left: 64px; transform-origin: left center; transform: translate(-8px, -50%) scale(0.9); }
+.tune-pane[data-side='right'] .tune-tip[data-on] { transform: translate(0, -50%) scale(1); }
+.tune-pane[data-side='right'] .tune-tip::after { right: auto; left: -5px; }
+
+.tune-body {
+  position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px 14px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--paper-3) transparent;
+}
+
+/* —— 底部：复制参数 —— */
+.tune-foot { padding: 10px 12px 14px; border-top: 2px dashed var(--line); }
+.tune-copy {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--yolk);
+  color: var(--ink);
+  font: 800 14.5px/1 'Nunito', ui-rounded, sans-serif;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 4px 0 var(--ledge), 0 9px 18px rgba(160, 110, 0, 0.22);
+  transition: transform 0.35s var(--t-bounce);
+  --icon-fill: var(--yolk);
+}
+/* 状态色：复制好了绿、失败了珊瑚红（叠一层，切 opacity） */
+.tune-copy::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: #74c05f;
+  opacity: 0;
+  transition: opacity 0.22s;
+}
+.tune-copy[data-state='failed']::before { background: #ee8069; }
+.tune-copy[data-state]::before { opacity: 1; }
+.tune-copy[data-state] { color: #fff; --icon-fill: transparent; }
+.tune-copy:hover { transform: translateY(-2px); }
+.tune-copy:active { transform: translateY(3px) scale(0.98); transition-duration: 0.08s; }
+.tune-copy-icon { width: 22px; height: 22px; flex: none; }
+.tune-copy-label { min-width: 0; white-space: nowrap; }
+.tune-bit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 2;
+}
+.tune-bit:nth-child(3n) { border-radius: 50%; }
+.tune-bit:nth-child(3n + 1) { width: 6px; height: 10px; }
+
+/* —— 收起后的小按钮 —— */
+.tune-fab {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 3px solid #fff;
+  border-radius: 20px;
+  background: var(--yolk);
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: none;
+  box-shadow: 0 5px 0 var(--ledge), 0 12px 24px rgba(60, 45, 30, 0.26);
+  transition: rotate 0.4s var(--t-bounce), scale 0.4s var(--t-bounce);
+  --icon-fill: var(--yolk);
+}
+.tune-fab .icon { width: 28px; height: 28px; transition: transform 0.45s var(--t-bounce); }
+.tune-fab:hover .icon { transform: rotate(-14deg) scale(1.1); }
+.tune-fab:active { scale: 0.92; transition-duration: 0.08s; }
+
+/* —— Tweakpane 主题 —— */
+.tune-page {
+  --tp-base-background-color: transparent;
+  --tp-base-shadow-color: transparent;
+  --tp-base-border-radius: 0px;
+  --tp-base-font-family: 'Nunito', ui-rounded, system-ui, sans-serif;
+  --tp-blade-border-radius: 10px;
+  --tp-blade-horizontal-padding: 7px;
+  --tp-blade-value-width: 150px;
+  --tp-container-unit-size: 26px;
+  --tp-container-unit-spacing: 7px;
+  --tp-container-horizontal-padding: 4px;
+  --tp-container-vertical-padding: 7px;
+  --tp-button-background-color: color-mix(in srgb, var(--c) 22%, #fff);
+  --tp-button-background-color-hover: color-mix(in srgb, var(--c) 30%, #fff);
+  --tp-button-background-color-focus: color-mix(in srgb, var(--c) 30%, #fff);
+  --tp-button-background-color-active: color-mix(in srgb, var(--c) 38%, #fff);
+  --tp-button-foreground-color: var(--ink);
+  --tp-container-background-color: color-mix(in srgb, var(--c) 12%, var(--paper));
+  --tp-container-background-color-hover: color-mix(in srgb, var(--c) 19%, var(--paper));
+  --tp-container-background-color-focus: color-mix(in srgb, var(--c) 19%, var(--paper));
+  --tp-container-background-color-active: color-mix(in srgb, var(--c) 25%, var(--paper));
+  --tp-container-foreground-color: var(--ink);
+  --tp-input-background-color: var(--paper-2);
+  --tp-input-background-color-hover: color-mix(in srgb, var(--paper-2) 70%, var(--paper-3));
+  --tp-input-background-color-focus: #fff;
+  --tp-input-background-color-active: #fff;
+  --tp-input-foreground-color: var(--ink);
+  --tp-label-foreground-color: var(--ink-2);
+  --tp-monitor-background-color: var(--paper-2);
+  --tp-monitor-foreground-color: var(--ink-2);
+  --tp-groove-foreground-color: var(--paper-3);
+}
+.tune-pane .tp-rotv { font-size: 12.5px; font-weight: 600; line-height: 1.25; box-shadow: none; color: var(--ink); }
+.tune-pane .tp-lblv { line-height: 1.2; }
+.tune-pane .tp-lblv_l { padding-left: 4px; padding-right: 10px; color: var(--ink-2); }
+
+/* 滑块：粗圆的槽，已选那段是这一组的颜色，旋钮是带彩色圈的白糖豆，悬停胖一点、按住再胖一点 */
+.tune-pane .tp-sldv_t { margin: 0 10px 0 8px; }
+.tune-pane .tp-sldv_t::before { height: 8px; border-radius: 99px; background: var(--paper-3); box-shadow: inset 0 1.5px 0 rgba(74, 64, 88, 0.12); }
+.tune-pane .tp-sldv_k::before { height: 8px; border-radius: 99px; background: var(--c); }
+.tune-pane .tp-sldv_k::after,
+.tune-pane .tp-sldv_t:hover .tp-sldv_k::after,
+.tune-pane .tp-sldv_t:focus .tp-sldv_k::after,
+.tune-pane .tp-sldv_t:active .tp-sldv_k::after {
+  width: 18px;
+  height: 18px;
+  right: -9px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--c), 0 3px 0 2px rgba(74, 64, 88, 0.16);
+  transition: transform 0.35s var(--t-bounce);
+}
+.tune-pane .tp-sldv_t:hover .tp-sldv_k::after { transform: scale(1.14); }
+.tune-pane .tp-sldv_t:active .tp-sldv_k::after { transform: scale(1.3); transition-duration: 0.12s; }
+.tune-pane .tp-sldv_t:focus-visible .tp-sldv_k::after { box-shadow: 0 0 0 3px var(--c), 0 0 0 6.5px rgba(242, 183, 5, 0.6); }
+
+/* 数字、文字输入框 */
+.tune-pane .tp-txtv_i {
+  border-radius: 9px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 1.5px 0 rgba(74, 64, 88, 0.1);
+}
+.tune-pane .tp-txtv_i:focus { box-shadow: 0 0 0 2px var(--c); }
+.tune-pane .tp-sldtxtv_t { flex: 0 0 54px; margin-left: 6px; }
+
+/* 开关：Tweakpane 的勾选框改成拨动开关（圆点 translateX，底色叠一层切 opacity） */
+.tune-pane .tp-ckbv_w {
+  width: 42px;
+  height: 24px;
+  margin-top: 1px;
+  border-radius: 99px;
+  background: var(--paper-3);
+  box-shadow: inset 0 1.5px 0 rgba(74, 64, 88, 0.14);
+}
+.tune-pane .tp-ckbv_w svg { display: none; }
+.tune-pane .tp-ckbv_w::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--c);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.tune-pane .tp-ckbv_w::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 0 rgba(74, 64, 88, 0.22);
+  transition: transform 0.45s var(--t-bounce);
+}
+.tune-pane .tp-ckbv_i:checked + .tp-ckbv_w::before { opacity: 1; }
+.tune-pane .tp-ckbv_i:checked + .tp-ckbv_w::after { transform: translateX(18px); }
+.tune-pane .tp-ckbv_i:active + .tp-ckbv_w::after { transform: scale(0.88); }
+.tune-pane .tp-ckbv_i:checked:active + .tp-ckbv_w::after { transform: translateX(18px) scale(0.88); }
+.tune-pane .tp-ckbv_i:focus-visible + .tp-ckbv_w { box-shadow: 0 0 0 3px rgba(242, 183, 5, 0.65); }
+
+/* 下拉选择、按钮：圆角玩具按钮，底下一道厚度，按下去沉一点 */
+.tune-pane .tp-lstv_s {
+  padding-left: 10px;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  box-shadow: 0 0 0 2px var(--line), 0 2px 0 2px rgba(74, 64, 88, 0.06);
+}
+.tune-pane .tp-lstv_s:hover { background: var(--paper); }
+.tune-pane .tp-lstv_m { color: color-mix(in srgb, var(--c) 75%, var(--ink)); }
+.tune-pane .tp-btnv_b {
+  height: 32px;
+  line-height: 32px;
+  border-radius: 12px;
+  font-weight: 800;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--c) 45%, #8f7d62);
+  transition: transform 0.35s var(--t-bounce);
+}
+.tune-pane .tp-btnv_b:hover { transform: translateY(-1px); }
+.tune-pane .tp-btnv_b:active { transform: translateY(3px); box-shadow: none; transition-duration: 0.06s; }
+
+/* 子分组 = 抽屉：一条淡彩色的拉手，箭头转下来；展开时里面的行依次淡入（缝线代替原来的竖条） */
+.tune-pane .tp-fldv_b {
+  height: 34px;
+  line-height: 34px;
+  padding-left: 12px;
+  border-radius: 12px;
+  font-weight: 800;
+  color: var(--ink);
+  transition: transform 0.35s var(--t-bounce);
+}
+.tune-pane .tp-fldv_b:active { transform: scale(0.98); transition-duration: 0.08s; }
+.tune-pane .tp-fldv_c > .tp-fldv > .tp-fldv_b,
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_b,
+.tune-pane .tp-rotv_c > .tp-fldv.tp-v-lst:not(.tp-fldv-expanded) > .tp-fldv_b { border-radius: 12px; }
+.tune-pane .tp-fldv_t { padding-left: 2px; }
+.tune-pane .tp-fldv_m {
+  width: 8px;
+  height: 8px;
+  right: 14px;
+  background: none;
+  border-right: 2.5px solid currentColor;
+  border-bottom: 2.5px solid currentColor;
+  border-radius: 1px;
+  opacity: 0.65;
+  transform: rotate(-45deg);
+  transition: transform 0.45s var(--t-bounce);
+}
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_b > .tp-fldv_m { transform: translateY(-2px) rotate(45deg); }
+.tune-pane .tp-fldv_i { width: 10px; top: 38px; }
+.tune-pane .tp-fldv:not(.tp-fldv-expanded) > .tp-fldv_i { display: none; }
+.tune-pane .tp-fldv_i::before { left: 6px; width: 0; background: none; border-left: 2px dashed color-mix(in srgb, var(--c) 50%, transparent); }
+.tune-pane .tp-fldv_c { padding-left: 10px; }
+.tune-pane .tp-fldv_c,
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c { transition: height 1ms linear, opacity 1ms linear, padding 1ms linear; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > * { animation: tune-row-in 0.42s var(--t-spring) backwards; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > :nth-child(2) { animation-delay: 0.025s; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > :nth-child(3) { animation-delay: 0.05s; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > :nth-child(4) { animation-delay: 0.075s; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > :nth-child(5) { animation-delay: 0.1s; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > :nth-child(6) { animation-delay: 0.125s; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > :nth-child(7) { animation-delay: 0.15s; }
+.tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > :nth-child(n + 8) { animation-delay: 0.17s; }
+@keyframes tune-row-in { from { opacity: 0; transform: translateY(-7px); } }
+
+/* 颜色：圆形色块（白边、底下一道厚度），悬停时歪一下；取色器弹出来是一张白卡片 */
+.tune-pane .tp-colswv {
+  border-radius: 50%;
+  box-shadow: 0 0 0 2.5px #fff, 0 2px 0 2.5px rgba(74, 64, 88, 0.16);
+  transition: transform 0.4s var(--t-bounce);
+}
+.tune-pane .tp-colv_h:hover .tp-colswv { transform: rotate(-14deg) scale(1.1); }
+.tune-pane .tp-colswv_b:focus::after { border-radius: 50%; border-color: var(--yolk); }
+.tune-pane .tp-coltxtv_ms { border-radius: 9px; font-weight: 800; }
+.tune-pane .tp-popv {
+  padding: 8px 8px 10px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 0 0 2px var(--paper-3), 0 16px 32px rgba(60, 45, 30, 0.26);
+  transform-origin: 50% 0;
+  animation: tune-pop 0.38s var(--t-bounce) backwards;
+}
+@keyframes tune-pop { from { opacity: 0; transform: translateY(-6px) scale(0.86); } }
+.tune-pane .tp-svpv { border-radius: 12px; }
+.tune-pane .tp-hplv_c, .tune-pane .tp-aplv_b { height: 8px; margin-top: -4px; border-radius: 99px; }
+.tune-pane .tp-hplv_m, .tune-pane .tp-aplv_m, .tune-pane .tp-svpv_m { border: 3px solid #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(74, 64, 88, 0.4); }
+
+/* 只读的数值、帧时间曲线、分隔线 */
+.tune-pane .tp-sglv_i { border-radius: 9px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tune-pane .tp-grlv_g { height: 64px; border-radius: 12px; }
+.tune-pane .tp-grlv_g polyline { stroke: var(--c); stroke-width: 2; }
+.tune-pane .tp-grlv .tp-ttv { background-color: var(--ink); border-radius: 6px; font-weight: 800; }
+.tune-pane .tp-grlv .tp-ttv::before { border-top-color: var(--ink); }
+.tune-pane .tp-sprv_r { height: 0; background: none; border-top: 2px dashed var(--line); }
+
+/* —— 手机竖屏：贴底的半屏抽屉，标签横排；收起时右下角一个小按钮。不能拖 —— */
+@media (max-width: 640px) {
+  .tune-pane { top: auto; bottom: 0; left: 0; right: 0; width: auto; translate: none !important; }
+  .tune-card {
+    max-height: min(60vh, 520px);
+    max-height: min(60dvh, 520px);
+    border-radius: 24px 24px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    transform-origin: 92% 100%;
+    box-shadow: 0 0 0 2.5px #f0ddb6, 0 -10px 30px rgba(60, 45, 30, 0.22);
+  }
+  .tune-head { cursor: default; padding-top: 9px; }
+  .tune-grip { display: none; }
+  .tune-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .tune-rail { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 8px 12px 9px; border-bottom: 2px dashed var(--line); }
+  .tune-plate { left: 0; top: 8px; margin: 0 0 0 -3px; }
+  .tune-body { padding: 6px 12px 12px 8px; }
+  .tune-foot { padding: 8px 12px 10px; }
+  .tune-copy { height: 42px; }
+  .tune-fab { top: auto; bottom: calc(16px + env(safe-area-inset-bottom)); right: 14px; width: 52px; height: 52px; }
+  .tune-tip { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tune-pane, .tune-card, .tune-plate, .tune-tab .icon, .tune-fab, .tune-fab .icon, .tune-copy, .tune-min,
+  .tune-pane .tp-sldv_k::after, .tune-pane .tp-ckbv_w::after, .tune-pane .tp-fldv_m, .tune-pane .tp-colswv, .tune-pane .tp-fldv_b, .tune-pane .tp-btnv_b { transition-duration: 0.01ms !important; }
+  .tune-pane[data-drag='on'] .tune-card { rotate: none; }
+  .tune-pane .tp-fldv.tp-fldv-expanded > .tp-fldv_c > *, .tune-pane .tp-popv { animation: tune-fade 0.18s ease-out backwards; }
+  .tune-tab:hover .icon, .tune-fab:hover .icon { transform: none; }
+}
+@keyframes tune-fade { from { opacity: 0; } }

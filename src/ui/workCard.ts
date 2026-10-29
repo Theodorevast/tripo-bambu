@@ -1,5 +1,6 @@
 import type { Team, Work } from '../data/types';
 import { el, formatTris } from './dom';
+import { icon } from './icons';
 
 // 作品在团队作品里的序号，从 1 开始；0 = 不在里面（拖进来的临时作品）
 function workIndex(work: Work, team: Team): number {
@@ -45,14 +46,18 @@ export class WorkCard {
     root.append(this.node);
   }
 
+  // 每次 show 都重新建内容，CSS 的弹出动画（styles.css 的 card-pop）跟着重放：换一件作品时卡片也会轻轻弹一下
   show(work: Work, team: Team, failed: boolean): void {
     this.node.replaceChildren(
-      el('button', { className: 'wc-close', textContent: '×', ariaLabel: 'Close', onclick: () => this.hide() }),
+      el('button', { className: 'wc-close', type: 'button', ariaLabel: 'Close', onclick: () => this.hide() }, icon('close')),
       ...workInfo(work, team, failed),
     );
     // 临时作品不在博物馆里，没有这个按钮
-    if (workIndex(work, team) > 0) this.node.append(el('button', { className: 'primary', textContent: 'View in Museum →', onclick: () => this.onMuseum(work.id) }));
+    if (workIndex(work, team) > 0) this.node.append(el('button', { className: 'primary wc-go', type: 'button', onclick: () => this.onMuseum(work.id) }, 'View in Museum', icon('arrow')));
     this.node.hidden = false;
+    delete this.node.dataset.pop;
+    void this.node.offsetWidth; // 已经开着时换内容：去掉再加回 data-pop，让弹出动画重新开始
+    this.node.dataset.pop = '';
   }
 
   hide(): void {
