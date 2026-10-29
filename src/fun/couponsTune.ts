@@ -66,6 +66,7 @@ export function addCouponsTune(pane: Folder): void {
     ['life', 1, 30, 0.5, 'life s'],
     ['fade', 0.1, 3, 0.05, 'fade s'],
     ['boost', 0, 3, 0.05, 'planet view boost'],
+    ['minScreen', 0, 0.15, 0.005, 'min size on screen (× view height)'],
   ]);
   const pick = f.addFolder({ title: 'Pick up', expanded: false });
   sliders(pick, [

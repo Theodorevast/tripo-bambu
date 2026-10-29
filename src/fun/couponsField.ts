@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import type { CouponTicket } from '../data/coupons';
-import { COUPONS, flightAcross, flightArc, flipAngle, flutterWeight, lifeOpacity, pickupProgress } from './couponsMath';
+import { COUPONS, couponScale, flightAcross, flightArc, flipAngle, flutterWeight, lifeOpacity, pickupProgress } from './couponsMath';
 import { CAPACITY, GlowDiscs, Sparks, TicketMesh } from './couponsFx';
 import { smooth, span } from '../scenes/ease';
 
@@ -93,9 +93,10 @@ export class CouponField {
   private clock = 0;
   private rand: () => number;
 
-  constructor(atlas: HTMLCanvasElement, rand: () => number) {
+  // sceneDepth：场景缓冲的深度（券画在不调色的那一层时按它裁掉被挡住的部分，couponsFx.ts）
+  constructor(atlas: HTMLCanvasElement, rand: () => number, sceneDepth: THREE.DepthTexture | null = null) {
     this.rand = rand;
-    this.tickets = new TicketMesh(atlas);
+    this.tickets = new TicketMesh(atlas, sceneDepth);
     this.glows = new GlowDiscs();
     this.sparks = new Sparks();
     this.group.name = 'coupons';
@@ -271,15 +272,20 @@ export class CouponField {
     return best ? best.id : null;
   }
 
-  // 每帧：hero 是这一帧的放大倍数（落点按它贴地），target(id) 给出飞向镜头的终点
-  update(dt: number, camera: THREE.Camera, ground: CouponGround | null, hero: number, target: (out: PickupTarget) => void, pickTarget: PickupTarget): void {
+  // 每帧：heroIn 是这一帧跟着作品地标的放大倍数，target(id) 给出飞向镜头的终点。
+  // 按距离放大（F2）：每张券实际的放大倍数不小于「长边在画面上有 COUPONS.minScreen 个画面高」要的倍数，
+  // 按翠宝脚下（同一次吐出的几张共用）离镜头多远算，落点、浮起的高度、大小一起按它放大（couponScale）
+  update(dt: number, camera: THREE.Camera, ground: CouponGround | null, heroIn: number, target: (out: PickupTarget) => void, pickTarget: PickupTarget): void {
     this.clock += dt;
+    const cam = camera as THREE.PerspectiveCamera;
+    const tanH = cam.isPerspectiveCamera ? Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) : 0;
     for (const s of this.slots) {
       if (s.phase === 'free') continue;
       if (!ground && s.phase !== 'pickup' && s.phase !== 'held') {
         this.release(s);
         continue;
       }
+      const hero = couponScale(heroIn, s.origin.distanceTo(camera.position), tanH);
       if (ground && (s.hero < 0 || Math.abs(hero - s.hero) > 0.003 * hero)) this.reground(s, ground, hero);
       s.highlight += ((s.hovered ? 1 : 0) - s.highlight) * (1 - Math.exp(-14 * dt));
       switch (s.phase) {

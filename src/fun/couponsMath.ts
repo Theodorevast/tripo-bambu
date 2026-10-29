@@ -47,10 +47,19 @@ export const COUPONS = {
   cardPx: 360, // 券飞到镜头前时在画面上多宽（像素，和卡片上的券一样大）
   // —— 星球视图：作品放大多少，站桩翠宝和券跟着放大（再乘 boost） ——
   boost: 1.2,
+  // 按距离放大（F2）：镜头离得远时，券的长边在画面上至少有这么多个画面高（星球全景里原来只有约 25 像素；0.065 在 900 像素高的画面上约 58 像素）。
+  // 一次吐出的几张按翠宝脚下离镜头多远一起放大：大小、落点离翠宝多远、浮多高一起放大，不挤在一起。贴近看（漫游）时不起作用
+  minScreen: 0.065,
   volume: 0.5, // 音量（0 关）
 };
 
 export type CouponParams = typeof COUPONS;
+
+// 按距离放大（F2）：离镜头 dist 米、竖直视角一半的正切是 tanHalfFov 时，券的放大倍数至少要多少，长边才有 minScreen 个画面高。
+// 不比 hero（跟着作品的地标放大）小
+export function couponScale(hero: number, dist: number, tanHalfFov: number, p: CouponParams = COUPONS): number {
+  return Math.max(hero, (p.minScreen * 2 * Math.max(0, dist) * tanHalfFov) / Math.max(1e-6, p.size));
+}
 
 // 翠宝这一帧的姿态（叠在它自己的站姿、走路动作上面）。缩放以脚底为原点
 export interface TribooPose {

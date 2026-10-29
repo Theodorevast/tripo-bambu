@@ -108,6 +108,14 @@ type V3 = THREE.Node<'vec3'>;
 // 叠在调色之前的一层（线性颜色进、线性颜色出），例如转场的云层：addOverlay 以后重建最后一步的着色器
 export type Overlay = (rgb: V3, uv: V2, aspect: F, invSize: V2) => V3;
 
+// 不调色的一层（F2：星球上的优惠券）：这一层的东西不画进场景缓冲，单独画进 layer 缓冲（存显示空间、预乘过 alpha 的颜色），
+// 最后一步在调色之后按 alpha 叠上去。翠宝黄经过 AgX 和调色以后饱和度最多剩一半左右（亮了更淡、暗了发褐，自发光救不回来），只能不过调色。
+// 被场景挡住的部分由这一层自己的着色器按场景缓冲的深度裁掉（sceneDepth）。转场的云层盖着时整层淡掉
+export interface UngradedLayer {
+  scene: THREE.Scene;
+  active(): boolean; // 这一帧有没有东西要画：没有就整层跳过，最后一步也不采样
+}
+
 const linear = (hex: string, out: THREE.Vector3): THREE.Vector3 => {
   const c = new THREE.Color(hex);
   return out.set(c.r, c.g, c.b);
@@ -120,6 +128,7 @@ const _rel = new THREE.Matrix4();
 const _p = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _sun = new THREE.Vector3();
+const _clear = new THREE.Color();
 
 // 一件作品在它自己的坐标里（+Y 是地面法线）占地多大：所有可见网格的几何包围盒，取水平方向最远的那一边
 function footprintOf(root: THREE.Object3D): number {
@@ -151,6 +160,11 @@ export class MainPost {
   private readonly finalMaterial = new THREE.NodeMaterial();
   private readonly finalQuad: THREE.QuadMesh;
   private readonly overlays: Overlay[] = [];
+  // 不调色的一层（F2）：8 位、不多采样（存的是显示空间 0..1 的颜色；券的轮廓是贴图 alpha 裁出来的，多采样帮不上），自己的深度。
+  // 2880×1800 时颜色加深度约 40 MB（照场景缓冲的半浮点、4 倍多采样要约 290 MB）
+  private readonly layerTarget: THREE.RenderTarget;
+  private layer: UngradedLayer | null = null;
+  private readonly layerOn = uniform(0);
   // uniform
   private readonly invSize = uniform(new THREE.Vector2(1, 1));
   private readonly aspect = uniform(1);
@@ -220,6 +234,18 @@ export class MainPost {
       depthTexture,
     });
     this.target.texture.name = 'scene-color';
+    this.layerTarget = new THREE.RenderTarget(1, 1, {
+      type: THREE.UnsignedByteType,
+      format: THREE.RGBAFormat,
+      colorSpace: THREE.ColorManagement.workingColorSpace as THREE.ColorSpace, // 不做颜色空间换算：着色器写的就是显示颜色
+      depthBuffer: true,
+      stencilBuffer: false,
+      samples: 0,
+      generateMipmaps: false,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    });
+    this.layerTarget.texture.name = 'ungraded-layer';
     // 只要一个通道（透光程度、光束亮度）：半浮点单通道，四分之一分辨率下不到 1 MB，取样都在缓存里
     const quarter = { type: THREE.HalfFloatType, format: THREE.RedFormat, depthBuffer: false, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
     this.maskTarget = new THREE.RenderTarget(1, 1, quarter);
@@ -274,6 +300,29 @@ export class MainPost {
     this.build();
   }
 
+  // 不调色的一层（F2）：只有一层；null 撤掉
+  setUngraded(layer: UngradedLayer | null): void {
+    this.layer = layer;
+  }
+
+  // 场景缓冲的深度：不调色那一层的着色器按它裁掉被挡住的部分
+  get sceneDepth(): THREE.DepthTexture {
+    return this.target.depthTexture!;
+  }
+
+  // 在后台编好不调色那一层里的东西：按这一层的缓冲编（object 要已经在 scene 里，scene 就是 setUngraded 交进来的那一层）。
+  // 只在调 compileAsync 的那一下换渲染目标（它在第一个 await 之前就按当前的渲染目标排好队），马上换回来
+  compileUngraded(object: THREE.Object3D, scene: THREE.Scene): Promise<void> {
+    const r = this.renderer;
+    const saved = r.getRenderTarget();
+    r.setRenderTarget(this.layerTarget);
+    try {
+      return r.compileAsync(object, this.camera, scene);
+    } finally {
+      r.setRenderTarget(saved);
+    }
+  }
+
   // 每帧调一次，代替 renderer.render(scene, camera)
   render(world: World): void {
     const r = this.renderer;
@@ -299,6 +348,7 @@ export class MainPost {
       this.last = now;
       const veil = world.director.veil.visible ? 0 : 1;
       this.unveiled = veil > this.unveiled ? Math.min(1, this.unveiled + dt / 0.15) : Math.max(veil, this.unveiled - dt / 0.15);
+      this.drawLayer();
       this.gatherContacts(world);
       this.gatherPlanets(world);
       // 2. 日落光束（只在要画的时候）
@@ -345,6 +395,7 @@ export class MainPost {
   dispose(): void {
     if (this.renderer.getRenderTarget() === this.target) this.renderer.setRenderTarget(null);
     this.target.dispose();
+    this.layerTarget.dispose();
     this.maskTarget.dispose();
     this.raysTarget.dispose();
     for (const q of [this.maskQuad, this.raysQuad, this.finalQuad]) (q.material as THREE.Material).dispose();
@@ -356,6 +407,7 @@ export class MainPost {
     const h = Math.max(1, this.size.y);
     if (this.target.width !== w || this.target.height !== h) {
       this.target.setSize(w, h);
+      this.layerTarget.setSize(w, h);
       const qw = Math.max(1, Math.round(w / 4));
       const qh = Math.max(1, Math.round(h / 4));
       this.maskTarget.setSize(qw, qh);
@@ -387,6 +439,25 @@ export class MainPost {
     if (out instanceof Promise) return out.finally(restore) as T;
     restore();
     return out;
+  }
+
+  // 不调色的一层（F2）：有东西要画时清成全透明、画进 layer 缓冲；转场的云层盖着时跟着淡掉（云层画在场景里，这一层叠在它上面）
+  private drawLayer(): void {
+    const layer = this.layer;
+    const on = layer !== null && this.unveiled > 0 && layer.active();
+    this.layerOn.value = on ? this.unveiled : 0;
+    if (!on) return;
+    const r = this.renderer;
+    r.getClearColor(_clear);
+    const alpha = r.getClearAlpha();
+    r.setClearColor(0x000000, 0);
+    r.setRenderTarget(this.layerTarget);
+    try {
+      r.render(layer.scene, this.camera);
+    } finally {
+      r.setClearColor(_clear, alpha);
+      r.setRenderTarget(this.target); // 平时的渲染目标一直是场景缓冲（见文件开头）
+    }
   }
 
   private drawFinal(): void {
@@ -533,6 +604,7 @@ export class MainPost {
     const depth = texture(this.target.depthTexture!);
     const rays = texture(this.raysTarget.texture);
     const mask = texture(this.maskTarget.texture);
+    const layer = texture(this.layerTarget.texture);
     const node = Fn(() => {
       const st = uv();
       const c = color.sample(st).rgb.toVar();
@@ -590,6 +662,11 @@ export class MainPost {
       for (const overlay of this.overlays) rgb = overlay(rgb, st, this.aspect, this.invSize);
       const out = renderOutput(vec4(rgb, 1), this.toneMapping, this.colorSpace);
       const graded = vec4(gradeDisplay(out.rgb, st, screenCoordinate.xy), 1).toVar();
+      // 不调色的一层（F2）：调色之后按 alpha 叠上去（层里是显示空间、预乘过 alpha 的颜色）
+      If(this.layerOn.greaterThan(0), () => {
+        const l = layer.sample(st);
+        graded.assign(vec4(graded.rgb.mul(float(1).sub(l.a.mul(this.layerOn))).add(l.rgb.mul(this.layerOn)), 1));
+      });
       // 自查用的中间结果
       If(this.debugView.equal(1), () => {
         graded.assign(vec4(vec3(float(1).sub(occ.mul(this.contactStrength))), 1));
