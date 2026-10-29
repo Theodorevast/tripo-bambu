@@ -65,6 +65,9 @@ export class PlanetPreview {
   private last = 0;
   private uses = 0;
   private warming = false;
+  private frozen = false; // Launch 以后不再在后台备别的预设
+  private paused = false; // 离开「选样子」那一步时不在后台备别的预设（主画面这时要编新星球的着色器，WebGL2 上两边抢 GPU 进程）
+  private inflight = 0; // 正在编译的有几颗
   private fit = 1.95; // 画面里要装下多大（× 半径）：有石头带时大一些，渐变过去（舷窗是圆的，石头带两头、浮岛被圆边裁一点没关系）
   private fitGoal = 1.95;
   private readonly size = new THREE.Vector2();
@@ -123,17 +126,48 @@ export class PlanetPreview {
     return this.canvas.getBoundingClientRect();
   }
 
-  dispose(): void {
+  // Launch 一开始：不再在后台备别的预设（建星球、编着色器都占主线程），现在这颗照常转着画（窗口收起时它往下掉进云里）
+  freeze(): void {
+    this.frozen = true;
+  }
+
+  // 在别的步骤（名字、邀请、Launch）时不在后台备别的预设；回到「选样子」再接着备
+  pauseWarm(on: boolean): void {
+    if (this.paused === on) return;
+    this.paused = on;
+    if (!on && this.ready) void this.warmOthers();
+  }
+
+  // 没有正在编的（最多等 cap 毫秒）：Launch 前等一下，WebGL2 上预览的链接不和主画面抢 GPU 进程
+  settled(cap = 1200): Promise<void> {
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      const poll = () => (this.inflight === 0 || performance.now() - t0 > cap ? resolve() : setTimeout(poll, 50));
+      poll();
+    });
+  }
+
+  // Launch 以后（每个浏览器只建一颗，预览不会再用）：停下来，星球一颗一颗放掉（每隔一会儿放一颗，不挤在一帧里）。
+  // 渲染器本身不销毁：实测销毁 WebGPU 设备时 GPU 进程停 380 ms 左右，主画面跟着停一帧（Launch 以后的动画要求每帧 ≤ 50 ms）；
+  // 空着的设备不占什么，留到页面关掉
+  release(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.frozen = true;
     this.running = false;
-    for (const s of this.slots.values()) this.drop(s);
+    void this.rendererReady?.then((r) => r.setAnimationLoop(null));
+    const rest = [...this.slots.values()];
     this.slots.clear();
     this.current = null;
-    void this.rendererReady?.then((r) => {
-      r.setAnimationLoop(null);
-      r.dispose();
-    });
+    const next = () => {
+      const s = rest.shift();
+      if (!s) return;
+      void s.ready.then(() => {
+        this.drop(s);
+        setTimeout(next, 120);
+      });
+    };
+    next();
   }
 
   // —— 内部 ——
@@ -210,6 +244,7 @@ export class PlanetPreview {
   }
 
   private async compile(s: Slot): Promise<void> {
+    this.inflight++;
     const renderer = await this.rendererReady!;
     const t0 = performance.now();
     const hidden: THREE.Object3D[] = [];
@@ -225,6 +260,7 @@ export class PlanetPreview {
       console.warn('preview compile failed', err);
     } finally {
       for (const o of hidden) o.visible = false;
+      this.inflight--;
     }
     s.compiled = true;
     this.stats.compileMs.push(Math.round(performance.now() - t0));
@@ -256,7 +292,7 @@ export class PlanetPreview {
     try {
       for (const preset of PRESET_IDS) {
         const look = this.wanted;
-        if (!look || this.disposed || !this.running) return;
+        if (!look || this.disposed || this.frozen || this.paused || !this.running) return;
         const s = this.slot({ ...look, preset });
         await s.ready;
         await new Promise((r) => setTimeout(r, 120)); // 中间歇一下：主画面、输入框都顺
