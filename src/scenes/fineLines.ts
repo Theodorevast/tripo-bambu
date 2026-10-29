@@ -33,6 +33,7 @@ export interface FineStar {
 
 export interface FineLinesOptions {
   additive?: boolean; // 叠加混合（夜空上像发光）；默认普通混合
+  blend?: 'max'; // 取亮的那个（线和线接头重叠的地方不会叠出一个个亮点：一圈分很多段的圆线条均匀）
   twinkle?: number; // 小星闪烁的幅度 0..1
   twinkleSpeed?: number; // 闪烁的速度（弧度 / 秒）
   name?: string;
@@ -90,6 +91,15 @@ export class FineLines {
     const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide });
     m.name = opts.name ?? 'fine-lines';
     if (opts.additive) m.blending = THREE.AdditiveBlending;
+    if (opts.blend === 'max') {
+      m.blending = THREE.CustomBlending;
+      m.blendEquation = THREE.MaxEquation;
+      m.blendSrc = THREE.OneFactor;
+      m.blendDst = THREE.OneFactor;
+      m.blendEquationAlpha = THREE.MaxEquation;
+      m.blendSrcAlpha = THREE.OneFactor;
+      m.blendDstAlpha = THREE.OneFactor;
+    }
     const P = positionLocal;
     const O = attribute<'vec3'>('other', 'vec3');
     const C = attribute<'vec2'>('corner', 'vec2');
@@ -124,7 +134,8 @@ export class FineLines {
     const tw = sin(time.mul(opts.twinkleSpeed ?? 1.1).add(E.y)).mul(amp * 0.5).add(1 - amp * 0.5);
     const starA = max(core, max(rayX, rayY).mul(0.75)).add(glowR).mul(tw).clamp(0, 1);
     const a = select(K.greaterThan(0.5), starA, lineA).mul(T.w).mul(this.fade);
-    m.colorNode = vec4(T.xyz, a); // 叠加混合是 SrcAlpha · One：颜色乘一次透明度就够
+    // 叠加混合是 SrcAlpha · One：颜色乘一次透明度就够；取亮混合（Max）不乘因子：颜色自己先乘好透明度
+    m.colorNode = opts.blend === 'max' ? vec4(T.xyz.mul(a), a) : vec4(T.xyz, a);
     this.mesh = new THREE.Mesh(g, m);
     this.mesh.name = m.name;
     this.mesh.frustumCulled = false;

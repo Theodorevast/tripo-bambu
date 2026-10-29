@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { STAGE_VIEW_DIR } from '../planet/ground';
+import { setLampPools, STAGE_VIEW_DIR } from '../planet/ground';
 import { PATH } from '../planet/mask';
 import { PRESETS } from '../planet/presets';
 import { PropsField, type PropsPlanet } from '../planet/props-v2';
@@ -50,8 +50,10 @@ export function installPropsV2(world: World): PropsField {
       stage: new THREE.Vector3(...STAGE_VIEW_DIR),
       rockColor: new THREE.Color(PRESETS[recipe.preset].ground.rock),
     };
-    field.fill(info);
+    const items = field.fill(info);
     if (field.group.parent !== planet.decor) planet.decor.add(field.group);
+    // 灯柱脚下的暖光（ground.ts 的 LAMP_POOLS）：灯柱底座的位置（星球本地坐标）
+    setLampPools(items.filter((it) => it.kind === 'lamp').map((it) => ({ pos: it.dir.clone().multiplyScalar(planet.height(it.dir.x, it.dir.y, it.dir.z)), k: 1 })));
   };
   world.frameHooks.add(() => {
     if (!ready) return;
@@ -62,6 +64,7 @@ export function installPropsV2(world: World): PropsField {
     bound = e;
     if (!e) {
       field.group.removeFromParent();
+      setLampPools([]);
       return;
     }
     fill(e);
