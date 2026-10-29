@@ -60,31 +60,36 @@ export interface Preset {
 
 // 「小王子」方向：缓坡草甸，起伏只占半径的 4–6%（半径 30 时 ±1.2–1.8 米，角色 1 米高走起来有起伏，星球轮廓仍是圆的）。
 // 水面压得很低，只在最低的洼地里留几个小水塘（星球外面的「海」是云海）
+//
+// 第二版 [v2-world] 的「大地」色板（art-direction.md）：草是 Sage #8d9c86、Moss #5c6b55、Lichen #a7ab8a，石头 Stone #8f8b84、Slate #6a7389，
+// 沙 Sand #c7b69a，水偏灰蓝 Water #5f7f97。不要荧光绿、糖果色。每个键先按色板挑「显示色」，再按第一版同一个键的线性亮度缩放
+// （第一版的亮度是按 AgX、tint、farTint 调好的），所以色相、饱和度是色板的，明暗和第一版一样。五个预设靠色相分开：
+// 草甸（灰绿）、沙丘（沙色）、霜原（灰蓝、雪白）、玄武岩（深橄榄、锈色田）、海岛（偏青的灰绿、玫瑰色的岸）
 export const PRESETS: Record<PresetId, Preset> = {
   verdant: {
     id: 'verdant', label: 'Verdant', amp: 0.06, freq: 1.4, sea: -0.12, continentFreq: 1.15, land: 0.02, basin: 0,
-    ground: { grass: '#293412', fresh: '#3c4816', dry: '#555327', tip: '#6f7938', root: '#11160a', moss: '#222c10', soil: '#3a2a18', path: '#745a3a', rock: '#4b463f', sand: '#8c7853', deep: '#0f3640', far: '#5c8a2e', field: '#a6bf45' },
-    water: '#3c7f8c', atmosphere: '#bfe0f0', ring: '#e8dcc0',
+    ground: { grass: '#2a3227', fresh: '#3e453b', dry: '#545240', tip: '#747561', root: '#10160f', moss: '#232b20', soil: '#322c26', path: '#655e50', rock: '#494643', sand: '#857966', deep: '#233340', far: '#75816f', field: '#b3b794' },
+    water: '#5f7f97', atmosphere: '#c5cdd8', ring: '#d8c08e',
   },
   desert: {
     id: 'desert', label: 'Desert', amp: 0.06, freq: 1.8, sea: null, continentFreq: 1.3, land: 0.06, basin: -0.2,
-    ground: { grass: '#66610a', fresh: '#7b721a', dry: '#8e7637', tip: '#998d51', root: '#322b0d', moss: '#4d4d12', soil: '#6f4723', path: '#957c53', rock: '#715946', sand: '#bba985', deep: '#a38c70', far: '#a3823f', field: '#d0ac62' },
-    water: '#000000', atmosphere: '#f6cfa0', ring: '#e6c49c',
+    ground: { grass: '#636049', fresh: '#757159', dry: '#83785e', tip: '#958c73', root: '#2f2b21', moss: '#4d4b38', soil: '#5d4d3e', path: '#8d7d67', rock: '#675c4f', sand: '#b9a98f', deep: '#9e8e75', far: '#96846a', field: '#bdaf94' },
+    water: '#000000', atmosphere: '#d9c9b8', ring: '#d8c08e',
   },
   glacier: {
     id: 'glacier', label: 'Glacier', amp: 0.055, freq: 1.2, sea: -0.1, continentFreq: 1.0, land: -0.02, basin: 0,
-    ground: { grass: '#597464', fresh: '#6b8274', dry: '#8f9a97', tip: '#98a29d', root: '#26362f', moss: '#426054', soil: '#595d61', path: '#8d9496', rock: '#686e72', sand: '#a7b3b2', deep: '#173f52', far: '#6f9a88', field: '#a9d4e2' },
-    water: '#5d9db3', atmosphere: '#dff2f6', ring: '#c8d6dc',
+    ground: { grass: '#64716b', fresh: '#737f79', dry: '#929999', tip: '#9ca1a0', root: '#2b3434', moss: '#505d57', soil: '#595d63', path: '#8e939b', rock: '#656d82', sand: '#acb1b5', deep: '#293d4c', far: '#8696a0', field: '#d8d8d2' },
+    water: '#6d8ea4', atmosphere: '#d3dbe4', ring: '#c9ccd2',
   },
   volcanic: {
     id: 'volcanic', label: 'Volcanic', amp: 0.065, freq: 1.6, sea: null, continentFreq: 1.4, land: 0.04, basin: -0.25,
-    ground: { grass: '#3a4512', fresh: '#495411', dry: '#574b27', tip: '#717138', root: '#151a0c', moss: '#242f0d', soil: '#261d18', path: '#4b3b30', rock: '#312d2a', sand: '#5b5058', deep: '#3a3243', far: '#556b2a', field: '#9a5d38' },
-    water: '#000000', atmosphere: '#e7b39c', ring: '#9d8478',
+    ground: { grass: '#3c4337', fresh: '#4b5142', dry: '#514b3f', tip: '#736e5b', root: '#161916', moss: '#272d23', soil: '#231e1b', path: '#453d37', rock: '#2c2e33', sand: '#565259', deep: '#373340', far: '#585d53', field: '#72625a' },
+    water: '#000000', atmosphere: '#c9b3b0', ring: '#a8894f',
   },
   coral: {
     id: 'coral', label: 'Coral', amp: 0.055, freq: 1.5, sea: -0.05, continentFreq: 1.7, land: -0.1, basin: 0,
-    ground: { grass: '#456d31', fresh: '#5a7f39', dry: '#8c7852', tip: '#90985e', root: '#1a3215', moss: '#2f5931', soil: '#6a4434', path: '#9e7d66', rock: '#7a645b', sand: '#c2a688', deep: '#164e57', far: '#4f9a42', field: '#b3cc52' },
-    water: '#4fa3a0', atmosphere: '#f8d6dc', ring: '#efd6cb',
+    ground: { grass: '#566a5f', fresh: '#6a7a70', dry: '#817a66', tip: '#96947d', root: '#262f24', moss: '#455442', soil: '#594a43', path: '#918077', rock: '#726664', sand: '#bea697', deep: '#2f4b5a', far: '#7f9188', field: '#c3b0a2' },
+    water: '#5f8a94', atmosphere: '#d9c8cb', ring: '#d8c08e',
   },
 };
 

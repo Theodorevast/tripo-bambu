@@ -88,12 +88,13 @@ export interface WaterPalette {
 // 海冰的多少（配方「海冰」）：只有冰川预设结冰
 export const WATER_ICE: Record<PresetId, number> = { verdant: 0, desert: 0, glacier: 1, volcanic: 0, coral: 0 };
 
+// 第二版 [v2-world]：水偏灰蓝（Water #5f7f97），不用青蓝；浅处透一点灰绿，深处是暗的石板蓝，白沫是象牙白
 export const WATER_COLORS: Record<PresetId, WaterPalette> = {
-  verdant: { shallow: '#7cc9b4', mid: '#3f9a9c', deep: '#1f5f78', foam: '#f4f0e2' },
-  desert: { shallow: '#86c9b8', mid: '#3f9a9c', deep: '#1f5f78', foam: '#f4f0e2' },
-  glacier: { shallow: '#a6dce2', mid: '#5aa8c0', deep: '#2b6690', foam: '#f6f8f8' },
-  volcanic: { shallow: '#7cc9b4', mid: '#3f9a9c', deep: '#1f5f78', foam: '#f4f0e2' },
-  coral: { shallow: '#86dcc6', mid: '#3bb0b0', deep: '#1d6f8f', foam: '#f8f1e4' },
+  verdant: { shallow: '#93adb9', mid: '#5f7f97', deep: '#2f4a60', foam: '#ece7dc' },
+  desert: { shallow: '#9ab1b8', mid: '#62808f', deep: '#31495a', foam: '#ede6da' },
+  glacier: { shallow: '#a9bec9', mid: '#6f8ea4', deep: '#3a566d', foam: '#f0f1ee' },
+  volcanic: { shallow: '#8ea4b1', mid: '#5a768c', deep: '#2c4256', foam: '#e6e2da' },
+  coral: { shallow: '#98b6b8', mid: '#5f8a94', deep: '#2e5263', foam: '#efe7dd' },
 };
 
 // 涉水、雨点的波纹：最多同时 SOURCES 圈（角色走过的地方一圈一圈往外扩）
@@ -396,8 +397,8 @@ export function waterMaterial(preset: PresetId): THREE.MeshPhysicalNodeMaterial 
   // 冰的颜色：薄冰（浅水上）透一点水的青色，厚冰发白；一块块冰有大块的明暗；裂纹是细的青线；边上一道白
   const crack = float(1).sub(smoothstep(0.0, 0.035, abs(valueNoise3(p.mul(2.4).add(4.4)).sub(0.5)))).mul(keep(2.4));
   const iceEdge = smoothstep(0.05, 0.45, ice).mul(float(1).sub(smoothstep(0.55, 0.95, ice)));
-  const iceBase = mix(mix(pal.shallow, color('#dcebf0'), 0.6), color('#e8f2f5'), smoothstep(0.0, 0.4, d).mul(0.7).add(patch.add(0.5).mul(0.3)));
-  const iceCol = mix(mix(iceBase, color('#9fc7d6'), crack.mul(0.6)), color('#fbfdfd'), iceEdge);
+  const iceBase = mix(mix(pal.shallow, color('#dde3e6'), 0.6), color('#e8ecee'), smoothstep(0.0, 0.4, d).mul(0.7).add(patch.add(0.5).mul(0.3)));
+  const iceCol = mix(mix(iceBase, color('#9fb3c0'), crack.mul(0.6)), color('#f6f6f3'), iceEdge);
 
   const foam = saturate(max(max(rim, lace.mul(0.85)), max(line.mul(0.5), legs.mul(0.8))).add(rings.w.mul(0.3))).mul(U.foam).mul(exists.sub(ice).max(0)).toVar();
 

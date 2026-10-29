@@ -35,7 +35,7 @@ export const STARDUST_TRIBOO = {
   lift: 0.6, // 流的时候往上拱多高（× 星球半径）
 };
 
-const DUST_BASE = 3600;
+const DUST_BASE = 4800; // 第二版 [v2-world]：粒子更细、多一些（3600 → 4800），总的填充量反而小了
 const WISP_COUNT = 110;
 
 function rng(seed: number): () => number {
@@ -179,14 +179,16 @@ export class GalaxyDecor {
     // 星尘：圆的小光点，中间实、边上一圈软的晕；每粒按自己的亮度当相位慢慢闪。叠加混合：和云海拉开，像在发光
     const S = instancedBufferAttribute(this.shapeAttr) as unknown as THREE.Node<'vec4'>;
     const shapeK = smoothstep(0, 1, this.uShape.mul(1.6).sub(S.z.mul(0.6)).clamp(0, 1)); // 这一粒到了几成（先后错开）
-    const partColor = mix(mix(lin('#ffbe3b'), lin('#fff7e6'), step(0.5, S.w)), lin('#ffd21f'), step(1.5, S.w)); // 圆暖金、V 奶白、T 翠宝黄
+    // 第二版：和星尘同一套颜色——圆是香槟金、V 是星光白、T 是浅一点的香槟（不再是翠宝黄）
+    const partColor = mix(mix(lin('#d8c08e'), lin('#f6f1e7'), step(0.5, S.w)), lin('#ead8a8'), step(1.5, S.w));
     this.dust = makeBatch(Math.round(DUST_BASE * 2.5), 'home-dust', this.fade, true, (c) => {
       const d = length(uv().sub(0.5)).mul(2);
-      const core = smoothstep(0.42, 0.0, d);
-      const halo = smoothstep(1.0, 0.15, d).mul(0.3);
-      const twinkle = sin(time.mul(1.6).add(c.a.mul(53))).mul(0.22).add(0.88);
+      // 第二版：亮点更小更实、晕更淡；闪烁更克制（慢、幅度小）
+      const core = smoothstep(0.36, 0.0, d);
+      const halo = smoothstep(1.0, 0.2, d).mul(0.16);
+      const twinkle = sin(time.mul(0.9).add(c.a.mul(53))).mul(0.09).add(0.95);
       const bright = mix(c.a, float(1.15), shapeK);
-      const k = core.add(halo).mul(bright).mul(twinkle).mul(this.glow).mul(1.8);
+      const k = core.add(halo).mul(bright).mul(twinkle).mul(this.glow).mul(2.0);
       return vec4(mix(c.rgb, partColor, shapeK).mul(k), k); // 叠加：颜色本身乘亮度
     });
     {
@@ -219,8 +221,9 @@ export class GalaxyDecor {
       const ring = smoothstep(1.0, 0.55, d).mul(smoothstep(0.25, 0.62, d));
       const inner = smoothstep(0.75, 0.0, d).mul(0.5);
       const pulse = sin(time.mul(1.3)).mul(0.08).add(0.92);
-      const k = ring.add(inner).mul(0.55).mul(pulse).mul(this.fade).mul(this.haloK);
-      haloMat.colorNode = vec4(mix(lin('#fff1c8'), lin('#ffc94d'), smoothstep(0.2, 0.9, d)).mul(k), k);
+      // 第二版：很淡的一层星光白往香槟金过渡（你的星球主要靠天体仪环认出来，homeArmillary.ts）
+      const k = ring.add(inner).mul(0.26).mul(pulse).mul(this.fade).mul(this.haloK);
+      haloMat.colorNode = vec4(mix(lin('#f6f1e7'), lin('#d8c08e'), smoothstep(0.2, 0.9, d)).mul(k), k);
     }
     this.halo = new THREE.Sprite(haloMat);
     this.halo.name = 'home-you-halo';
@@ -229,11 +232,12 @@ export class GalaxyDecor {
     groundMat.blending = THREE.AdditiveBlending;
     {
       const d = length(uv().sub(0.5)).mul(2);
-      const band = smoothstep(0.42, 0.68, d).mul(smoothstep(1.0, 0.72, d));
-      const fill = smoothstep(0.85, 0.0, d).mul(0.25);
+      // 第二版：一道细细的金线圈（不是一大片光环），里面一点点微光
+      const band = smoothstep(0.66, 0.7, d).mul(smoothstep(0.74, 0.7, d));
+      const fill = smoothstep(0.85, 0.0, d).mul(0.06);
       const pulse = sin(time.mul(1.1)).mul(0.1).add(0.9);
       const k = band.add(fill).mul(0.6).mul(pulse).mul(this.fade).mul(this.haloK);
-      groundMat.colorNode = vec4(lin('#ffcf5c').mul(k), k);
+      groundMat.colorNode = vec4(lin('#d8c08e').mul(k), k);
     }
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), groundMat);
     this.ground.rotation.x = -Math.PI / 2;
@@ -264,10 +268,11 @@ export class GalaxyDecor {
     const rs = Math.sin(ext.rotation);
     const pt = { x: 0, z: 0, r: 0, a: 0 };
     const rand = rng(91);
-    const gold = new THREE.Color('#ffb42e');
-    const amber = new THREE.Color('#ff8a3d');
-    const cream = new THREE.Color('#fff0c4');
-    const pearl = new THREE.Color('#ffd9a6');
+    // 第二版：一条臂香槟金（往外偏古金），一条星光白（往外偏一点桃色的余晖）
+    const gold = new THREE.Color('#d8c08e');
+    const amber = new THREE.Color('#a8894f');
+    const cream = new THREE.Color('#f6f1e7');
+    const pearl = new THREE.Color('#e6c2a6');
     const tmp = new THREE.Color();
     // —— 星尘 ——
     const n = Math.min(this.dust.max, Math.round(DUST_BASE * HOME_DUST.density));
@@ -308,7 +313,7 @@ export class GalaxyDecor {
       pos[i * 3] = x * rc - z * rs;
       pos[i * 3 + 1] = y;
       pos[i * 3 + 2] = (x * rs + z * rc) * sz;
-      size[i] = R * (0.22 + 0.55 * rand() * rand()) * (1.15 - 0.35 * k) * HOME_DUST.size;
+      size[i] = R * (0.12 + 0.3 * rand() * rand()) * (1.15 - 0.35 * k) * HOME_DUST.size;
       // 一条臂暖金（往外偏琥珀），一条奶白（往外偏珍珠桃）
       if (arm === 0) tmp.copy(gold).lerp(amber, k * 0.8);
       else tmp.copy(cream).lerp(pearl, k * 0.8);
@@ -328,8 +333,9 @@ export class GalaxyDecor {
     const wp = this.wisps.pos.array as Float32Array;
     const ws = this.wisps.size.array as Float32Array;
     const wc = this.wisps.color.array as Float32Array;
-    const pink = new THREE.Color('#f2a07a');
-    const butter = new THREE.Color('#ffc65a');
+    // 第二版：小云絮换成很淡的暮色薄雾（灰紫、往外偏 Mauve），给螺旋臂一点身体，不是奶油色的软云
+    const pink = new THREE.Color('#6f6488');
+    const butter = new THREE.Color('#8a7f9c');
     for (let i = 0; i < WISP_COUNT; i++) {
       const t = 0.04 + 0.96 * (i / WISP_COUNT);
       spiralPoint(i % arms, t * total, r0, p, pt);
@@ -344,7 +350,7 @@ export class GalaxyDecor {
       wc[i * 4] = tmp.r;
       wc[i * 4 + 1] = tmp.g;
       wc[i * 4 + 2] = tmp.b;
-      wc[i * 4 + 3] = 0.7 * (1 - t * 0.45);
+      wc[i * 4 + 3] = 0.32 * (1 - t * 0.45);
     }
     this.wisps.pos.needsUpdate = true;
     this.wisps.size.needsUpdate = true;

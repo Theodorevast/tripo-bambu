@@ -6,7 +6,7 @@ import { galaxyFactor, overviewFactor, planetSurfaceLook, stageFactor, sunDirNod
 import { onPlanetRadius, PLANET_RADIUS, PRESETS, type GroundPalette } from './presets';
 import { shapeSea } from './noise';
 import { SHOWCASE_POLE } from './placement';
-import { cellDots, fbm2, valueNoise3 } from './tslNoise';
+import { cellDots, cellPuffs, fbm2, valueNoise3 } from './tslNoise';
 
 // 地表着色器（「小王子」方向）：不再按高度分色带，而是草地、干草、苔藓、泥土、土路之间按噪声遮罩平滑混合；
 // 土路和作品空地来自星球遮罩（mask.ts）；法线叠一层细节噪声（Mikkelsen 的无切线凹凸），近处看有颗粒感，远处淡掉不闪。
@@ -26,15 +26,21 @@ export const GROUND = {
   farTint: 0.3, // 俯瞰那几种颜色（far、field、花）的亮度：和 tint 一样是把 sRGB 颜色对齐到 AgX 下的地面亮度
   fieldSun: 0.8, // 朝阳的黄绿大片
   fieldDeep: 0.7, // 低处的深绿
-  teamCover: 0.35, // 团队色花海的覆盖（星球视图里）
-  teamCoverGalaxy: 0.8, // 星系里
-  teamBright: 1.1, // 花海的亮度
-  fieldFlowers: 1, // 花田
+  // 第二版 [v2-world]：团队色的花海、花田都收着（不要糖果色）：覆盖少、颜色往灰里退，星系里星球降饱和、哑光
+  teamCover: 0.16, // 团队色花海的覆盖（星球视图里）
+  teamCoverGalaxy: 0.42, // 星系里
+  teamBright: 0.95, // 花海的亮度
+  teamVivid: 0.8, // 团队色的饱和度（1 = 原色；第一版是 1.35，提过一截）
+  fieldFlowers: 0.5, // 花田
   warmCool: 0.8, // 冷暖渐变
-  galaxySat: 0.45, // 星系里饱和度再提多少
+  galaxySat: -0.22, // 星系里饱和度再提多少（负的 = 降饱和：第二版的星球远看是安静、有质感的小世界）
   galaxyShade: 1, // 星系里背光一侧的环境光压暗多少（0..1）
-  galaxyGloss: 0.3, // 星系里清漆一样的高光（0 = 和近处一样哑光）
+  galaxyGloss: 0, // 星系里清漆一样的高光（0 = 和近处一样哑光）
+  stoneDetail: 1, // 第二版：石头地、土、路面的细节纹理（裂纹、地衣、碎石）的强度
 };
+
+// 第二版 [v2-world]：地面上远看的花、花田的颜色（sRGB）：象牙白、淡香槟、灰紫，都退到灰调里（第一版是奶白、明黄、亮紫）
+export const FLOWER_V2 = { ivory: '#ece6d8', gold: '#d3c08f', mauve: '#a99cb8' };
 
 // 外沿的石头地：赤道附近一圈（按纬度的正弦）。center 是这一圈的中心，half 是半宽。
 // 星球视图里云海和星球接上的地方大约在纬度 0–10°（镜头从斜上方 26° 看过来），这一圈要压在那条线上
@@ -50,7 +56,7 @@ export const STAGE_VIEW_DIR: [number, number, number] = (() => {
   return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
 })();
 
-export const GROUND_SPECULAR = 0.25; // 地面镜面反射的强度（MeshPhysicalNodeMaterial.specularIntensity，标准材质相当于 1）
+export const GROUND_SPECULAR = 0.15; // 地面镜面反射的强度（MeshPhysicalNodeMaterial.specularIntensity，标准材质相当于 1）。第二版更哑：0.25 → 0.15
 
 // 地表和草叶的衔接（集成时加的，Dressing 每帧按聚焦星球上的草设）：
 // 草画到的范围里，草缝里露出来的地面压暗成草根色（近处），往外按距离过渡到「远看的草色」（grassTint，和草叶同一条公式），
@@ -76,6 +82,8 @@ const U = {
   teamCover: uniform(GROUND.teamCover).setGroup(renderGroup),
   teamCoverGalaxy: uniform(GROUND.teamCoverGalaxy).setGroup(renderGroup),
   teamBright: uniform(GROUND.teamBright).setGroup(renderGroup),
+  teamVivid: uniform(GROUND.teamVivid).setGroup(renderGroup),
+  stoneDetail: uniform(GROUND.stoneDetail).setGroup(renderGroup),
   fieldFlowers: uniform(GROUND.fieldFlowers).setGroup(renderGroup),
   warmCool: uniform(GROUND.warmCool).setGroup(renderGroup),
   galaxySat: uniform(GROUND.galaxySat).setGroup(renderGroup),
@@ -108,6 +116,8 @@ export function applyGround(): void {
   U.teamCover.value = GROUND.teamCover;
   U.teamCoverGalaxy.value = GROUND.teamCoverGalaxy;
   U.teamBright.value = GROUND.teamBright;
+  U.teamVivid.value = GROUND.teamVivid;
+  U.stoneDetail.value = GROUND.stoneDetail;
   U.fieldFlowers.value = GROUND.fieldFlowers;
   U.warmCool.value = GROUND.warmCool;
   U.galaxySat.value = GROUND.galaxySat;
@@ -198,7 +208,9 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   const grass = mix(tint, pal.moss.mul(U.tint), mossAmt.mul(0.6)).mul(shade);
   // 露土：零星的小块，坡陡的地方更多；土里有颗粒
   const soilAmt = max(smoothstep(U.soil, U.soil.add(0.16), clump.mul(0.55).add(mid.mul(0.45))).mul(0.75), smoothstep(0.05, 0.14, slope));
-  const soil = pal.soil.mul(grain.sub(0.5).mul(0.35).mul(kGrain).add(crumb.sub(0.5).mul(0.25).mul(kCrumb)).add(1));
+  // 第二版：土里混着小石子（浅一点、偏石头色的圆点，约 18 厘米一格），按像素大小淡出
+  const pebbles = cellDots(p.mul(5.5).add(3.3), 0.45).mul(keep(5.5)).mul(U.stoneDetail);
+  const soil = mix(pal.soil.mul(grain.sub(0.5).mul(0.35).mul(kGrain).add(crumb.sub(0.5).mul(0.25).mul(kCrumb)).add(1)), pal.rock.mul(1.25), pebbles.mul(0.45));
   let meadow = mix(grass, soil, soilAmt);
   // 聚焦星球上草画到的范围：草缝里露出来的地面是草丛深处的颜色（草根色，带一点草色），往外按距离过渡回远看的草色。
   // 满密度半径以内全是草根色，到草最远半径的 3/4 处完全是远看的草色（那里草已经很稀，地面的颜色就是草的颜色）
@@ -234,7 +246,7 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   const sunny = smoothstep(0.45, 0.6, field).mul(smoothstep(-0.02, 0.2, rel)).mul(meadowOnly);
   const hollow = max(smoothstep(0.42, 0.29, field), smoothstep(0.26, 0.06, rel).mul(0.7)).mul(meadowOnly);
   // 朝阳的大片往团队色靠一点（星系里同一个预设的几颗星球分得开）
-  const fieldCol = look ? mix(pal.field, look.accent, look.accentAmount.mul(0.38)) : pal.field;
+  const fieldCol = look ? mix(pal.field, look.accent, look.accentAmount.mul(0.18)) : pal.field; // 第二版：团队色只染一点（0.38 → 0.18）
   meadow = mix(meadow, fieldCol.mul(U.farTint).mul(shade), sunny.mul(overview).mul(U.fieldSun));
   meadow = mix(meadow, pal.far.mul(U.farTint).mul(0.42).mul(color('#cfe0ee')).mul(shade), hollow.mul(overview).mul(U.fieldDeep));
   // 团队的花海（planet 角色，lead 第三轮）：约 30 米一片、按噪声扭过的大块，颜色是团队色（提一点饱和、按 AgX 对齐亮度），
@@ -247,7 +259,7 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
     const teamAmt = smoothstep(th, th.add(0.05), teamN).mul(meadowOnly).mul(overview).mul(look.accentAmount);
     const accentLin = look.accent as unknown as THREE.Node<'vec3'>; // 颜色 uniform 在着色器里就是 vec3
     const luma = dot(accentLin, vec3(0.2126, 0.7152, 0.0722));
-    const vivid = mix(vec3(luma), accentLin, 1.35).max(0.002);
+    const vivid = mix(vec3(luma), accentLin, U.teamVivid).max(0.002);
     const teamCol = vivid.mul(U.farTint).mul(U.teamBright).mul(shade);
     meadow = mix(meadow, teamCol, teamAmt.mul(0.85));
     const teamDots = cellDots(p.mul(1.8).add(33.3), 0.6).mul(keep(1.8));
@@ -257,9 +269,10 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   const fq = p.mul(0.075).add(valueNoise3(p.mul(0.035).add(3.9)).sub(0.5).mul(3));
   const flowerField = smoothstep(0.57, 0.67, valueNoise3(fq.add(77.7))).mul(meadowOnly).mul(overview).mul(float(1).sub(galaxyFactor(U.radius).mul(0.75))).mul(U.fieldFlowers);
   const fHue = valueNoise3(p.mul(0.04).add(13.3));
-  // 第三种花：淡紫，有团队色时换成团队色（调淡一点，像一片那个颜色的花）
-  const third = look ? mix(color('#bda6e3'), mix(look.accent, color('#ffffff'), 0.25), look.accentAmount) : color('#bda6e3');
-  const fCol = mix(mix(color('#f6f1e4'), color('#f3cd48'), smoothstep(0.48, 0.54, fHue)), third, smoothstep(0.64, 0.7, fHue));
+  // 第三种花：淡紫，有团队色时换成团队色（调淡一点，像一片那个颜色的花）。
+  // 第二版：花色都退到灰调里——象牙白、淡香槟、灰紫（不要明黄、亮紫）
+  const third = look ? mix(color(FLOWER_V2.mauve), mix(look.accent, color(FLOWER_V2.ivory), 0.35), look.accentAmount) : color(FLOWER_V2.mauve);
+  const fCol = mix(mix(color(FLOWER_V2.ivory), color(FLOWER_V2.gold), smoothstep(0.48, 0.54, fHue)), third, smoothstep(0.64, 0.7, fHue));
   const speck = max(cellDots(p.mul(1.5).add(91.3), 0.7).mul(keep(1.5)), cellDots(p.mul(2.4).add(17.1), 0.55).mul(keep(2.4)));
   meadow = mix(meadow, mix(meadow, fCol.mul(U.farTint).mul(2.2), 0.5), flowerField.mul(0.4));
   meadow = mix(meadow, fCol.mul(0.8), speck.mul(flowerField).mul(0.9));
@@ -273,9 +286,14 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   const ringAng = acos(clamp(dot(dir, vec3(...STAGE_VIEW_DIR)), -1, 1)).mul(180 / Math.PI);
   const ringBand = smoothstep(U.ringWidth.add(2.5), U.ringWidth.sub(1), abs(ringAng.sub(U.ringAngle).add(rimWob.mul(40))));
   const rocky = max(rimBand.mul(rimSeg), ringBand.mul(smoothstep(0.22, 0.45, valueNoise3(p.mul(0.06).add(41.3))))).mul(meadowOnly).mul(stageFactor(U.radius)).toVar();
-  const stone = pal.rock.mul(mid.sub(0.5).mul(0.35).add(clump.sub(0.5).mul(0.3)).add(grain.sub(0.5).mul(0.2).mul(kGrain)).add(1.15));
+  // 第二版：石头的质感——细细的裂纹（暗）、零星的地衣斑（浅、偏 Lichen 的灰黄绿）、表面的颗粒，都按像素大小淡出
+  const crackN = valueNoise3(p.mul(1.7).add(19.3));
+  const crack = float(1).sub(smoothstep(0.0, 0.045, abs(crackN.sub(0.5)))).mul(keep(1.7)).mul(U.stoneDetail);
+  const lichen = cellDots(p.mul(2.2).add(7.7), 0.4).mul(keep(2.2)).mul(U.stoneDetail);
+  const stoneBase = pal.rock.mul(mid.sub(0.5).mul(0.35).add(clump.sub(0.5).mul(0.3)).add(grain.sub(0.5).mul(0.2).mul(kGrain)).add(crumb.sub(0.5).mul(0.16).mul(kCrumb)).add(1.15));
+  const stone = mix(stoneBase.mul(float(1).sub(crack.mul(0.38))), stoneBase.mul(vec3(1.3, 1.32, 1.12)), lichen.mul(0.5));
   const mossTop = smoothstep(0.45, 0.7, clump.mul(0.6).add(fbm2(p.mul(0.4).add(8.8)).mul(0.4)));
-  const rimCol = mix(stone, pal.moss.mul(U.tint).mul(1.25), mossTop.mul(0.55));
+  const rimCol = mix(stone, pal.moss.mul(U.tint).mul(1.25), mossTop.mul(0.45));
   meadow = mix(meadow, rimCol, rocky);
 
   // 远看的野花：白、黄、淡紫的小点（约 0.15 米一朵），只在镜头 20 米以外出现（近处是 3D 的花），防闪按像素大小
@@ -285,7 +303,7 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   // 远看的花点比原来稀、淡一些（集成时调的）：地面按 AgX 压暗以后，原来的密度在星球视图里像撒了一层彩色碎屑
   const bloom = smoothstep(0.87, 0.91, bloomN).mul(bloomPatch).mul(smoothstep(20, 40, camDist)).mul(keep(3.4))
     .mul(float(1).sub(soilAmt)).mul(float(1).sub(max(beach, lowFloor))).mul(float(1).sub(rocky)).mul(0.55);
-  const flower = mix(mix(color('#f5f0e1'), color('#f2cc4b'), smoothstep(0.45, 0.55, bloomKind)), color('#b59bd9'), smoothstep(0.68, 0.74, bloomKind));
+  const flower = mix(mix(color(FLOWER_V2.ivory), color(FLOWER_V2.gold), smoothstep(0.45, 0.55, bloomKind)), color(FLOWER_V2.mauve), smoothstep(0.68, 0.74, bloomKind));
   meadow = mix(meadow, flower, bloom);
   // 贴着水边的一圈湿沙（颜色深一点）
   meadow = mix(meadow, sandCol.mul(hasWater ? 0.62 : 0.85), shore.mul(0.55));
@@ -297,7 +315,10 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   const worn = smoothstep(0.75, 1, masks.r); // 路中线附近
   const dirt = mix(mix(pal.path, pal.soil, smoothstep(0.3, 0.85, mid).mul(0.4)), pal.path.mul(1.08), worn.mul(0.5));
   const gravel = grain.sub(0.5).mul(0.22).mul(kGrain).add(crumb.sub(0.5).mul(0.3).mul(kCrumb)).add(1);
-  const pathCol = dirt.mul(gravel);
+  // 第二版（轻中古的一点）：路中间铺着一块块磨圆的踏石（约 0.9 米一格，不是每格都有），石缝里是土；路边还是土路
+  const paver = cellPuffs(p.mul(1.15).add(5.5), 0.82).mul(keep(1.15)).mul(smoothstep(0.62, 0.9, masks.r)).mul(U.stoneDetail).toVar();
+  const paverCol = mix(pal.rock, pal.path, 0.35).mul(1.18).mul(gravel).mul(float(1).sub(crack.mul(0.25)));
+  const pathCol = mix(dirt.mul(gravel), paverCol, paver);
   const border = pathAmt.mul(float(1).sub(pathAmt)).mul(4);
   let col = mix(meadow, pathCol, pathAmt).mul(float(1).sub(border.mul(0.2)));
 
@@ -317,7 +338,7 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   col = mix(col, floorCol, lowFloor);
   // 掠射角下草地发亮一点（远看一片草叶迎着光的那层绒感）
   const facing = saturate(dot(normalize(normalView), normalize(positionView.negate())));
-  const sheen = pow(float(1).sub(facing), 3).mul(float(1).sub(max(pathAmt, clearAmt))).mul(0.22).mul(look ? look.fade : float(1));
+  const sheen = pow(float(1).sub(facing), 3).mul(float(1).sub(max(pathAmt, clearAmt))).mul(0.12).mul(look ? look.fade : float(1)); // 第二版更哑：0.22 → 0.12
   col = col.add(pal.dry.mul(sheen));
   // 冷暖（俯瞰时）：朝太阳的一侧偏暖、背光一侧偏冷，整颗星球上有一层柔和的冷暖渐变
   col = col.mul(sunTint(normalize(positionWorld.sub(modelPosition)), overview.mul(U.warmCool)));
@@ -343,7 +364,8 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   // 每一层都按像素大小淡出，按屏幕空间导数算法线（不需要切线）
   const ground = clump.mul(0.5).add(tuft.mul(0.25).mul(kTuft)).add(grain.mul(0.18).mul(kGrain)).add(crumb.mul(0.07).mul(kCrumb));
   const rough = max(pathAmt, clearAmt);
-  const h = ground.sub(rough.mul(0.3)).mul(float(1).sub(under.mul(0.7))).mul(U.bump);
+  // 第二版：踏石鼓起来一点、石头地上的裂纹凹下去
+  const h = ground.sub(rough.mul(0.3)).add(paver.mul(pathAmt).mul(0.45)).sub(crack.mul(rocky).mul(0.35)).mul(float(1).sub(under.mul(0.7))).mul(U.bump);
   m.normalNode = perturbNormal(h);
   return m;
 }

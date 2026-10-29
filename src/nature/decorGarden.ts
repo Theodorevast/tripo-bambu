@@ -85,6 +85,16 @@ const smooth = (e0: number, e1: number, x: number) => {
 const pick = <T>(rng: Rng, xs: readonly T[]): T => xs[Math.floor(rng() * xs.length) % xs.length];
 const hex = (s: string) => new THREE.Color(s);
 
+// 第二版 [v2-world] 的花园开关（?tune → World v2）：flags = 作品背后那面团队色的小旗（默认不要）
+export const GARDEN_V2 = { flags: false, muted: true }; // muted：团队色的花、灌木退到灰调里（不提饱和度）
+
+// 第二版：团队色只当一点提示——饱和度压到 0.32 以下、亮度放在 0.52–0.68（像一丛褪了色的花）
+export function muted(c: THREE.Color): THREE.Color {
+  c.getHSL(_hsl2, THREE.SRGBColorSpace);
+  return new THREE.Color().setHSL(_hsl2.h, Math.min(_hsl2.s, 0.32), Math.min(0.68, Math.max(0.52, _hsl2.l)), THREE.SRGBColorSpace);
+}
+const _hsl2 = { h: 0, s: 0, l: 0 };
+
 // 团队色多半是浅浅的粉彩：小旗、开花的灌木要从远处看得见，同一个色相提饱和度、亮度压到中间
 const _hsl = { h: 0, s: 0, l: 0 };
 export function vivid(c: THREE.Color): THREE.Color {
@@ -108,7 +118,7 @@ export function gardenCandidates(work: GardenWork): Item[] {
     return it;
   };
   const polar = (r: number, a: number): [number, number] => [Math.sin(a) * r, Math.cos(a) * r]; // a = 0 正面，往 +x（右）转
-  const accent = vivid(work.accent);
+  const accent = GARDEN_V2.muted ? muted(work.accent) : vivid(work.accent);
   const flowerColors = [...PALETTE.flowers.map(hex), accent];
 
   // 1. 踏脚石：从展台正面往土路铺 3 块扁石板
@@ -205,9 +215,11 @@ export function gardenCandidates(work: GardenWork): Item[] {
   }
 
   // 7. 小旗：栅栏外侧、背后偏路牌那一侧，团队色的三角旗。远看是一根竖线挑着一块颜色，作品在哪一眼就找到
+  // 第二版 [v2-world]：不要旗子（用户觉得旗子、纹章太中古），GARDEN_V2.flags 关掉；随机数照样取，别的零件的位置不变
   {
     const [x, z] = polar(rf + 0.22, Math.PI - side * (0.35 + rng() * 0.2));
-    add('flag', x, z, { yaw: rng() * 6.28, sx: k, sy: k * (0.95 + rng() * 0.1), sz: k, sink: 0.03 * k, sway: 0.16, tint: accent.clone(), delay: 0.32 });
+    const opts = { yaw: rng() * 6.28, sx: k, sy: k * (0.95 + rng() * 0.1), sz: k, sink: 0.03 * k, sway: 0.16, tint: accent.clone(), delay: 0.32 };
+    if (GARDEN_V2.flags) add('flag', x, z, opts);
   }
 
   // 8. 长椅：另一侧稍后方，朝着作品

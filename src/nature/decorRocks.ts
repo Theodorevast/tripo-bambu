@@ -57,9 +57,9 @@ export function roundRockGeometry(seed: number, style: Style, detail = 3): THREE
   return geo;
 }
 
-// 苔藓色：比原来亮、饱和一点（玩具感），按 AgX 调过
-const MOSS = uniform(new THREE.Color('#58702a')).setGroup(renderGroup);
-const MOSS_DEEP = uniform(new THREE.Color('#33461a')).setGroup(renderGroup);
+// 苔藓色：按 AgX 调过。第二版 [v2-world]：灰绿的 Moss（第一版是亮黄绿的玩具感）
+const MOSS = uniform(new THREE.Color('#4f5c45')).setGroup(renderGroup);
+const MOSS_DEEP = uniform(new THREE.Color('#2f3a2a')).setGroup(renderGroup);
 // ?tune 的 moss on rocks 改的是 DECOR.moss：每次渲染照它取，不用另外接线
 const MOSS_AMOUNT = uniform(DECOR.moss).setGroup(renderGroup).onRenderUpdate(() => DECOR.moss);
 

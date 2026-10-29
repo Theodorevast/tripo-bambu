@@ -26,6 +26,7 @@ import { installTuneToggle } from './ui/tuneToggle';
 import { installCreatePlanet } from './ui/createPlanet';
 import { installCloudTriboo } from './scenes/homeCloudTriboo';
 import { installHomeTribooTune } from './scenes/homeTribooTune';
+import { installWorldV2 } from './scenes/worldV2';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 // 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后云散开；Nunito 的几个字重从这里开始在后台预加载
@@ -46,6 +47,7 @@ const coupons = installCoupons(app, planetScreen, walk, editor); // 点翠宝吐
 installHomeTriboo(app, coupons, home); // 首页右下角躲着的翠宝（H2）：点它吐一张券，展开成领券窗口
 installCloudTriboo(world); // 首页翠宝元素①：云海上空一朵翠宝形状的云（scenes/homeCloudTriboo.ts；开场预热之前装上，一起编译）
 installHomeTribooTune(world); // ?tune → Home → Cloud Triboo / Stardust Triboo
+installWorldV2(world); // 第二版 [v2-world]：首页的天体仪环、星座线（scenes/worldV2.ts；开场预热之前装上，一起编译）
 installCreatePlanet(app, store); // P3：#/create 造星窗口、首页标题卡片的「Create a planet」接上 openCreatePlanet、新星球从云海升起来（ui/createPlanet*.ts）
 app.planetLayer = {
   enter: (team) => {

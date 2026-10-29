@@ -6,7 +6,7 @@ import { Gardens, type GardenWork } from '../nature/decorGarden';
 import { footprintGroundRadius } from '../planet/footprint';
 import { MAX_PLINTH_RADIUS, placementTransform, plinthRadius } from '../planet/placement';
 import { onPlanetRadius, PLANET_RADIUS, PRESETS } from '../planet/presets';
-import { plinthMaterial, STAND_TOP, standGeometry } from './plinth';
+import { plinthMaterial, STAND_TOP, standGeometry } from './plinthV2'; // 第二版 [v2-world]：石座 + 一圈香槟金（第一版的玩具底座在 plinth.ts）
 import { compileShadowExact } from './shadowWarm';
 import type { Entrance } from './stager';
 import type { PlanetEntry, World } from './world';
