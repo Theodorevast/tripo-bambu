@@ -23,7 +23,7 @@ export const NIGHT_SKY = {
   twinkle: 0.45, // 闪烁的幅度（0 不闪，1 闪到全暗）
   twinkleSpeed: 1, // 闪烁快慢
   spikes: 0.8, // 最亮几颗的十字星芒（0 没有）
-  homeStars: 2.2, // 首页的星星再亮多少倍（云缝里透出来，隔着一层薄云）
+  homeStars: 2.8, // 首页的星星再亮多少倍（云缝里透出来，隔着一层薄云）
   // —— 银河 ——
   milkyWay: 0.5, // 浓淡（0 没有）
   milkyWidth: 0.16, // 宽窄（方向余弦）
@@ -43,19 +43,19 @@ export const NIGHT_SKY = {
   moonAzimuth: 160, // 星球页：月亮的方位角（度，从 +Z 转向 +X；镜头从展示方向看过去时在画面右上方）
   moonElevation: 21, // 星球页：高度角（度）
   // —— 云海 ——
-  homeLit: '#726f9b', // 首页云（月光下）：受光面
-  homeMid: '#504d79', // 中间调
-  homeShade: '#3f3d69', // 背光
-  homeDeep: '#312f5a', // 缝隙
+  homeLit: '#8f93b3', // 首页云（月光下）：受光面（冷灰紫，低对比：看得见层次，但不抢星系的戏）
+  homeMid: '#4c5172', // 中间调（往 Indigo、Slate 靠）
+  homeShade: '#30344f', // 背光
+  homeDeep: '#1e2342', // 缝隙
   homeMix: 0.9, // 首页的云往这套颜色靠多少（夜里；白天照旧是暖奶油）
-  silver: '#e4e6ff', // 上缘的月光银边（显示色）
-  silverK: 1, // 银边浓淡
+  silver: '#d6daf2', // 上缘的月光银边（显示色）
+  silverK: 0.5, // 银边浓淡（很淡的一圈）
   silverPow: 3, // 银边多窄（越大越贴着边）
-  homeGaps: 0.8, // 首页：云缝里透出星空的程度（0 不透）
-  homeThin: 0.22, // 首页：整层云再薄这么多（星星隔着薄云也透得出来）
+  homeGaps: 0.92, // 首页：云缝里透出星空的程度（0 不透）
+  homeThin: 0.34, // 首页：整层云再薄这么多（星星隔着薄云也透得出来）
   planetGaps: 0.12, // 星球页
   gapLo: 0.06, // 云的高度（0 缝底 … 1 云顶）低于这个是全透
-  gapHi: 0.6, // 高于这个是不透
+  gapHi: 0.74, // 高于这个是不透
   scatter: 1, // 月亮附近的云被照亮
   clear: 0.92, // 月亮那一块云变薄（月亮从云后面透出来）
   clearSize: 2.4, // 变薄的范围（× 月亮半径）
@@ -63,6 +63,11 @@ export const NIGHT_SKY = {
   ambient: '#1e2546', // 夜里额外的冷色补光（加在环境光上：作品的暗面不发黑）
   ambientK: 1,
   fireflies: 0.8, // 夜里给生机层的「傍晚系数」（≥ 0.5 有萤火虫）
+  // —— 首页空气里的星屑（nature/skyDust.ts）——
+  dust: 1, // 浓淡（0 关）
+  dustSize: 1.8, // 大小（像素）
+  dustDrift: 1, // 漂动的速度倍数
+  dustTwinkle: 0.6, // 闪烁的幅度
   // —— 后期（scenes/postGlow.ts）——
   grain: 0.03, // 胶片颗粒（0 关）
   grainSize: 1.25, // 颗粒大小（像素）
@@ -85,8 +90,8 @@ export const NIGHT_GRADE: Partial<Grade> = {
   contrast: 0.12,
   mids: 0.03,
   lift: 0.022,
-  shadowTint: '#3f3a7a',
-  shadows: 0.12,
+  shadowTint: '#3a3768',
+  shadows: 0.08,
   highlightTint: '#ffd8a6',
   highlights: 0.15,
   vignette: 0.3,
@@ -164,9 +169,9 @@ const lin = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
 // 环境光偏冷，主光是柔和的淡紫白（不硬、不暖）；云是冷灰紫，受光面带一点银
 export const BLUE_HOUR: Palette = {
   zenith: sky('#10162f'),
-  upper: sky('#2c2d5a'),
-  horizon: sky('#5d5582'),
-  horizonSun: sky('#b48f97'),
+  upper: sky('#252a52'),
+  horizon: sky('#4b4f6c'),
+  horizonSun: sky('#a68f98'),
   gradUpper: 0.2,
   gradZenith: 0.72,
   glow: sky('#d9ae96').multiplyScalar(0.55),
@@ -175,10 +180,10 @@ export const BLUE_HOUR: Palette = {
   sunDisc: lin(0, 0, 0),
   sunLight: lin(0.8, 0.76, 1),
   sunIntensity: 3.9,
-  cloudLit: sky('#8f8cb4'),
-  cloudMid: sky('#68658f'),
-  cloudShade: sky('#4d4b77'),
-  cloudDeep: sky('#3a3862'),
+  cloudLit: sky('#8f93b3'),
+  cloudMid: sky('#4c5172'),
+  cloudShade: sky('#30344f'),
+  cloudDeep: sky('#1e2342'),
   ground: lin(0.035, 0.04, 0.075),
   envIntensity: 1.7,
   envBelow: 0.6,
@@ -196,8 +201,8 @@ export const BLUE_HOUR: Palette = {
 export const MOONLIT: Palette = {
   zenith: sky('#0b1027', 1.55),
   upper: sky('#1b2348', 1.55),
-  horizon: sky('#3a3866', 1.55),
-  horizonSun: sky('#6f6488', 1.55),
+  horizon: sky('#3b4266', 1.55),
+  horizonSun: sky('#5e6688', 1.55),
   gradUpper: 0.24,
   gradZenith: 0.75,
   glow: sky('#9aa3cc', 1.55).multiplyScalar(0.4),
@@ -206,10 +211,10 @@ export const MOONLIT: Palette = {
   sunDisc: lin(0, 0, 0),
   sunLight: lin(0.7, 0.82, 1),
   sunIntensity: 4.3,
-  cloudLit: sky('#949cc2', 1.55),
-  cloudMid: sky('#656c94', 1.55),
-  cloudShade: sky('#484f77', 1.55),
-  cloudDeep: sky('#30365a', 1.55),
+  cloudLit: sky('#929ab8', 1.55),
+  cloudMid: sky('#4b5373', 1.55),
+  cloudShade: sky('#2e3550', 1.55),
+  cloudDeep: sky('#1b2240', 1.55),
   ground: lin(0.025, 0.035, 0.065),
   envIntensity: 1.6,
   envBelow: 0.55,

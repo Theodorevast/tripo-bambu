@@ -36,6 +36,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { BLUE_HOUR, homeNightCloud, MOONLIT, nightLayer, NIGHT_SKY, NIGHT_U, seaMoonlight, seaNightAlpha, skyLuma, underSky, updateNightSky } from './nightSky';
+import { createSkyDust } from './skyDust';
 
 // 天空、云海和光照（独立模块）。参考《小王子：星辰之旅》：淡蓝到奶白的天空、星球下方和四周厚厚的云海、低角度的暖色太阳。
 //
@@ -948,6 +949,9 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   scene.add(clouds);
   // 不参与拾取：云海圆盘铺到远平面，天空球包住一切，游戏里对整个场景做射线检测时不能被它们挡住
   for (const o of [sky, sea, clouds]) o.raycast = () => {};
+  // 首页空气里的星屑（v2-sky，skyDust.ts）：一次绘制，开场预热时和天空一起编译
+  const dust = createSkyDust();
+  scene.add(dust.sprite);
 
   // ---- 距离雾 + 云海附近的高度雾（对场景里所有开着 fog 的材质生效）
   const fogNode = Fn(() => {
@@ -1167,6 +1171,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uLodK.value = pixelAngle / (1 / uScale1.value / NOISE_SIZE) * 1.6 * (1 + CALM.blur * calm);
     // 夜空（v2-sky）：月亮、银河的方向，星星的大小按像素张角
     updateNightSky({ camera, frameQ: frame.q, up: frame.up, look, calm, pixelAngle });
+    dust.update({ dt, center, radius: R, seaTop: top, e1: uE1.value, up: frame.up, e2: uE2.value, home: calm, pixelAngle, shown });
 
     // 远处积云
     camera.getWorldQuaternion(camQ);
@@ -1211,6 +1216,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     sunDir,
     dispose() {
       scene.remove(sky, sea, clouds, sun, sun.target);
+      dust.dispose();
       skyGeo.dispose();
       skyMat.dispose();
       seaGeo.dispose();
