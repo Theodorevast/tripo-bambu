@@ -62,7 +62,7 @@ try {
     title.name === 'Community Planets' && /Build a planet with friends/.test(title.tagline ?? '') && title.visit === 'Visit your planet' && title.create === 'Create a planet' && !title.oldLine,
     `${title.name} / ${title.tagline} / ${title.visit} / ${title.create}`);
 
-  // —— 1b. 联名标志（tripo × MakerWorld）：本机有品牌图时是图，没有时是文字；活动名照活动页的标题 ——
+  // —— 1b. 联名标志（Tripo × MakerWorld）：本机有品牌图时是图，没有时是文字；活动名照活动页的标题 ——
   await until(page, () => !!document.querySelector('.cb-head .cobrand')?.hasAttribute('data-art'), null, 5000);
   const brand = await page.evaluate(() => {
     const head = document.querySelector('.cb-head');
@@ -80,8 +80,8 @@ try {
     };
   });
   const sameHeight = brand.imgs.length === 2 && Math.abs(brand.imgs[0].h - brand.imgs[1].h) < 1 && brand.imgs.every((i) => i.ok);
-  check('联名：标题上面 tripo（左）× MakerWorld，两边一样高；下面一行活动名 GBN · Great Benchy Nations',
-    brand.label === 'tripo × MakerWorld' && (brand.art ? sameHeight : /tripo × MakerWorld/.test(brand.text ?? '')) && /GBN · Great Benchy Nations/.test(brand.event ?? '') && brand.above && brand.opacity === '1',
+  check('联名：标题上面 Tripo（左）× MakerWorld，两边一样高；下面一行活动名 GBN · Great Benchy Nations',
+    brand.label === 'Tripo × MakerWorld' && (brand.art ? sameHeight : /Tripo × MakerWorld/.test(brand.text ?? '')) && /GBN · Great Benchy Nations/.test(brand.event ?? '') && brand.above && brand.opacity === '1',
     brand.art ? `图：${brand.imgs.map((i) => `${Math.round(i.w)}×${Math.round(i.h)}`).join(' × ')}；${brand.event}` : `没有品牌图，文字：${brand.text}`);
 
   // —— 2. 名牌 ——

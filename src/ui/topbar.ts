@@ -22,7 +22,7 @@ export class Topbar {
   private readonly visitButton: HTMLButtonElement;
   private readonly createButton: HTMLButtonElement;
   private readonly ctas: HTMLDivElement;
-  private readonly cobrand = cobrandHeader(); // 联名（tripo × MakerWorld，GBN）：首页标题上面
+  private readonly cobrand = cobrandHeader(); // 联名（Tripo × MakerWorld，GBN）：首页标题上面
   private readonly actions = el('nav', { className: 'tb-actions' });
   private readonly editButton: HTMLButtonElement;
   private readonly walkButton: HTMLButtonElement;

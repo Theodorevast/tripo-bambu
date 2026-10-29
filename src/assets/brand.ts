@@ -1,4 +1,4 @@
-// 品牌素材（tripo、MakerWorld 的）都放在 public/brand/，开发和构建版都从这里读，跟着 dist/ 一起发布：
+// 品牌素材（Tripo、MakerWorld 的）都放在 public/brand/，开发和构建版都从这里读，跟着 dist/ 一起发布：
 // - triboo.glb：翠宝（首页右边缘、开场探头、星球上站桩的、漫游的角色）
 // - tripo-logo.png、makerworld-logo.png：联名标志（ui/cobrand.ts）
 // - triboo01.gif、boom01.gif：启动画面的像素翠宝（ui/boot.ts）

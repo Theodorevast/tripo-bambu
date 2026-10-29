@@ -39,7 +39,7 @@ export class CouponCard {
   private readonly use: HTMLAnchorElement;
   private readonly claim: HTMLAnchorElement; // 首页领券窗口的大按钮（链接，不是 window.open）
   private readonly claimNote: HTMLParagraphElement;
-  private readonly cobrand: HTMLDivElement; // 领券窗口顶上的联名小标志（tripo × MakerWorld）
+  private readonly cobrand: HTMLDivElement; // 领券窗口顶上的联名小标志（Tripo × MakerWorld）
   private modeNow: CardMode = 'code';
   private current: CouponTicket | null = null;
   private state: 'closed' | 'pending' | 'open' | 'closing' = 'closed';

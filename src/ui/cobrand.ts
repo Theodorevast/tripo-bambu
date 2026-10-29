@@ -2,17 +2,17 @@ import './cobrand.css';
 import { brandUrl } from '../assets/brand';
 import { el } from './dom';
 
-// 联名（tripo × MakerWorld，GBN 活动）：首页标题卡片上的联名标志和活动名、领券窗口顶上的小标志。
+// 联名（Tripo × MakerWorld，GBN 活动）：首页标题卡片上的联名标志和活动名、领券窗口顶上的小标志。
 // 标志图是品牌素材，放在 public/brand/（tripo-logo.png、makerworld-logo.png），开发和构建版都从这里读（assets/brand.ts）
-// 图到之前、或者下不来时：显示文字「tripo × MakerWorld」（Nunito）
-// tripo 用黑底方块的那张（tripo-logo.png）：去掉黑底的那张 V 是白色的，放在暖白纸面上看不见
+// 图到之前、或者下不来时：显示文字「Tripo × MakerWorld」（Nunito）
+// Tripo 用黑底方块的那张（tripo-logo.png）：去掉黑底的那张 V 是白色的，放在暖白纸面上看不见
 
 // 活动名：活动页 campaign.makerworld.com/gbn/ 的标题是「GBN | Great Benchy Nations」
 export const EVENT_SHORT = 'GBN';
 export const EVENT_NAME = 'Great Benchy Nations';
 
 export interface BrandArt {
-  tripo: string; // tripo 的标志（黑底方块）
+  tripo: string; // Tripo 的标志（黑底方块）
   makerworld: string; // MakerWorld 的标志（黑字透明底）
 }
 
@@ -30,13 +30,13 @@ function decoded(src: string): Promise<HTMLImageElement | null> {
   return img.decode().then(() => img, () => null);
 }
 
-// 联名标志：[tripo 的标志 + 「tripo」字样] × [MakerWorld 的标志]，两边一样高，tripo 在左。
-// 图到之前（或者没有图）是文字「tripo × MakerWorld」；图都下好了才换成图（不会一边是图一边是字）
+// 联名标志：[Tripo 的标志 + 「Tripo」字样] × [MakerWorld 的标志]，两边一样高，Tripo 在左。
+// 图到之前（或者没有图）是文字「Tripo × MakerWorld」；图都下好了才换成图（不会一边是图一边是字）
 export function cobrandLockup(size: 'lg' | 'sm'): HTMLDivElement {
   const root = el('div', { className: `cobrand cobrand-${size}` });
   root.setAttribute('role', 'img');
-  root.setAttribute('aria-label', 'tripo × MakerWorld');
-  const text = el('span', { className: 'cb-text' }, el('b', { textContent: 'tripo' }), el('i', { textContent: '×' }), 'MakerWorld');
+  root.setAttribute('aria-label', 'Tripo × MakerWorld');
+  const text = el('span', { className: 'cb-text' }, el('b', { textContent: 'Tripo' }), el('i', { textContent: '×' }), 'MakerWorld');
   text.setAttribute('aria-hidden', 'true');
   root.append(text);
   const a = brandArt();
@@ -44,7 +44,7 @@ export function cobrandLockup(size: 'lg' | 'sm'): HTMLDivElement {
     if (!tripo || !mw) return;
     tripo.className = 'cb-tripo-mark';
     mw.className = 'cb-mw';
-    const word = el('span', { className: 'cb-tripo' }, tripo, el('span', { className: 'cb-tripo-word', textContent: 'tripo' }));
+    const word = el('span', { className: 'cb-tripo' }, tripo, el('span', { className: 'cb-tripo-word', textContent: 'Tripo' }));
     const x = el('span', { className: 'cb-x', textContent: '×' });
     for (const n of [word, x, mw]) (n as HTMLElement).setAttribute('aria-hidden', 'true');
     root.replaceChildren(word, x, mw);

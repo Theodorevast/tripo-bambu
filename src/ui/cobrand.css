@@ -1,4 +1,4 @@
-/* 联名标志（ui/cobrand.ts，H2）：[tripo 的标志 + tripo] × [MakerWorld]，两边一样高。
+/* 联名标志（ui/cobrand.ts，H2）：[Tripo 的标志 + Tripo] × [MakerWorld]，两边一样高。
    首页标题卡片上（lg）：启动画面的云散开时轻轻淡入；领券窗口顶上（sm）。没有品牌图时是一行文字（Nunito） */
 .cobrand { display: inline-flex; align-items: center; gap: 10px; color: #1f1a24; line-height: 1; white-space: nowrap; }
 .cobrand-lg { --cb-h: 28px; }
