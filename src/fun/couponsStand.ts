@@ -1,15 +1,15 @@
 import * as THREE from 'three/webgpu';
+import { tribooUrl } from '../assets/brand';
 import type { ModelLibrary } from '../assets/models';
 import { easeOutBack } from '../scenes/ease';
 import { createStandIn } from '../scenes/mascot';
 import type { PlanetEntry } from '../scenes/world';
-import { localTribooUrl } from '../play/localAsset';
 import { CHAR_HEIGHT } from '../play/params';
 import type { TribooPose } from './couponsMath';
 
 // 站桩的翠宝（coupons）：「你的星球」上、作品前面的草地上站着一个翠宝（向导），面朝镜头、轻轻呼吸，点它就吐券。
-// 模型和漫游的角色是同一个：本机有翠宝的 GLB 就从 PlanetView 的 ModelLibrary 克隆一份（几何、材质、贴图共用，着色器不用再编一遍），
-// 没有就用 mascot.ts 代码拼的替身。身高按 CHAR_HEIGHT（1 米）；星球视图里镜头离得远，和作品一样按「地标放大」放大。
+// 模型和漫游的角色是同一个：品牌的翠宝 GLB（public/brand/triboo.glb，assets/brand.ts），从 PlanetView 的 ModelLibrary 克隆一份
+// （几何、材质、贴图共用，着色器不用再编一遍），加载失败就用 mascot.ts 代码拼的替身。身高按 CHAR_HEIGHT（1 米）；星球视图里镜头离得远，和作品一样按「地标放大」放大。
 // 根节点叫 walker：post.ts 的接触阴影按这个名字认翠宝（星球组里名叫 walker 的孩子），脚下一圈草地跟着暗一点
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -60,13 +60,10 @@ export function logoGlow(root: THREE.Object3D): (k: number) => void {
 export async function loadStandModel(library: ModelLibrary): Promise<StandModel> {
   let object: THREE.Object3D | null = null;
   let height = 1;
-  const url = await localTribooUrl().catch(() => null);
-  if (url) {
-    const model = await library.load({ id: 'coupon-stand', file: new URL(url, location.href).href });
-    if (!model.failed) {
-      object = model.object;
-      height = model.height;
-    }
+  const model = await library.load({ id: 'coupon-stand', file: tribooUrl() });
+  if (!model.failed) {
+    object = model.object;
+    height = model.height;
   }
   if (!object) {
     const s = createStandIn();

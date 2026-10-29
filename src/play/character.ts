@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
+import { tribooUrl } from '../assets/brand';
 import type { ModelLibrary } from '../assets/models';
 import { easeOutBack } from '../scenes/stager';
-import { localTribooUrl } from './localAsset';
 import { CHAR_HEIGHT, CHAR_RADIUS, WALK } from './params';
 import { damp } from './sphere';
 import type { Walker } from './walker';
@@ -31,16 +31,13 @@ export function capsuleCharacter(): THREE.Group {
   return group;
 }
 
-// 角色模型：开发环境、本机有翠宝的 GLB 时用它（走作品同一套加载：meshopt 解码、各向异性），缩放到 CHAR_HEIGHT；
-// 没有文件或者读不了就用胶囊体，不报错
+// 角色模型：品牌的翠宝 GLB（public/brand/triboo.glb，assets/brand.ts；走作品同一套加载：meshopt 解码、各向异性），缩放到 CHAR_HEIGHT；
+// 读不了就用胶囊体，不报错
 export async function loadCharacter(library: ModelLibrary): Promise<{ object: THREE.Object3D; triboo: boolean }> {
-  const url = await localTribooUrl();
-  if (url) {
-    const model = await library.load({ id: 'walker-triboo', file: new URL(url, location.href).href });
-    if (!model.failed) {
-      model.object.scale.setScalar(CHAR_HEIGHT / model.height);
-      return { object: model.object, triboo: true };
-    }
+  const model = await library.load({ id: 'walker-triboo', file: tribooUrl() });
+  if (!model.failed) {
+    model.object.scale.setScalar(CHAR_HEIGHT / model.height);
+    return { object: model.object, triboo: true };
   }
   return { object: capsuleCharacter(), triboo: false };
 }

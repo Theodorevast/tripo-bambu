@@ -1,3 +1,5 @@
+import { brandUrl } from '../assets/brand';
+
 // 启动画面：index.html 里的 #boot（样式在 boot.css），页面一打开就显示，不等 JS。main.ts 按启动的进度推进三个阶段：
 // 建天空（建 World、装配各个页面）→ 预热（编译着色器）→ 落地（进入第一条路由）；3D 准备好后云散开、淡出、撤掉。
 // 起不来时停在启动画面上：浏览器做不了 3D（没有 WebGPU 也没有 WebGL2）时提示换浏览器或设备，别的错误提示刷新。
@@ -81,14 +83,10 @@ function canWebGL2(): boolean {
   return gl !== null;
 }
 
-// 品牌动图（像素翠宝）：品牌素材还没确认能公开发布，只在开发环境从本机仓库根目录的 tripo/ 读（.gitignore 里有），
-// 不提交、不打包。import.meta.glob 由开发服务器按磁盘匹配：文件不在时结果是空的，页面不发请求，也就没有 404；
-// 生产构建里 import.meta.env.DEV 是 false，这一支连同 glob 一起被去掉，构建结果里没有这些动图（换成三个圆点）
-async function brandGif(name: BrandGif): Promise<string | null> {
-  if (!import.meta.env.DEV) return null;
-  const files = import.meta.glob<string>('/tripo/{triboo01,boom01}.gif', { query: '?url', import: 'default' });
-  const load = files[`/tripo/${name}.gif`];
-  return load ? load() : null;
+// 品牌动图（像素翠宝）：public/brand/ 下的 triboo01.gif、boom01.gif，开发和构建版都从这里读（assets/brand.ts）。
+// 下不来时换成 showArt 的 otherwise（三个圆点，或者不放图）
+function brandGif(name: BrandGif): string {
+  return brandUrl(`${name}.gif`);
 }
 
 function frames(n: number): Promise<void> {
@@ -124,12 +122,11 @@ export function startBoot(root: HTMLElement | null = document.getElementById('bo
     const art = root?.querySelector<HTMLElement>('.boot-art');
     if (!root || !art) return;
     const token = ++artToken;
-    const url = await brandGif(name).catch(() => null);
-    const img = url ? Object.assign(new Image(), { className: 'boot-gif', alt: '', src: url }) : null;
-    const ok = img ? await img.decode().then(() => true, () => false) : false;
+    const img = Object.assign(new Image(), { className: 'boot-gif', alt: '', src: brandGif(name) });
+    const ok = await img.decode().then(() => true, () => false);
     if (token !== artToken) return;
     art.querySelector('.boot-gif')?.remove();
-    if (img && ok) art.prepend(img);
+    if (ok) art.prepend(img);
     root.dataset.art = ok ? 'gif' : otherwise;
   };
 
