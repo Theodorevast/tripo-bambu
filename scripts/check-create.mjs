@@ -99,11 +99,11 @@ try {
     await stepIs(page, 'look');
   });
 
-  await step('第二步：选 Volcanic、团队色 Lagoon、关掉石头带、Reroll：预览每次都平滑换好', async () => {
+  await step('第二步：选 Volcanic、团队色 Tide、关掉石头带、Reroll：预览每次都平滑换好', async () => {
     const builds0 = (await page.evaluate(() => window.__create.preview())).builds;
     await page.locator('.cp-preset', { hasText: 'Volcanic' }).click();
     await until(page, '换成 Volcanic 后预览就绪', () => window.__create.state().previewReady);
-    await page.locator('.cp-color[title="Lagoon"]').click();
+    await page.locator('.cp-color[title="Tide"]').click();
     await page.locator('.cp-switch').click();
     await until(page, '关掉石头带后预览就绪', () => window.__create.state().previewReady);
     await page.locator('.cp-reroll').click();

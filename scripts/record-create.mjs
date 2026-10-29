@@ -128,7 +128,7 @@ for (const preset of ['Coral', 'Glacier']) {
   await shootUntil(() => window.__create.state().previewReady);
   await shoot(30);
 }
-await clickOn('.cp-color[title="Berry"]', 16, 30);
+await clickOn('.cp-color[title="Rose"]', 16, 30);
 mark('colour');
 await clickOn('.cp-reroll', 18, 4);
 mark('reroll');

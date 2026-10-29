@@ -30,7 +30,7 @@ export const GROUND = {
   teamCover: 0.16, // 团队色花海的覆盖（星球视图里）
   teamCoverGalaxy: 0.42, // 星系里
   teamBright: 0.95, // 花海的亮度
-  teamVivid: 0.8, // 团队色的饱和度（1 = 原色；第一版是 1.35，提过一截）
+  teamVivid: 0.65, // 团队色的饱和度（1 = 原色；第一版是 1.35，提过一截）
   fieldFlowers: 0.5, // 花田
   warmCool: 0.8, // 冷暖渐变
   galaxySat: 0.08, // 星系里饱和度再提多少（第一版 0.45：糖果色。第二版地面本身已经是灰调的大地色，星系里只提一点点，五种预设分得开）
