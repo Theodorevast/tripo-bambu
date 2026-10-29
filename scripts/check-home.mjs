@@ -144,7 +144,11 @@ try {
   // —— 5. 点翠宝 → 领券窗口（ROUNDS 轮）——
   const closers = [
     ['Esc', async () => page.keyboard.press('Escape')],
-    ['点窗口外面', async () => page.mouse.click(60, H * 0.5)],
+    // 点窗口外面：点在卡片下面的背景上（手机上卡片差不多和屏幕一样宽，固定的 x = 60 会点在卡片上）
+    ['点窗口外面', async () => {
+      const r = await page.evaluate(() => document.querySelector('.coupon-card')?.getBoundingClientRect().toJSON() ?? null);
+      await page.mouse.click(Math.round(W / 2), Math.round(r ? Math.min(H - 8, (r.bottom + H) / 2) : H * 0.9));
+    }],
     ['关闭按钮', async () => page.locator('.coupon-card .cc-close').click()],
   ];
   let firstMax = null;
@@ -228,12 +232,27 @@ try {
     await until(page, () => window.__home.state().card.open === false && document.querySelector('#app > .coupon-layer')?.hidden !== false, null, 5000);
     const a0 = await azimuth();
     // 在画面右上方的空地上横着拖（OrbitControls：拖一个画面高度转 360°）。拖完等惯性停下来
-    const y = Math.round(H * 0.16);
-    await page.mouse.move(Math.round(W * 0.8), y);
-    await page.mouse.down();
-    const span = Math.round(H * 0.5);
-    for (let i = 1; i <= 20; i++) await page.mouse.move(Math.round(W * 0.8) - (span * i) / 20, y);
-    await page.mouse.up();
+    // 横着拖半个画面高（= 转 180°）。从画布上空着的一行开始拖（标题卡片下面、右下角翠宝上面）；
+    // 手机上半个画面高比屏幕还宽，分几次拖
+    const y = await page.evaluate(() => {
+      const card = document.querySelector('.tb-title')?.getBoundingClientRect();
+      for (let yy = Math.round((card?.bottom ?? 0) + 24); yy < innerHeight * 0.5; yy += 8) {
+        let free = true;
+        for (const xx of [innerWidth * 0.2, innerWidth * 0.5, innerWidth * 0.85]) if (document.elementFromPoint(xx, yy)?.id !== 'stage') free = false;
+        if (free) return yy;
+      }
+      return Math.round(innerHeight * 0.5);
+    });
+    let left = Math.round(H * 0.5);
+    while (left > 0) {
+      const step = Math.min(left, Math.round(W * 0.6));
+      const x0 = Math.round(W * 0.8);
+      await page.mouse.move(x0, y);
+      await page.mouse.down();
+      for (let i = 1; i <= 16; i++) await page.mouse.move(x0 - (step * i) / 16, y);
+      await page.mouse.up();
+      left -= step;
+    }
     await page.waitForTimeout(1800);
     const a1 = await azimuth();
     const turned = Math.abs(((a1 - a0 + 540) % 360) - 180);
@@ -277,7 +296,10 @@ try {
   check('回首页：名牌、翠宝回来', back && tagsBack);
 
   // —— 7. 名牌是按钮：Tab 选到、回车进星球 ——
-  const other = built.find((t) => t.id !== you.id);
+  // 挑一张显示着的名牌（螺旋星系里叠在一起的名牌会淡掉、不能聚焦；手机上显示着的少）
+  await page.waitForTimeout(500);
+  const shownNow = (await homeState(page)).tags.filter((t) => t.shown && !t.you).map((t) => t.id);
+  const other = built.find((t) => t.id !== you.id && shownNow.includes(t.id)) ?? built.find((t) => t.id !== you.id);
   await page.locator('.planet-tag', { hasText: other.name }).focus();
   await page.keyboard.press('Enter');
   const keyEnter = await until(page, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), other.id, 20000);
