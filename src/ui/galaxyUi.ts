@@ -339,7 +339,8 @@ export class GalaxyUi {
     let slot = -1;
     // 名牌一律放在自己星球的正下方；和更近的名牌、更近的星球叠在一起就淡掉（你的星球的名牌一直在）
     if (ok) {
-      if (hover || t.rank === 0) slot = 0;
+      if (hover) slot = 0;
+      else if (t.rank === 0) slot = 0; // 你的星球：名牌一律在正下方、一直显示（先摆它，别的名牌给它让开）
       else if (t.entry.team.status === 'under-construction') slot = -1; // 建设中的：平时不显示，悬停时才有
       else if (this.fits(t, ys[0], placed)) slot = 0;
     }
@@ -368,7 +369,7 @@ export class GalaxyUi {
   private fits(t: Tag, y: number, placed: Tag[]): boolean {
     if (y < 0 || y + t.h > innerHeight || t.x - t.w / 2 < 0 || t.x + t.w / 2 > innerWidth) return false;
     for (const o of placed) {
-      if (Math.abs(o.x - t.x) < (o.w + t.w) / 2 + 4 && Math.abs(o.y - y) < (o.h + t.h) / 2 + 2) return false;
+      if (Math.abs(o.x - t.x) < (o.w + t.w) / 2 + 10 && Math.abs(o.y - y) < (o.h + t.h) / 2 + 5) return false; // 名牌之间留点空
     }
     const l = t.x - t.w / 2;
     const r = t.x + t.w / 2;
@@ -378,7 +379,7 @@ export class GalaxyUi {
       // 矩形和圆：圆心到矩形最近点的距离
       const cx = Math.min(Math.max(d.x, l), r);
       const cy = Math.min(Math.max(d.y, y), y + t.h);
-      if (Math.hypot(d.x - cx, d.y - cy) < d.r * 0.6) return false; // 擦到边上可以，压到星球身上不行
+      if (Math.hypot(d.x - cx, d.y - cy) < d.r * 0.8) return false; // 不压到更近的星球身上（擦到边上可以）
     }
     return true;
   }

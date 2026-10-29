@@ -89,13 +89,36 @@ try {
   await page.waitForTimeout(600);
   let st = await homeState(page);
   const shownTags = st.tags.filter((t) => t.shown);
-  const builtShown = built.every((t) => shownTags.some((s) => s.id === t.id));
   const youTag = st.tags.find((t) => t.id === you.id);
-  check(`名牌：建好的 ${built.length} 个团队都有名牌，你的星球写 You`, builtShown && !!youTag?.you && youTag.shown, `显示 ${shownTags.length}/${st.tags.length} 张`);
-  // 你的星球在最前面正中：名牌在画面最下面、横向在中间附近
+  // 螺旋星系（H2）：你的星球的名牌一直在，建设中的平时不显示；显示着的名牌两两不叠
+  const boxes = await page.evaluate(() => [...document.querySelectorAll('.planet-tag:not(.is-off) .pt-card')].map((e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }).filter((r) => r[2] > r[0]));
+  let overlaps = 0;
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const [a0, a1, a2, a3] = boxes[i];
+    const [b0, b1, b2, b3] = boxes[j];
+    if (a0 < b2 && b0 < a2 && a1 < b3 && b1 < a3) overlaps++;
+  }
+  const buildingShown = shownTags.filter((t) => seed.teams.find((x) => x.id === t.id)?.status === 'under-construction').length;
+  check('名牌：你的星球写 You、一直显示；显示着的名牌两两不叠；建设中的平时不显示', !!youTag?.you && youTag.shown && overlaps === 0 && buildingShown === 0,
+    `显示 ${shownTags.length}/${st.tags.length} 张，叠在一起的 ${overlaps} 对`);
+  // 你的星球在星系正中、最大；整个星系在画面里（没有星球出画、没有星球被标题卡片盖住）
+  const lay = await page.evaluate(() => {
+    const w = window.__world;
+    const you = w.planets.get(window.__home.state().you);
+    const card = document.querySelector('.tb-title')?.getBoundingClientRect();
+    let biggest = true;
+    let out = 0;
+    let underCard = 0;
+    for (const e of w.planets.values()) {
+      if (e !== you && e.planet.group.scale.x >= you.planet.group.scale.x) biggest = false;
+      const p = window.__app.planetScreenPos(e.team.id);
+      if (!p || p.x < 0 || p.x > innerWidth || p.y < 0 || p.y > innerHeight) out++;
+      else if (card && p.x < card.right && p.y < card.bottom) underCard++;
+    }
+    return { center: you.home.length() < 1e-3, biggest, out, underCard };
+  });
+  check('版式：你的星球在螺旋星系正中、最大；所有星球都在画面里、没有被标题卡片盖住', lay.center && lay.biggest && lay.out === 0 && lay.underCard === 0, JSON.stringify(lay));
   const youAt = await page.evaluate((id) => window.__app.planetScreenPos(id), you.id);
-  const lowest = Math.max(...(await Promise.all(seed.teams.map((t) => page.evaluate((id) => window.__app.planetScreenPos(id)?.y ?? -1, t.id)))));
-  check('版式：你的星球在最前面（画面上最低）、横向居中附近', youAt && Math.abs(youAt.y - lowest) < 1 && Math.abs(youAt.x - W / 2) < W * 0.2, youAt ? `(${Math.round(youAt.x)}, ${Math.round(youAt.y)})` : '不在画面里');
 
   // —— 3. 悬停：星球放大、名牌弹起来、光标是手形 ——
   const before = await page.evaluate((id) => window.__world.planets.get(id).planet.group.scale.x, you.id);
@@ -193,6 +216,50 @@ try {
     }
   }
   check('第一次点翠宝：最长帧间隔 ≤ 33 ms', firstMax !== null && firstMax <= 33.4, `${backend}，${firstMax?.toFixed(1)} ms`);
+
+  // —— 5b. 螺旋星系随便转：左右拖 180° 以后，照样能悬停名牌、点进星球；回首页时回到正面的取景 ——
+  {
+    const azimuth = () => page.evaluate(() => {
+      const w = window.__world;
+      const c = w.rig.camera.position;
+      const t = w.rig.controls.target;
+      return (Math.atan2(c.x - t.x, c.z - t.z) * 180) / Math.PI;
+    });
+    await until(page, () => window.__home.state().card.open === false && document.querySelector('#app > .coupon-layer')?.hidden !== false, null, 5000);
+    const a0 = await azimuth();
+    // 在画面右上方的空地上横着拖（OrbitControls：拖一个画面高度转 360°）。拖完等惯性停下来
+    const y = Math.round(H * 0.16);
+    await page.mouse.move(Math.round(W * 0.8), y);
+    await page.mouse.down();
+    const span = Math.round(H * 0.5);
+    for (let i = 1; i <= 20; i++) await page.mouse.move(Math.round(W * 0.8) - (span * i) / 20, y);
+    await page.mouse.up();
+    await page.waitForTimeout(1800);
+    const a1 = await azimuth();
+    const turned = Math.abs(((a1 - a0 + 540) % 360) - 180);
+    check('首页左右随便转：横着拖半个画面高转了 180° 左右（不再卡在 ±14° / ±45°）', turned > 150, `转了 ${turned.toFixed(0)}°`);
+    // 转过去以后：挑一张显示着的、建好的星球的名牌，悬停、点进去
+    await page.mouse.move(W * 0.5, 30);
+    await page.waitForTimeout(600);
+    st = await homeState(page);
+    const pick = st.tags.find((t) => t.shown && !t.you && built.some((b) => b.id === t.id));
+    let entered180 = false;
+    let hovered180 = false;
+    if (pick) {
+      await page.mouse.move(pick.x, pick.y + 12);
+      hovered180 = await until(page, (name) => document.querySelector('.planet-tag.is-hover .pt-name')?.textContent === name, pick.text, 3000);
+      await page.mouse.click(pick.x, pick.y + 12);
+      entered180 = await until(page, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), pick.id, 30000);
+    }
+    check('转了 180° 以后：悬停名牌弹起来，点名牌直接飞进那颗星球（从当前角度飞过去）', !!pick && hovered180 && entered180, pick ? `${pick.text}` : '没有显示着的名牌');
+    if (entered180) {
+      await page.locator('.topbar button', { hasText: 'Galaxy' }).click();
+      await until(page, () => window.__app.routeIdle() && (location.hash === '#/' || location.hash === ''), null, 30000);
+      await page.waitForTimeout(800);
+      const a2 = await azimuth();
+      check('从星球回首页：回到正面的取景', Math.abs(((a2 + 540) % 360) - 180) < 8, `方位角 ${a2.toFixed(0)}°`);
+    }
+  }
 
   // —— 6. Visit your planet：先弹一下，再穿云进你的星球；星球页上翠宝缩走、名牌收起 ——
   await page.mouse.move(W * 0.5, 40);
