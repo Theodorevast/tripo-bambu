@@ -162,9 +162,10 @@ export class HomeTriboo {
     return this.ready && this.home() && this.started && this.out[0] > 0.12 && !this.coupons.card.open;
   }
 
+  // 开场的星尘拼标志在放（shapeState.t ≥ 0）时也不算：星尘拼成标志、停着的那一秒不能提前露出来，放完再出来（P3 量过两个同时露着约 1.4 秒）
   private home(): boolean {
     const w = this.world;
-    return !w.focused && !w.director.busy && !w.rig.flying && !w.paused && !w.rig.drive;
+    return !w.focused && !w.director.busy && !w.rig.flying && !w.paused && !w.rig.drive && !((w.galaxy?.shapeState.t ?? -1) >= 0);
   }
 
   // 指针在翠宝身上（身体那个球，被画面右边缘切掉的部分不算）

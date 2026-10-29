@@ -42,14 +42,17 @@ async function open({ reduced = false } = {}) {
 }
 
 const homeState = (page) => page.evaluate(() => window.__home.state());
-// 云里的翠宝露出来的那一块（rect）压到了什么：显示着的名牌、标题卡片、星球（画面上的圆）
-const cloudClash = (page, rect) => page.evaluate((r) => {
+// 云里的翠宝露出来的那一块（rect）压到了什么：显示着的名牌、标题卡片、星球（画面上的圆）、看得清的云朵翠宝（P3）
+const cloudClash = (page, rect) => page.evaluate(async (r) => {
   if (!r) return ['没有露出来'];
   const out = [];
   const hit = (b) => b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top;
   for (const t of document.querySelectorAll('.planet-tags.is-shown .planet-tag:not(.is-off)')) if (hit(t.getBoundingClientRect())) out.push(`名牌 ${t.querySelector('.pt-name')?.textContent}`);
   const title = document.querySelector('.tb-title')?.getBoundingClientRect();
   if (title && hit(title)) out.push('标题卡片');
+  const ct = (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo();
+  const cr = ct?.screenRect();
+  if (cr && ct.opacity >= 0.12 && hit(cr)) out.push(`云朵翠宝（${ct.state.phase}）`);
   const w = window.__world;
   const d = { x: 0, y: 0, r: 0 };
   for (const [id, e] of w.planets) {
@@ -398,19 +401,84 @@ try {
       await until(page, () => window.__app.routeIdle() && (location.hash === '#/' || location.hash === ''), null, 30000);
       await page.waitForTimeout(800);
     }
-    // 定时那只露着的时候指到另一颗星球上：它先沉下去，再从那颗星球旁边冒出来（那颗 30 秒内没带过路）
-    const other = await page.evaluate(() => window.__home.state().tags.find((t) => t.shown && !t.you)?.id ?? null);
-    await page.mouse.move(W * 0.5, 12);
-    await until(page, () => !window.__home.state().cloud.active && !window.__home.state().card.open, null, 5000);
-    const peeked = await page.evaluate(() => window.__home.peekCloud());
-    const up = await until(page, () => window.__home.state().cloud?.phase === 'stay' && window.__home.state().cloud.mode === 'timer', null, 4000);
-    const op = other ? await page.evaluate((id) => window.__app.planetScreenPos(id), other) : null;
-    if (op) await page.mouse.move(op.x, op.y);
-    const sank = await until(page, () => ['sink', 'close'].includes(window.__home.state().cloud.phase), null, 1500);
-    const moved = await until(page, guideUp, other, 5000);
-    check('定时那只露着的时候指到星球上：它先沉下去，再从那颗星球旁边冒出来', !!other && peeked && up && sank && moved, other ?? '没有显示着的别的名牌');
+    // 定时那只露着的时候指到另一颗星球上：它先沉下去，再从那颗星球旁边冒出来（那颗 30 秒内没带过路）。
+    // 有的星球旁边没地方（手机上挤，P3 的云朵翠宝也占着一块）：这一次不带路，换下一颗再试；定时那只沉下去这一步每次都要对
+    const others = await page.evaluate(() => window.__home.state().tags.filter((t) => t.shown && !t.you).map((t) => t.id));
+    const tried = [];
+    let reEmerged = null;
+    for (const other of others) {
+      await page.mouse.move(W * 0.5, 12);
+      await until(page, () => !window.__home.state().cloud.active && !window.__home.state().card.open, null, 6000);
+      const peeked = await page.evaluate(() => window.__home.peekCloud());
+      const up = await until(page, () => window.__home.state().cloud?.phase === 'stay' && window.__home.state().cloud.mode === 'timer', null, 4000);
+      const op = await page.evaluate((id) => window.__app.planetScreenPos(id), other);
+      if (op) await page.mouse.move(op.x, op.y);
+      const sank = await until(page, () => ['sink', 'close'].includes(window.__home.state().cloud.phase), null, 1500);
+      const moved = await until(page, guideUp, other, 5000);
+      tried.push(`${other}：${moved ? '旁边冒出来了' : '旁边没地方，没带'}${peeked && up && sank ? '' : `（peek ${peeked}，up ${up}，sank ${sank}）`}`);
+      if (!(peeked && up && sank)) break;
+      if (moved) {
+        reEmerged = other;
+        break;
+      }
+    }
+    check('定时那只露着的时候指到星球上：它先沉下去，再从那颗星球旁边冒出来', !!reEmerged, tried.join('；') || '没有显示着的别的名牌');
     await page.mouse.move(W * 0.5, 12);
     await until(page, () => !window.__home.state().cloud.active, null, 3000);
+  }
+
+  // —— 5d. 和 P3 的云朵翠宝（scenes/homeCloudTriboo.ts）互相避开：它聚好、散开、聚拢的时候各叫一次云里那只，
+  //        每帧记：云里那只探出来、停着，云朵翠宝也看得清（opacity ≥ 0.12）的时候，两个在画面上叠在一起的帧数（要 0）；
+  //        散开时云朵翠宝占的地方比聚好时大 ——
+  {
+    await page.evaluate(async () => { window.__cloudTriboo = (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo; });
+    const cloudPhase = (ph) => until(page, (p) => window.__cloudTriboo?.()?.state.phase === p, ph, 60000);
+    const width = () => page.evaluate(() => { const r = window.__cloudTriboo?.()?.screenRect(); return r ? r.right - r.left : 0; });
+    const idle = () => until(page, () => !window.__home.state().cloud.active && !window.__home.state().card.open, null, 9000);
+    const peekOnce = async () => {
+      await idle();
+      const ok = await page.evaluate(() => window.__home.peekCloud());
+      await until(page, () => window.__home.state().cloud.phase === 'stay' || !window.__home.state().cloud.active, null, 4000);
+      await idle();
+      return ok;
+    };
+    await page.mouse.move(W * 0.5, 12);
+    await page.evaluate(() => {
+      const o = (window.__overlap = { both: 0, frames: 0, on: true });
+      const tick = () => {
+        const c = window.__home.state().cloud;
+        const ct = window.__cloudTriboo?.();
+        const r = ct?.screenRect();
+        if (c?.rect && (c.phase === 'rise' || c.phase === 'stay')) {
+          o.frames++;
+          if (r && ct.opacity >= 0.12 && c.rect.left < r.right && c.rect.right > r.left && c.rect.top < r.bottom && c.rect.bottom > r.top) o.both++;
+        }
+        if (o.on) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const shown = await cloudPhase('show');
+    const p1 = await peekOnce();
+    // 云朵翠宝自己大约 40 秒散一次：等它聚好（错过了就等下一次聚好），量一下聚好时多大，再让它马上散开
+    await cloudPhase('show');
+    const wShow = await width();
+    await page.evaluate(() => window.__cloudTriboo?.()?.replay());
+    const scattering = await cloudPhase('scatter');
+    await page.waitForTimeout(500);
+    const wScatter = await width();
+    const p2 = await peekOnce();
+    // 散开以后一会儿就换个地方聚拢；错过了（已经聚好）就再散一次
+    if (!(await page.evaluate(() => window.__cloudTriboo?.()?.state.phase === 'gather'))) await page.evaluate(() => window.__cloudTriboo?.()?.replay());
+    const gathering = await cloudPhase('gather');
+    await page.waitForTimeout(400);
+    const p3 = await peekOnce();
+    const o = await page.evaluate(() => {
+      window.__overlap.on = false;
+      return window.__overlap;
+    });
+    check('和云朵翠宝互相避开：它聚好、散开、聚拢的时候叫云里那只出来，探出来、停着的时候都不和它叠在一起；散开时它占的地方更大',
+      shown && scattering && gathering && p1 && p2 && p3 && o.frames > 0 && o.both === 0 && wScatter > wShow,
+      `云里那只探出来、停着 ${o.frames} 帧，叠在一起 ${o.both} 帧；云朵翠宝聚好时宽 ${Math.round(wShow)} px，散开 0.5 秒时 ${Math.round(wScatter)} px`);
   }
 
   // —— 5b. 螺旋星系随便转：左右拖 180° 以后，照样能悬停名牌、点进星球；回首页时回到正面的取景 ——

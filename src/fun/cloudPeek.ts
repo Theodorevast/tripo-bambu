@@ -4,10 +4,11 @@ import type { App } from '../app';
 import { easeInBack, easeOutBack, easeOutCubic, smooth, span } from '../scenes/ease';
 import type { HomeTuneFolder } from '../scenes/homeTune';
 import { reducedMotion } from '../scenes/transition';
+import { cloudTriboo } from '../scenes/homeCloudTriboo';
 import type { PlanetEntry, World } from '../scenes/world';
 import { el } from '../ui/dom';
 import type { CloudPeekState } from '../ui/home';
-import { BALL_C, BALL_R, besideSpot, clearance, footprint, GUIDE, GuideMemo, pointAt, type Box, type Disc } from './cloudPeekMath';
+import { BALL_C, BALL_R, besideSpot, boxGap, clearance, footprint, GUIDE, GuideMemo, pointAt, type Box, type Disc } from './cloudPeekMath';
 import type { Coupons } from './coupons';
 import type { HomeTriboo } from './couponsHome';
 import { COUPONS, restPose, shakePose, spitPose, spitTimes, stepHover, type TribooPose } from './couponsMath';
@@ -55,6 +56,7 @@ export const CLOUD_PEEK = {
 // wait：等右下角那只整个缩到画面外（场上同一时间只有一只翠宝），再让云面鼓起来
 type Phase = 'idle' | 'wait' | 'bulge' | 'rise' | 'stay' | 'sink' | 'close';
 const WAIT_MAX = 1.2; // 最多等多久（秒）：右下角那只缩不走（正在吐券之类）就这一次不冒了
+const CLOUD_ROOM = 16; // 挑位置时离 P3 的云朵翠宝至少多留几像素
 type Mode = 'timer' | 'guide';
 
 interface Act {
@@ -175,6 +177,7 @@ export class CloudPeek {
   private readonly discs: Disc[] = [];
   private readonly tags: Box[] = [];
   private readonly boxes: Box[] = [];
+  private readonly cloudBox: Box = { left: 0, top: 0, right: 0, bottom: 0 }; // P3 的云朵翠宝在画面上占的地方
   // 悬停时带路
   private target: PlanetEntry | null = null; // 带路时指着的那颗星球
   private pointing: PlanetEntry | null = null; // 指针（或键盘焦点）在哪颗星球、哪张名牌上
@@ -270,6 +273,7 @@ export class CloudPeek {
   private home(): boolean {
     const w = this.world;
     if (w.focused || w.director.busy || w.rig.flying || w.paused || w.rig.drive) return false;
+    if ((w.galaxy?.shapeState.t ?? -1) >= 0) return false; // 开场的星尘拼标志在放（同右下角那只）
     this.creatorNode ??= this.app.root.querySelector<HTMLElement>('section.creator');
     if (this.creatorNode && !this.creatorNode.hidden) return false;
     return !location.hash.startsWith('#/create');
@@ -278,6 +282,15 @@ export class CloudPeek {
   // 现在能按时冒出来：没指着星球、名牌，没在拖，镜头停稳了，领券窗口没开，右下角那只没在演
   private allowed(): boolean {
     return this.world.hovered === null && this.pending === null && !this.dragging && this.still > 0.5 && !this.coupons.card.open && !this.corner.busy && this.homeFor > 1.5 && !reducedMotion();
+  }
+
+  // P3 的云朵翠宝聚到（或散到）这只露出来的地方了（离它不到 6 像素）：定时冒出来的那只让开，沉回去（带路的不让：指针还在星球上）
+  private crowded(): boolean {
+    if (!this.box.valid) return false;
+    const r = cloudTriboo()?.screenRect(this.cloudBox);
+    if (!r) return false;
+    const g = boxGap(this.box, r);
+    return g >= 0 ? g < 6 : true;
   }
 
   // ?tune 的 Peek now、自查脚本：马上冒出来（不管定时、开关、指没指着东西；位置照样躲开星球、名牌）。冒不出来返回 false
@@ -354,6 +367,16 @@ export class CloudPeek {
       if (r && r.width > 0) boxes.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
     }
     boxes.push({ left: W - Math.max(150, W * 0.14), top: Hp - Math.max(230, Hp * 0.3), right: W, bottom: Hp }); // 右下角的翠宝
+    // P3 的云朵翠宝（scenes/homeCloudTriboo.ts）：聚好时是它连手带脚那一圈；聚拢、散开的时候按云絮散到多远算。
+    // 多留 CLOUD_ROOM 像素：它散开时还在变大，慢慢飘也会挪一点（露着的时候碰到它就沉回去，见 crowded）
+    const cloud = cloudTriboo()?.screenRect(this.cloudBox);
+    if (cloud) {
+      cloud.left -= CLOUD_ROOM;
+      cloud.top -= CLOUD_ROOM;
+      cloud.right += CLOUD_ROOM;
+      cloud.bottom += CLOUD_ROOM;
+      boxes.push(cloud);
+    }
   }
 
   // 画面上 (px, py) 这一点往云面上打一条线：打到了、不太远（地平线那边的云又小又雾）就返回那一点的俯视角正弦，否则 null
@@ -570,7 +593,7 @@ export class CloudPeek {
     const out = this.phase === 'bulge' || this.phase === 'rise' || this.phase === 'stay';
     // 别的东西开了领券窗口（右下角那只吐的）、开始指着星球或名牌（带路的：指针离开了那颗星球）：沉回去
     // （自己吐的券开的窗口照样演完）；还没冒头就直接不冒了
-    const leave = this.mode === 'timer' ? this.world.hovered !== null : this.pointing !== this.target;
+    const leave = this.mode === 'timer' ? this.world.hovered !== null || this.crowded() : this.pointing !== this.target;
     if (!this.act && ((this.coupons.card.open && !this.ours) || leave)) {
       if (this.phase === 'wait') {
         this.finish();
