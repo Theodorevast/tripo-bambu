@@ -228,7 +228,7 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
 .mcard-foot { position: relative; margin-top: auto; align-self: stretch; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 12px; border-top: 2px dashed var(--line); font-weight: 800; font-size: 13px; color: var(--ink-dim); }
 .mcard-count { display: inline-flex; align-items: center; gap: 6px; }
 .mcard-count .icon { width: 17px; height: 17px; color: color-mix(in srgb, var(--team) 60%, var(--ink)); }
-.mcard-flip-hint { width: 20px; height: 20px; color: var(--ink-faint); transition: transform 0.6s var(--bounce), color 0.2s; }
+.mcard-flip-hint { width: 20px; height: 20px; color: var(--ink-faint); transition: transform 0.6s var(--bounce); }
 .member:hover .mcard-flip-hint { transform: rotate(-200deg); color: var(--ink); }
 /* 正面整张是一个透明按钮；键盘聚焦时整张卡外面一圈深色描边 */
 :where(#app) .mcard-hit { position: absolute; inset: 0; z-index: 2; padding: 0; border-radius: 22px; background: transparent; box-shadow: none; translate: none; }
