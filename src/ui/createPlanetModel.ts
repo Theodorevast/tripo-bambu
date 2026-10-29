@@ -12,17 +12,17 @@ export const LIMITS = {
   friends: 5, // 最多邀请几个
 };
 
-// 团队色，每个带一个名字（读屏、悬停提示用）。第二版 [v2-world]：从糖果色换成降了饱和的一组，和「大地」色板、夜空的金色细线一个调子
-// （香槟金、灰玫瑰、灰紫、石板蓝、灰青、Sage、陶土、暮色紫），彼此还分得开
+// 团队色：绘本里的几种糖果色（和界面的翠宝黄、莓红、天蓝、叶绿一个调子），每个带一个名字（读屏、悬停提示用）
 export const TEAM_COLORS: ReadonlyArray<{ name: string; hex: string }> = [
-  { name: 'Champagne', hex: '#cdb27a' },
-  { name: 'Rose', hex: '#b98e8e' },
-  { name: 'Mauve', hex: '#9182a8' },
-  { name: 'Slate', hex: '#7488a6' },
-  { name: 'Tide', hex: '#6f9a98' },
-  { name: 'Sage', hex: '#8d9c79' },
-  { name: 'Clay', hex: '#b07d60' },
-  { name: 'Dusk', hex: '#6a6492' },
+  // 第二版（v2-ui）：同样的八种色相，饱和度降下来，和夜空、香槟金放在一起不刺眼（不要糖果色）
+  { name: 'Sunflower', hex: '#d6b35e' },
+  { name: 'Peach', hex: '#dea283' },
+  { name: 'Berry', hex: '#b9868f' },
+  { name: 'Lilac', hex: '#8e84b6' },
+  { name: 'Sky', hex: '#6f8db0' },
+  { name: 'Lagoon', hex: '#5f8f8c' },
+  { name: 'Leaf', hex: '#8d9c6c' },
+  { name: 'Clay', hex: '#b48766' },
 ];
 
 // 每种星球一句话（第二步预设旁边的小字）

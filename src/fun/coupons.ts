@@ -164,7 +164,7 @@ export class Coupons {
   // —— 准备 ——
 
   private async warm(): Promise<void> {
-    // 券面上的字要用 Nunito：等字体下好再画一遍图集、卡片排一次版
+    // 券面上的字要用第二版的字体（Cinzel、Inter、Cormorant 斜体）：等字体下好再画一遍图集、卡片排一次版
     await fontsReady();
     drawAtlas(this.atlasCanvas);
     this.field.tickets.atlas.needsUpdate = true;

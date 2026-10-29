@@ -63,6 +63,19 @@ export interface TwinLook {
   color: string;
 }
 
+// 替身的样子 → 一个字符串（预设、种子、环、团队色）：字符串一样就是同一颗
+export function twinKey(look: TwinLook): string {
+  return [look.preset, look.seed, look.ring ? 1 : 0, look.color].join('|');
+}
+
+// 要加进星系的团队能不能直接用这颗替身（v2-ui）：会影响着色器、几何、远看样子的输入都要一样——预设、种子、环、团队色（远看的样子按它染）、
+// 建设中（替身都是建好的）、大气（替身都有）、摆放（替身上没有作品）。有一项对不上就不能用，照旧新建
+export function teamFitsTwin(team: Team, key: string): boolean {
+  const r = team.planet;
+  return team.status !== 'under-construction' && r.atmosphere === true && r.placements.length === 0
+    && twinKey({ preset: r.preset, seed: r.seed, ring: r.ring, color: team.color }) === key;
+}
+
 export class LaunchWarmer {
   private readonly world: World;
   private twin: { key: string; planet: PlanetObject; ready: Promise<void> } | null = null;
@@ -75,7 +88,7 @@ export class LaunchWarmer {
   }
 
   warm(look: TwinLook): Promise<void> {
-    const key = [look.preset, look.seed, look.ring ? 1 : 0, look.color].join('|');
+    const key = twinKey(look);
     if (this.twin?.key === key) return this.twin.ready;
     if (this.twin) this.spent.push(this.twin.planet);
     const planet = new PlanetObject({ seed: look.seed, preset: look.preset, ring: look.ring, atmosphere: true, placements: [] }, look.color, false);
@@ -97,6 +110,26 @@ export class LaunchWarmer {
     });
     this.twin = { key, planet, ready };
     return ready;
+  }
+
+  // Launch 时调（v2-ui）：替身已经编好、配方和要加的团队完全一样（teamFitsTwin），就把整颗交出去给 World.addPlanet 直接用——
+  // 着色器、遮罩贴图、几何都已经在 GPU 上了，Launch 那一刻不用再在主线程上新建一颗（原来这一下是 100–300 ms 的长帧）。
+  // 交出去之前把预热时的状态全部还原：父节点、位置、旋转、缩放、visible、layers（预热时藏着的部件 warm() 已经藏回去了）；
+  // 交出去以后从这里摘掉，销毁归 World 管，release() 不再碰它。对不上（样子改了还没编好、配方不一样）返回 null：照旧新建
+  take(team: Team): PlanetObject | null {
+    const twin = this.twin;
+    if (!twin || this.readyKey !== twin.key || !teamFitsTwin(team, twin.key)) return null;
+    this.twin = null;
+    this.readyKey = null;
+    const g = twin.planet.group;
+    g.removeFromParent();
+    g.position.set(0, 0, 0);
+    g.quaternion.identity();
+    g.scale.set(1, 1, 1);
+    g.visible = true;
+    g.layers.set(0);
+    g.updateMatrixWorld(true);
+    return twin.planet;
   }
 
   // 现在这个样子的替身已经备好（自查脚本、Launch 前看）
@@ -146,8 +179,9 @@ export interface LaunchState {
 }
 
 // 加星球、星球从云里冲出来、落定，然后回首页停在它上面（或者照常进这颗星球，BURST.after）。
-// 返回的 Promise 在收尾开始时 resolve。fx：开窗口时预编译好的特效；hold：等它 resolve 了镜头才开始动（窗口收起的动画）
-export async function riseIntoGalaxy(app: App, team: Team, fx: BurstFx | null, state: LaunchState, hold: Promise<unknown> = Promise.resolve()): Promise<void> {
+// 返回的 Promise 在收尾开始时 resolve。fx：开窗口时预编译好的特效；hold：等它 resolve 了镜头才开始动（窗口收起的动画）；
+// prebuilt：第三步预热好的那颗星球（LaunchWarmer.take），有就直接用，不再新建
+export async function riseIntoGalaxy(app: App, team: Team, fx: BurstFx | null, state: LaunchState, hold: Promise<unknown> = Promise.resolve(), prebuilt: PlanetObject | null = null): Promise<void> {
   const world = app.world;
   app.galaxyUi.setEnabled(false);
   // 先把镜头停在原地（接管）：首页加星球时看到镜头被接管，就不自己飞到新的取景
@@ -156,7 +190,7 @@ export async function riseIntoGalaxy(app: App, team: Team, fx: BurstFx | null, s
   rig.drive = () => {};
   const show = !reducedMotion() && fx !== null;
   // 有冲出来的演出时：先不成为「你的星球」，蓄力时才让（原来的你的星球那时滑开，把中间空出来，是演出的一部分）
-  app.addTeam(team, !show);
+  app.addTeam(team, !show, prebuilt ?? undefined);
   const entry = world.planets.get(team.id);
   const release = () => {
     rig.drive = null;
@@ -445,7 +479,7 @@ class BurstShow {
       this.aim.lerp(this.endAim, smooth(Math.min(1, Math.max(0, tb - B) / S)));
     }
     cam.lookAt(this.aim);
-    this.shake.apply(cam, dt, BURST.shake);
+    this.shake.apply(cam, dt, BURST.shake, cam.position.distanceTo(this.aim)); // 第二版：轻轻晃 + 冲出来时往前推一下（createPlanetBurst.ts 的 Shake）
     this.fx.tick(dt, cam);
     this.state.t = this.t;
   }

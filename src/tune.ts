@@ -7,6 +7,7 @@ import { DRESSING, GRASS } from './scenes/dressing';
 import { applyLights, LIGHTS } from './scenes/lights';
 import { applyLook, LOOK, TONE_MAPPINGS } from './scenes/look';
 import { addLookTune, LOOK_TUNE } from './scenes/postTune';
+import { addNightSkyTune, SKY_TUNE } from './scenes/skyTune';
 import { SHOTS } from './scenes/shots';
 import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
 import { addTransitionTune, TRANSITION_TUNE } from './scenes/transitionTune';
@@ -69,6 +70,7 @@ export function tuneJson(world?: World): string {
       museumLook: LOOK,
       museumLights: LIGHTS,
       look: LOOK_TUNE,
+      ...SKY_TUNE, // v2-sky：nightSky、transitionGlint
       water: { ...WATER, colors: WATER_COLORS, ice: WATER_ICE },
       stage: STAGE_TUNE,
       coupons: COUPONS,
@@ -165,6 +167,7 @@ export function installTune(world: World): TuneShell {
   sea.addBinding(ap, 'cloudSteps', { label: 'march steps', min: 4, max: 64, step: 1 });
   sea.addBinding(ap, 'farClouds', { label: 'far cumulus' });
   addLookTune(pane, world); // —— Look ——（scenes/postTune.ts：后处理、调色、接触阴影、日落光束、漫游镜头手感）
+  addNightSkyTune(pane, world); // —— Night sky ——（scenes/skyTune.ts，v2-sky：星星、银河、月亮、云海、星屑、颗粒、暗角、泛光、转场的金线）
 
   // —— Life ——
   const lf = pane.addFolder({ title: 'Life', expanded: false });

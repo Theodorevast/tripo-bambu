@@ -38,7 +38,7 @@ const NAME_IDEAS = ['Star Sprouts', 'Pebble Party', 'Moonlit Makers', 'Tiny Orbi
 declare global {
   interface Window {
     __create?: {
-      state(): { open: boolean; step: string; launching: boolean; launch: LaunchState; previewReady: boolean; twinReady: boolean };
+      state(): { open: boolean; step: string; launching: boolean; launch: LaunchState; previewReady: boolean; twinReady: boolean; usedTwin: boolean };
       preview(): PlanetPreview['stats'];
     };
   }
@@ -81,6 +81,7 @@ export class CreatePlanet implements CreatorLayer {
   private readonly preview: PlanetPreview;
   private readonly burst = new BurstFx(); // 星球冲出来时的云、光、冲击环、星星（createPlanetBurst.ts）
   private readonly warmer: LaunchWarmer; // 样子定下来以后，主画面的渲染器里先把新星球独有的着色器备好（Launch 时不卡）
+  private usedTwin = false; // 上一次 Launch 是不是直接用了预热好的替身（自查脚本看）
   private burstReady: Promise<void> | null = null;
   // 第一步
   private readonly nameInput = el('input', { className: 'cp-input', id: 'cp-name', type: 'text', maxLength: LIMITS.nameMax, autocomplete: 'off', spellcheck: false, placeholder: 'e.g. Star Sprouts' });
@@ -128,7 +129,7 @@ export class CreatePlanet implements CreatorLayer {
     app.root.append(this.node);
     this.syncCreateButton();
     window.__create = {
-      state: () => ({ open: this.open_, step: STEPS[this.step].id, launching: this.launching, launch: { ...this.launchState }, previewReady: this.preview.ready, twinReady: this.warmer.ready }),
+      state: () => ({ open: this.open_, step: STEPS[this.step].id, launching: this.launching, launch: { ...this.launchState }, previewReady: this.preview.ready, twinReady: this.warmer.ready, usedTwin: this.usedTwin }),
       preview: () => ({ ...this.preview.stats, gpu: [...this.preview.stats.gpu], twin: { ...this.warmer.stats } }),
     };
   }
@@ -497,7 +498,7 @@ export class CreatePlanet implements CreatorLayer {
     this.refreshCrew();
     this.say(`${name} added to your crew`);
     const li = this.crewList.lastElementChild;
-    if (li && !reducedMotion()) animate(li, [{ opacity: 0, transform: 'translateY(10px) scale(0.8) rotate(-3deg)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: curve('bounce') });
+    if (li && !reducedMotion()) animate(li, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 560, easing: curve('settle') });
     focusQuietly(this.friendInput);
   }
 
@@ -540,7 +541,7 @@ export class CreatePlanet implements CreatorLayer {
     if (ok) {
       this.setCopyLabel(true);
       this.say('Invite link copied');
-      if (!reducedMotion()) animate(this.copyButton, [{ transform: 'scale(1)' }, { transform: 'scale(1.12) rotate(-3deg)', offset: 0.35 }, { transform: 'scale(1)' }], { duration: 480, easing: EASE_OUT });
+      if (!reducedMotion()) animate(this.copyButton, [{ opacity: 0.55 }, { opacity: 1 }], { duration: 500, easing: EASE_OUT });
       void worldDelay(this.app.world, 2.2).then(() => { if (token === this.copyToken) this.setCopyLabel(false); });
     } else {
       this.say('Press Ctrl+C to copy the link');
@@ -627,7 +628,7 @@ export class CreatePlanet implements CreatorLayer {
     this.focusStep();
   }
 
-  // 换页：旧的一页往外滑走、新的从另一边带一点弹性滑进来（减弱动效时淡入淡出）。只动 transform / opacity
+  // 换页：旧的一页收起、新的从另一边轻轻滑进来（减弱动效时淡入淡出）。只动 transform / opacity
   private swapPages(from: HTMLElement, to: HTMLElement, forward: boolean): void {
     const reduce = reducedMotion();
     for (const a of from.getAnimations?.() ?? []) a.cancel();
@@ -636,7 +637,7 @@ export class CreatePlanet implements CreatorLayer {
     const dx = forward ? 1 : -1;
     animate(to, reduce
       ? [{ opacity: 0 }, { opacity: 1 }]
-      : [{ opacity: 0, transform: `translateX(${46 * dx}px) rotate(${1.2 * dx}deg)` }, { opacity: 1, transform: 'none' }],
+      : [{ opacity: 0, transform: `translateX(${28 * dx}px)` }, { opacity: 1, transform: 'none' }],
     { duration: reduce ? 180 : 560, easing: reduce ? 'ease-out' : curve('spring') });
     if (!reduce) {
       // 这一页的内容依次跟进来（标题、说明、各个字段）
@@ -703,19 +704,20 @@ export class CreatePlanet implements CreatorLayer {
   // —— 动效小工具 ——
   private bump(n: Element | null): void {
     if (!n || reducedMotion()) return;
-    animate(n, [{ transform: 'scale(1)' }, { transform: 'scale(1.16)', offset: 0.3 }, { transform: 'scale(1)' }], { duration: 420, easing: EASE_OUT, composite: 'add' });
+    animate(n, [{ transform: 'scale(1)' }, { transform: 'scale(1.05)', offset: 0.3 }, { transform: 'scale(1)' }], { duration: 480, easing: EASE_OUT, composite: 'add' });
   }
 
+  // 不让过时的提示：第二版不抖（不要抖动），输入框轻轻暗一下再亮回来（红色的描边、提示文字照旧）
   private shake(n: Element): void {
     if (reducedMotion()) return;
-    animate(n, [{ transform: 'none' }, { transform: 'translateX(-7px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(2px)' }, { transform: 'none' }], { duration: 380, easing: 'ease-out' });
+    animate(n, [{ opacity: 1 }, { opacity: 0.45, offset: 0.35 }, { opacity: 1 }], { duration: 520, easing: 'ease-in-out' });
   }
 
   private say(text: string): void {
     this.live.textContent = text;
   }
 
-  // 进场：背景淡入，纸卡从下面带一点倾斜弹上来，步骤贴纸、预览依次跟上
+  // 进场：背景淡入，面板从下面轻轻浮上来，月相步骤、预览依次跟上（第二版：不歪、不弹）
   private enter(): Array<Animation | null> {
     const list: Array<Animation | null> = [animate(this.backdrop, [{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' })];
     if (reducedMotion()) {
@@ -723,9 +725,9 @@ export class CreatePlanet implements CreatorLayer {
       return list;
     }
     list.push(
-      animate(this.card, [{ opacity: 0, transform: 'translateY(42px) scale(0.92) rotate(-1.5deg)' }, { opacity: 1, transform: 'none' }], { duration: 640, easing: curve('spring') }),
-      animate(this.stage, [{ opacity: 0, transform: 'scale(0.85) rotate(4deg)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: 160, easing: curve('spring'), fill: 'backwards' }),
-      ...this.stepButtons.map((b, i) => animate(b, [{ opacity: 0, transform: 'translateY(-10px) scale(0.8)' }, { opacity: 1, transform: 'none' }], { duration: 480, delay: 220 + i * 60, easing: curve('bounce'), fill: 'backwards' })),
+      animate(this.card, [{ opacity: 0, transform: 'translateY(24px)' }, { opacity: 1, transform: 'none' }], { duration: 700, easing: curve('spring') }),
+      animate(this.stage, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 720, delay: 160, easing: curve('spring'), fill: 'backwards' }),
+      ...this.stepButtons.map((b, i) => animate(b, [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 560, delay: 220 + i * 60, easing: curve('bounce'), fill: 'backwards' })),
     );
     return list;
   }
@@ -780,8 +782,11 @@ export class CreatePlanet implements CreatorLayer {
     // （WebGL2 上预览的链接会和主画面抢 GPU 进程）
     const collapsed = worldDelay(this.app.world, reducedMotion() ? 0 : 0.36);
     await Promise.race([this.warmer.warm(this.look()), new Promise((r) => setTimeout(r, 1500))]);
+    // 替身编好了、配方和这个团队完全一样：整颗交给 World.addPlanet 直接用（Launch 那一刻不用再新建一颗）；对不上就照旧新建（v2-ui）
+    const prebuilt = this.app.world.planets.has(created.id) ? null : this.warmer.take(created);
+    this.usedTwin = prebuilt !== null;
     const hold = Promise.all([collapsed, this.preview.settled()]);
-    const rise = riseIntoGalaxy(this.app, created, reducedMotion() ? null : this.burst, this.launchState, hold);
+    const rise = riseIntoGalaxy(this.app, created, reducedMotion() ? null : this.burst, this.launchState, hold, prebuilt);
     this.syncCreateButton();
     await collapse;
     this.node.hidden = true;
@@ -806,12 +811,12 @@ export class CreatePlanet implements CreatorLayer {
     const fall = Math.max(240, innerHeight - r.top);
     return finished([
       animate(this.backdrop, [{ opacity: 1 }, { opacity: 0 }], { duration: 420, easing: 'ease-in', fill: 'forwards' }),
-      animate(this.card, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(30px) scale(0.9) rotate(-1.5deg)' }], { duration: 340, easing: EASE_IN, fill: 'forwards' }),
+      animate(this.card, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(22px) scale(0.97)' }], { duration: 340, easing: EASE_IN, fill: 'forwards' }),
+      // 舷窗慢慢沉下去、变小、淡掉（第二版：不先往上蹦、不转）
       animate(porthole, [
         { transform: 'none', opacity: 1 },
-        { transform: 'translateY(-18px) scale(1.04)', opacity: 1, offset: 0.25 },
-        { transform: `translateY(${fall}px) scale(0.45) rotate(14deg)`, opacity: 0 },
-      ], { duration: 760, easing: 'cubic-bezier(0.55, 0, 0.75, 0.25)', fill: 'forwards' }),
+        { transform: `translateY(${Math.round(fall * 0.7)}px) scale(0.5)`, opacity: 0 },
+      ], { duration: 760, easing: 'cubic-bezier(0.5, 0, 0.7, 0.4)', fill: 'forwards' }),
     ]);
   }
 }

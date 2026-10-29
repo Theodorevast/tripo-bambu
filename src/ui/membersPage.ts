@@ -15,8 +15,9 @@ interface Parts {
   cards: HTMLElement[];
 }
 
-// Members：盖在星球上的一卷「成员卷轴」（3D 世界照常在后面跑，这一页不暂停它）。
-// 打开：卷轴从上往下展开，成员卡一张张弹进来。卡片：鼠标在上面移动时朝鼠标倾斜、抬起；
+// Members：盖在星球上的一卷「成员卷轴」（3D 世界照常在后面跑，这一页不暂停它）。第二版是一卷星图：两根细金杆中间一块深色面板，
+// 成员卡是 Ivory 的画廊卡片（theme-v2.css）。动效慢、柔、不回弹：
+// 打开：卷轴从上往下展开，成员卡一张张浮上来。卡片：鼠标在上面移动时朝鼠标倾斜、抬起；
 // 点一下（或回车、空格）翻到背面——介绍、作品数、作品小图（点小图进 Museum 的查看器，从小图那里放大出来）。
 // 关掉：卡片先收，卷轴往上卷回去，放完才藏起来（脚本等的 .sheet.members 的 hidden 也是这时才变）。
 // 减弱动效时只淡入淡出，翻面改成两面交叉淡入淡出。Esc 关；打开时焦点进面板，关掉时还给原来的按钮
@@ -84,17 +85,16 @@ export class MembersPage implements Sheet {
     const h = p.panel.offsetHeight || 600;
     const unroll: KeyframeAnimationOptions = { duration: 640, delay: 90, easing: curve('settle'), fill: 'backwards' };
     list.push(
-      animate(p.top, [{ opacity: 0, transform: 'translateY(-46px) scaleX(0.7)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: curve('bounce'), fill: 'backwards' }),
+      animate(p.top, [{ opacity: 0, transform: 'scaleX(0.4)' }, { opacity: 1, transform: 'none' }], { duration: 600, easing: curve('settle'), fill: 'backwards' }),
       animate(p.panel, [{ transform: 'scaleY(0.03)' }, { transform: 'none' }], unroll),
       animate(p.bottom, [{ transform: `translateY(${-h}px)` }, { transform: 'none' }], unroll),
       animate(p.head, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: 300, easing: EASE_OUT, fill: 'backwards' }),
     );
     p.cards.forEach((c, i) => {
-      const tilt = i % 2 ? 5 : -5;
       list.push(animate(c, [
-        { opacity: 0, transform: `translateY(30px) scale(0.82) rotate(${tilt}deg)` },
+        { opacity: 0, transform: 'translateY(18px)' },
         { opacity: 1, transform: 'none' },
-      ], { duration: 640, delay: 380 + i * 60, easing: curve('spring'), fill: 'backwards' }));
+      ], { duration: 700, delay: 380 + i * 60, easing: curve('spring'), fill: 'backwards' }));
     });
     return list;
   }
@@ -108,10 +108,10 @@ export class MembersPage implements Sheet {
     const roll: KeyframeAnimationOptions = { duration: 300, delay: 90, easing: EASE_IN, fill: 'forwards' };
     return [
       fadeAll,
-      ...p.cards.map((c) => animate(c, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.9) translateY(-10px)' }], { duration: 150, easing: EASE_IN, fill: 'forwards' })),
+      ...p.cards.map((c) => animate(c, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-6px)' }], { duration: 160, easing: EASE_IN, fill: 'forwards' })),
       animate(p.panel, [{ transform: 'none' }, { transform: 'scaleY(0.03)' }], roll),
       animate(p.bottom, [{ transform: 'none' }, { transform: `translateY(${-h}px)` }], roll),
-      animate(p.top, [{ transform: 'none' }, { transform: 'translateY(-30px) scaleX(0.8)' }], { duration: 220, delay: 330, easing: EASE_IN, fill: 'forwards' }),
+      animate(p.top, [{ transform: 'none' }, { transform: 'scaleX(0.5)' }], { duration: 220, delay: 330, easing: EASE_IN, fill: 'forwards' }),
     ];
   }
 
@@ -163,8 +163,7 @@ export class MembersPage implements Sheet {
       back.inert = !on;
       hit.setAttribute('aria-expanded', String(on));
       focusQuietly(on ? flipBack : hit);
-      // 翻面时整张卡轻轻一压一弹（叠加在倾斜上）；减弱动效时 CSS 只做两面交叉淡入淡出
-      if (!reducedMotion()) animate(layer, [{ transform: 'none' }, { transform: 'scale(0.95)', offset: 0.25 }, { transform: 'scale(1.03)', offset: 0.6 }, { transform: 'none' }], { duration: 560, easing: EASE_OUT, composite: 'add' });
+      // 翻面只是 CSS 的转过去（第二版不再一压一弹）；减弱动效时 CSS 只做两面交叉淡入淡出
     };
     hit.addEventListener('click', () => flip(true));
     flipBack.addEventListener('click', () => flip(false));
