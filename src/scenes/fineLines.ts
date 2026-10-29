@@ -37,6 +37,9 @@ export interface FineLinesOptions {
   twinkle?: number; // 小星闪烁的幅度 0..1
   twinkleSpeed?: number; // 闪烁的速度（弧度 / 秒）
   name?: string;
+  // 四边形怎么排：默认先放所有的线、再放所有的小星；group：每组 segments 条线 + stars 颗小星连着放
+  // （星座线一条线带两头两颗星：只画前 n 组时用 setDrawGroups 设绘制范围，后面没用到的组不画）
+  group?: { segments: number; stars: number };
 }
 
 // 一批细线和小星：segments、stars 的数量建好以后不变（容量），位置、颜色可以改（setSegment / setStar 再 commit）
@@ -49,10 +52,16 @@ export class FineLines {
   private readonly extra: THREE.BufferAttribute;
   readonly segments: number;
   readonly stars: number;
+  private readonly grouped: boolean;
+  private readonly gs: number; // 每组几条线（不分组时 = 全部）
+  private readonly gt: number; // 每组几颗星
 
   constructor(segments: number, stars: number, opts: FineLinesOptions = {}) {
     this.segments = segments;
     this.stars = stars;
+    this.grouped = !!opts.group;
+    this.gs = opts.group ? opts.group.segments : segments;
+    this.gt = opts.group ? opts.group.stars : stars;
     const nv = (segments + stars) * 4;
     const pos = new Float32Array(nv * 3);
     const other = new Float32Array(nv * 3);
@@ -62,15 +71,18 @@ export class FineLines {
     const extra = new Float32Array(nv * 2);
     const index: number[] = [];
     for (let s = 0; s < segments; s++) {
-      const v = s * 4;
+      const v = this.segQuad(s) * 4;
       // 角：x = 往哪一边撑（±1），y = 这一端是起点（0）还是终点（1）
       corner.set([-1, 0, 1, 0, -1, 1, 1, 1], v * 2);
-      index.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
     }
     for (let k = 0; k < stars; k++) {
-      const v = (segments + k) * 4;
+      const v = this.starQuad(k) * 4;
       corner.set([-1, -1, 1, -1, -1, 1, 1, 1], v * 2);
       kind.fill(1, v, v + 4);
+    }
+    // 索引按四边形的顺序（分组时一组接一组）：绘制范围只画前面几组
+    for (let q = 0; q < segments + stars; q++) {
+      const v = q * 4;
       index.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
     }
     const g = new THREE.BufferGeometry();
@@ -141,32 +153,91 @@ export class FineLines {
     this.mesh.frustumCulled = false;
   }
 
+  // 第 i 条线、第 i 颗星是第几个四边形
+  private segQuad(i: number): number {
+    return this.grouped ? Math.floor(i / this.gs) * (this.gs + this.gt) + (i % this.gs) : i;
+  }
+
+  private starQuad(i: number): number {
+    return this.grouped ? Math.floor(i / this.gt) * (this.gs + this.gt) + this.gs + (i % this.gt) : this.segments + i;
+  }
+
   setSegment(i: number, s: FineSegment): void {
-    const v = i * 4;
-    for (let k = 0; k < 4; k++) {
-      const end = k < 2 ? s.a : s.b;
-      const far = k < 2 ? s.b : s.a;
-      this.pos.setXYZ(v + k, end.x, end.y, end.z);
-      this.other.setXYZ(v + k, far.x, far.y, far.z);
-      this.tint.setXYZW(v + k, s.color.r, s.color.g, s.color.b, s.alpha);
-      this.extra.setXY(v + k, s.width, 0);
-    }
+    this.setSegmentRaw(i, s.a, s.b, s.width, s.color, s.alpha);
   }
 
   setStar(i: number, s: FineStar): void {
-    const v = (this.segments + i) * 4;
+    this.setStarRaw(i, s.at, s.size, s.color, s.alpha, s.phase);
+  }
+
+  // 和 setSegment / setStar 一样，参数直接传（不用拼对象：每帧都要调的地方不分配内存）。
+  // 直接写类型数组（不一个顶点一个顶点地调 setXYZ：没内联的调用要把浮点参数装箱，热路径里会产生垃圾）
+  setSegmentRaw(i: number, a: THREE.Vector3, b: THREE.Vector3, width: number, color: THREE.Color, alpha: number): void {
+    const v = this.segQuad(i) * 4;
+    const P = this.pos.array as Float32Array;
+    const O = this.other.array as Float32Array;
+    const T = this.tint.array as Float32Array;
+    const E = this.extra.array as Float32Array;
     for (let k = 0; k < 4; k++) {
-      this.pos.setXYZ(v + k, s.at.x, s.at.y, s.at.z);
-      this.other.setXYZ(v + k, s.at.x, s.at.y, s.at.z);
-      this.tint.setXYZW(v + k, s.color.r, s.color.g, s.color.b, s.alpha);
-      this.extra.setXY(v + k, s.size, s.phase);
+      const end = k < 2 ? a : b;
+      const far = k < 2 ? b : a;
+      const j3 = (v + k) * 3;
+      const j4 = (v + k) * 4;
+      const j2 = (v + k) * 2;
+      P[j3] = end.x;
+      P[j3 + 1] = end.y;
+      P[j3 + 2] = end.z;
+      O[j3] = far.x;
+      O[j3 + 1] = far.y;
+      O[j3 + 2] = far.z;
+      T[j4] = color.r;
+      T[j4 + 1] = color.g;
+      T[j4 + 2] = color.b;
+      T[j4 + 3] = alpha;
+      E[j2] = width;
+      E[j2 + 1] = 0;
+    }
+  }
+
+  setStarRaw(i: number, at: THREE.Vector3, size: number, color: THREE.Color, alpha: number, phase: number): void {
+    const v = this.starQuad(i) * 4;
+    const P = this.pos.array as Float32Array;
+    const O = this.other.array as Float32Array;
+    const T = this.tint.array as Float32Array;
+    const E = this.extra.array as Float32Array;
+    for (let k = 0; k < 4; k++) {
+      const j3 = (v + k) * 3;
+      const j4 = (v + k) * 4;
+      const j2 = (v + k) * 2;
+      P[j3] = at.x;
+      P[j3 + 1] = at.y;
+      P[j3 + 2] = at.z;
+      O[j3] = at.x;
+      O[j3 + 1] = at.y;
+      O[j3 + 2] = at.z;
+      T[j4] = color.r;
+      T[j4 + 1] = color.g;
+      T[j4 + 2] = color.b;
+      T[j4 + 3] = alpha;
+      E[j2] = size;
+      E[j2 + 1] = phase;
     }
   }
 
   // 只改透明度（悬停变亮、一笔一笔亮起来）：i 是线的序号；star = true 时是小星的序号
   setAlpha(i: number, alpha: number, star = false): void {
-    const v = ((star ? this.segments : 0) + i) * 4;
-    for (let k = 0; k < 4; k++) this.tint.setW(v + k, alpha);
+    const v = (star ? this.starQuad(i) : this.segQuad(i)) * 4;
+    const T = this.tint.array as Float32Array;
+    for (let k = 0; k < 4; k++) T[(v + k) * 4 + 3] = alpha;
+  }
+
+  // 只画前 n 组（分组的排法；不分组时 n 组就是全部）：几何、缓冲都不换，只改绘制范围
+  setDrawGroups(n: number): void {
+    this.mesh.geometry.setDrawRange(0, Math.max(0, n) * (this.gs + this.gt) * 6);
+  }
+
+  get drawCount(): number {
+    return this.mesh.geometry.drawRange.count;
   }
 
   // 用不上的线、小星：透明度 0（四边形还在，不画出东西）
@@ -175,6 +246,8 @@ export class FineLines {
     for (let i = star; i < this.stars; i++) this.setAlpha(i, 0, true);
   }
 
+  // 改好的数据传上去（整份传：几十 KB 以内，只在真的变了的那一帧传）。
+  // 不用局部上传的范围：three 传完以后把 updateRanges 清成长度 0，下一次再 push 就要重新分配数组，热路径里会分配内存
   commit(geometry = true): void {
     if (geometry) {
       this.pos.needsUpdate = true;
@@ -182,6 +255,11 @@ export class FineLines {
       this.extra.needsUpdate = true;
     }
     this.tint.needsUpdate = true;
+  }
+
+  // 自查：缓冲是不是还是原来那几份（换版式时不重新分配）
+  get buffers(): readonly ArrayLike<number>[] {
+    return [this.pos.array, this.other.array, this.extra.array, this.tint.array];
   }
 
   dispose(): void {
