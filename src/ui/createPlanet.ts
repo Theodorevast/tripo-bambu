@@ -775,6 +775,8 @@ export class CreatePlanet implements CreatorLayer {
     removeEventListener('keydown', this.onKey);
     this.preview.freeze();
     await (this.burstReady ??= this.burst.prepare(this.app.world).catch(() => {}));
+    // 窗口开始收起：预览马上停画（舷窗里留着最后一帧，跟着往下沉、淡掉），不和主画面的 Launch 抢 GPU（v2-ui）
+    this.preview.stop();
     const collapse = this.collapse();
     // 替身一般进第三步时就备好了；还在编（很快就点了 Launch）就先等它编完（最多 1.5 秒，窗口照常收起），
     // 真的星球再加进来：两边的着色器不挤在一起编。镜头等窗口收得差不多、预览手上正在编的也编完了才起飞
