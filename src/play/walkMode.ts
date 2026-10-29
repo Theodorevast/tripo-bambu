@@ -9,7 +9,7 @@ import { authorLine } from '../ui/workCard';
 import { CharacterView, loadCharacter } from './character';
 import { FollowCamera } from './followCamera';
 import { CHAR_RADIUS, FOLLOW, NEAR_DISTANCE, WADE_DEPTH, WALK } from './params';
-import { blendPose, easeInOutCubic, retangent, slerpDir, walkGround } from './sphere';
+import { blendPose, easeInOutCubic, retangent, slerpDir, transitionAdvance, walkGround } from './sphere';
 import { setObstacle, Walker, type Obstacle } from './walker';
 import './walk.css';
 
@@ -307,7 +307,8 @@ export class WalkMode {
       _pos.copy(this.cam.position);
       _quat.copy(this.cam.quaternion);
     } else {
-      this.t += dt;
+      // 过渡每帧最多推进 TRANSITION_MAX_STEP（sphere.ts）：掉一帧时镜头也不会一下子转过去（第二版 [v2-world] 加的）
+      this.t = transitionAdvance(this.t, dt);
       const k = easeInOutCubic(Math.min(1, this.t / FOLLOW.seconds));
       if (this.phase === 'enter') blendPose(this.fromPos, this.fromQuat, this.cam.position, this.cam.quaternion, k, _pos, _quat);
       else blendPose(this.fromPos, this.fromQuat, this.orbitPos, this.orbitQuat, k, _pos, _quat);

@@ -19,6 +19,17 @@ export function damp(rate: number, dt: number): number {
 
 export const easeInOutCubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
+// 进入、退出漫游时的镜头过渡：每帧最多往前推进 TRANSITION_MAX_STEP 秒（游戏里常见的做法：偶尔掉一帧时镜头不会一下子跳过去）。
+// 过渡 FOLLOW.seconds = 1.2 秒、按 easeInOutCubic（最陡处斜率 3）走：一帧最多转「两头的朝向差 × 3 / 1.2 × 步长」。
+// 进入漫游时两头差约 74°（check-walk 实测 60 帧时最多 3.08°/帧）：步长 1/40 秒最多 4.6°，朝向差到 96° 都在 6° 以内
+// （check-walk 的上限是 6°；1/30 秒时实测的过渡会到 6.2°，所以取 1/40）。
+// 只管过渡这一段：走路、跟随镜头照旧按真实的 dt
+export const TRANSITION_MAX_STEP = 1 / 40;
+
+export function transitionAdvance(t: number, dt: number): number {
+  return t + Math.min(Math.max(0, dt), TRANSITION_MAX_STEP);
+}
+
 // 去掉 v 沿单位法线 n 的分量，只留切平面里的部分（写回 v）
 export function flatten(v: THREE.Vector3, n: THREE.Vector3): THREE.Vector3 {
   return v.addScaledVector(n, -v.dot(n));
