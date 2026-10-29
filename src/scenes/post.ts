@@ -542,7 +542,7 @@ export class MainPost {
   // 日落光束：太阳在画面上的位置和强度。强度 = 预设（白天 / 日落按傍晚系数插值）× 太阳离画面多近
   private aimRays(world: World): void {
     const evening = THREE.MathUtils.clamp(world.light.evening / 0.6, 0, 1); // 0.6 = 日落预设的傍晚系数（world.ts 的 EVENING_AT_SUNSET）
-    const base = THREE.MathUtils.lerp(RAYS.day, RAYS.sunset, evening);
+    const base = THREE.MathUtils.lerp(RAYS.day, RAYS.sunset, evening) * (1 - world.atmosphere.night); // 夜里没有日落光束（v2-sky）
     let k = 0;
     if (base > 0.001) {
       _sun.copy(world.light.sunDir).multiplyScalar(1000).add(this.camera.position);

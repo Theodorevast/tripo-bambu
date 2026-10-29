@@ -3,6 +3,7 @@ import { ModelLibrary, setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { createAtmosphere, seaCeiling, targetUp, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
 import { createLife, type Life, type LifePlanet } from '../nature/life';
+import { NIGHT_SKY } from '../nature/nightSky';
 import { setGalaxyHaze, updatePlanetLook } from '../nature/planetLook';
 import { decorInstances } from '../planet/decor';
 import { focusDetail, LOD_LOW, prewarmTerrain } from '../planet/generate';
@@ -111,7 +112,7 @@ export class World {
   focused: PlanetEntry | null = null;
   hovered: PlanetEntry | null = null;
   paused = false; // Museum 打开时主画面被盖住，停止渲染
-  skyPreset: AtmospherePreset = 'day';
+  skyPreset: AtmospherePreset = 'blue'; // 第二版默认蓝调时刻（v2-sky；白天、日落、月夜在 ?tune → Sky & light 里切）
   // warmUp() 做完时 resolve：阴影贴图这时才有，要连投影那一遍一起预编译的东西（展台）等它
   readonly warm: Promise<void>;
   private warmed: () => void = () => {};
@@ -821,7 +822,8 @@ export class World {
     light.sunDir.copy(sun.position).sub(sun.target.position).normalize();
     light.sunColor.copy(sun.color);
     light.sunIntensity = sun.intensity;
-    light.evening = WEATHER.evening ?? eveningFor(this.atmosphere.params.sunElevation);
+    // 夜里的预设（v2-sky）：傍晚系数至少是 NIGHT_SKY.fireflies（有萤火虫、草的背光偏紫）
+    light.evening = WEATHER.evening ?? Math.max(eveningFor(this.atmosphere.params.sunElevation), this.atmosphere.night * NIGHT_SKY.fireflies);
     updatePlanetLook(dt, light.sunDir, camera, this.focused?.planet.look ?? null, this.atmosphere); // planet：远看的大气、云层跟着太阳转，镜头近了、看别的星球时藏起来
     if (this.life.object.visible) {
       this.life.setWalker(this.walkerOn ? this.walkerPos : null, this.walkerVel, this.walkerGrounded);
