@@ -1,6 +1,6 @@
 // 首页「云里探头的翠宝」（H2）的样张：1440×900 和 390×844 各一组——云面鼓起来、探出来、停着（挥手那一下）。
 // node scripts/shot-cloud.mjs [输出目录]（默认 .superpowers/sdd/2026-10-27-community-planets/team/home-media/cloud）。
-// WEBGL2=1：藏起 navigator.gpu 走 WebGL2；HEADED=1：有界面的 Chrome；TURN=90：先把镜头转 90° 再让它冒出来。
+// WEBGL2=1：藏起 navigator.gpu 走 WebGL2；HEADED=1：有界面的 Chrome；TURN=90：先把镜头转 90° 再让它冒出来；MODE=guide：悬停时带路（指针停在星球上）。
 // 用 window.__home.peekCloud() 叫它出来，时间停住（__trans.timeScale(0)）逐张往前走，每张的姿势确定
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -54,6 +54,28 @@ try {
       await page.waitForTimeout(900);
     }
     await page.waitForTimeout(600);
+    if (process.env.MODE === 'guide') {
+      // 悬停时带路：指针停在几颗星球上（你的星球、外圈的一颗），翠宝从旁边冒出来指着它
+      await page.evaluate(async () => { (await import('/src/fun/cloudPeek.ts')).CLOUD_PEEK.enabled = false; });
+      const ids = await page.evaluate(() => {
+        const s = window.__home.state();
+        const shown = s.tags.filter((t) => t.shown && !t.you).map((t) => t.id);
+        return [s.you, shown[shown.length - 1]].filter(Boolean);
+      });
+      await page.evaluate(() => window.__trans.timeScale(0));
+      for (const id of ids) {
+        const pos = await page.evaluate((i) => window.__app.planetScreenPos(i), id);
+        await page.mouse.move(pos.x, pos.y);
+        await advance(page, 2.2); // 停 0.6 秒 → 右下角那只缩走 → 鼓起来、探出来、指着、点头
+        await page.screenshot({ path: join(out, `guide-${w}-${id}-${tag}.png`) });
+        console.log(w, id, JSON.stringify(await page.evaluate(() => window.__home.state().cloud)));
+        await page.mouse.move(w * 0.5, 12);
+        await advance(page, 1.6); // 沉回去、合上
+      }
+      await page.evaluate(() => window.__trans.timeScale(1));
+      await ctx.close();
+      continue;
+    }
     const ok = await page.evaluate(() => window.__home.peekCloud());
     if (!ok) throw new Error(`${w}×${h}: 云里的翠宝冒不出来（peekCloud 返回 false）`);
     await page.evaluate(() => window.__trans.timeScale(0));

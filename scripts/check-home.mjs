@@ -42,6 +42,24 @@ async function open({ reduced = false } = {}) {
 }
 
 const homeState = (page) => page.evaluate(() => window.__home.state());
+// 云里的翠宝露出来的那一块（rect）压到了什么：显示着的名牌、标题卡片、星球（画面上的圆）
+const cloudClash = (page, rect) => page.evaluate((r) => {
+  if (!r) return ['没有露出来'];
+  const out = [];
+  const hit = (b) => b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top;
+  for (const t of document.querySelectorAll('.planet-tags.is-shown .planet-tag:not(.is-off)')) if (hit(t.getBoundingClientRect())) out.push(`名牌 ${t.querySelector('.pt-name')?.textContent}`);
+  const title = document.querySelector('.tb-title')?.getBoundingClientRect();
+  if (title && hit(title)) out.push('标题卡片');
+  const w = window.__world;
+  const d = { x: 0, y: 0, r: 0 };
+  for (const [id, e] of w.planets) {
+    if (!w.planetOnScreen(e, d)) continue;
+    const cx = Math.min(Math.max(d.x, r.left), r.right);
+    const cy = Math.min(Math.max(d.y, r.top), r.bottom);
+    if (Math.hypot(d.x - cx, d.y - cy) < d.r) out.push(`星球 ${id}`);
+  }
+  return out;
+}, rect);
 const tribooAt = async (page) => {
   await until(page, () => !!window.__home.state().triboo?.at, null, 15000);
   return (await homeState(page)).triboo?.at ?? null;
@@ -263,23 +281,7 @@ try {
     const up = await until(page, () => window.__home.state().cloud?.phase === 'stay' && !!window.__home.state().cloud.at, null, 4000);
     const peekMax = await page.evaluate(() => { const r = window.__rec; window.__rec = null; return Math.max(...r.frames.slice(1)); });
     const c1 = (await homeState(page)).cloud;
-    const clash = await page.evaluate((rect) => {
-      if (!rect) return ['没有露出来'];
-      const out = [];
-      const hit = (b) => b.left < rect.right && b.right > rect.left && b.top < rect.bottom && b.bottom > rect.top;
-      for (const t of document.querySelectorAll('.planet-tags.is-shown .planet-tag:not(.is-off)')) if (hit(t.getBoundingClientRect())) out.push(`名牌 ${t.querySelector('.pt-name')?.textContent}`);
-      const title = document.querySelector('.tb-title')?.getBoundingClientRect();
-      if (title && hit(title)) out.push('标题卡片');
-      const w = window.__world;
-      const d = { x: 0, y: 0, r: 0 };
-      for (const [id, e] of w.planets) {
-        if (!w.planetOnScreen(e, d)) continue;
-        const cx = Math.min(Math.max(d.x, rect.left), rect.right);
-        const cy = Math.min(Math.max(d.y, rect.top), rect.bottom);
-        if (Math.hypot(d.x - cx, d.y - cy) < d.r) out.push(`星球 ${id}`);
-      }
-      return out;
-    }, c1?.rect ?? null);
+    const clash = await cloudClash(page, c1?.rect ?? null);
     const rect = c1?.rect ? `(${Math.round(c1.rect.left)}, ${Math.round(c1.rect.top)})–(${Math.round(c1.rect.right)}, ${Math.round(c1.rect.bottom)})` : '没有';
     check('云里的翠宝：叫它出来 → 云面鼓起来、探出身子停着；露出来的那一块不压名牌、星球、标题卡片', peeked && up && clash.length === 0, `${rect}${clash.length ? `；压到 ${clash.join('、')}` : ''}`);
     // 悬停：手形光标（星球不接这一下）
@@ -331,6 +333,84 @@ try {
     const back = await tribooAt(page);
     check('云里那只沉下去以后，右下角那只探回原来的位置', !!back && back.x > W * 0.8 && back.y > H * 0.55, back ? `(${Math.round(back.x)}, ${Math.round(back.y)})` : '没回来');
     await page.evaluate(async (was) => { (await import('/src/fun/couponsMath.ts')).COUPONS.cooldown = was; }, cooldown);
+  }
+
+  // —— 5c. 悬停时带路：指针在一颗星球上停 0.6 秒 → 云里的翠宝从它旁边冒出来指着它（不压这颗星球、它的名牌，也不压别的）；
+  //        指针移开就沉回去；带路的时候点星球照样进星球（带路的那只不接点击） ——
+  {
+    await until(page, () => !window.__home.state().card.open && !window.__home.state().cloud.active, null, 8000);
+    await page.mouse.move(W * 0.5, 12);
+    await page.waitForTimeout(400);
+    const pos = await page.evaluate((id) => window.__app.planetScreenPos(id), you.id);
+    const guideUp = (id) => {
+      const c = window.__home.state().cloud;
+      return c.mode === 'guide' && c.guideFor === id && c.phase === 'stay' && !!c.rect;
+    };
+    // 场上同一时间只有一只翠宝：带路的那只露着的时候右下角那只不露（同 5a，每帧记）
+    await page.evaluate(() => {
+      const o = (window.__both = { both: 0, cloud: 0, on: true });
+      const tick = () => {
+        const s = window.__home.state();
+        if (s.cloud?.active && s.cloud.phase !== 'wait') {
+          o.cloud++;
+          if (s.triboo?.shown) o.both++;
+        }
+        if (o.on) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const t0 = Date.now();
+    await page.mouse.move(pos.x, pos.y);
+    const early = await page.evaluate(() => window.__home.state().cloud.active);
+    const guided = await until(page, guideUp, you.id, 5000);
+    const took = (Date.now() - t0) / 1000;
+    const g = (await homeState(page)).cloud;
+    const clash = await cloudClash(page, g?.rect ?? null);
+    // 在它旁边：露出来的那一块离这颗星球的圆不超过它自己高度的两倍（手机上你的星球两边被它的宽名牌占着，只能站得远一点）
+    const near = await page.evaluate(([id, r]) => {
+      const w = window.__world;
+      const d = { x: 0, y: 0, r: 0 };
+      if (!r || !w.planetOnScreen(w.planets.get(id), d)) return null;
+      const cx = Math.min(Math.max(d.x, r.left), r.right);
+      const cy = Math.min(Math.max(d.y, r.top), r.bottom);
+      return { gap: Math.round(Math.hypot(d.x - cx, d.y - cy) - d.r), side: (r.left + r.right) / 2 < d.x ? 'left' : 'right', h: Math.round(r.bottom - r.top) };
+    }, [you.id, g?.rect ?? null]);
+    check('悬停带路：指针在星球上停 0.6 秒 → 翠宝从它旁边的云里冒出来指着它，不压名牌、星球',
+      !early && guided && clash.length === 0 && !!near && near.gap < near.h * 2,
+      `${took.toFixed(1)} 秒露出来，${near ? `在${near.side === 'left' ? '左' : '右'}边，离星球 ${near.gap} px（它自己高 ${near.h} px）` : '没露出来'}${clash.length ? `；压到 ${clash.join('、')}` : ''}`);
+    await page.mouse.move(W * 0.5, 12);
+    const gone = await until(page, () => !window.__home.state().cloud.active, null, 3000);
+    const both = await page.evaluate(() => {
+      window.__both.on = false;
+      return window.__both;
+    });
+    check('悬停带路：指针移开就沉回云里；带路的时候右下角那只缩在画面外', gone && both.cloud > 0 && both.both === 0, `带路的那只露着 ${both.cloud} 帧，其中右下角那只也露着 ${both.both} 帧`);
+    // 再指一次（前 3 次一定带），带路的时候点星球：照样进星球
+    await page.waitForTimeout(300);
+    await page.mouse.move(pos.x, pos.y);
+    const guided2 = await until(page, guideUp, you.id, 5000);
+    await page.mouse.click(pos.x, pos.y);
+    const entered = await until(page, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), you.id, 30000);
+    const after = (await homeState(page)).cloud;
+    check('悬停带路：带路的时候点星球照样进星球（带路的那只不接点击），进了星球它就不在了', guided2 && entered && !after.active, `guided ${guided2}，entered ${entered}`);
+    if (entered) {
+      await page.locator('.topbar button', { hasText: 'Galaxy' }).click();
+      await until(page, () => window.__app.routeIdle() && (location.hash === '#/' || location.hash === ''), null, 30000);
+      await page.waitForTimeout(800);
+    }
+    // 定时那只露着的时候指到另一颗星球上：它先沉下去，再从那颗星球旁边冒出来（那颗 30 秒内没带过路）
+    const other = await page.evaluate(() => window.__home.state().tags.find((t) => t.shown && !t.you)?.id ?? null);
+    await page.mouse.move(W * 0.5, 12);
+    await until(page, () => !window.__home.state().cloud.active && !window.__home.state().card.open, null, 5000);
+    const peeked = await page.evaluate(() => window.__home.peekCloud());
+    const up = await until(page, () => window.__home.state().cloud?.phase === 'stay' && window.__home.state().cloud.mode === 'timer', null, 4000);
+    const op = other ? await page.evaluate((id) => window.__app.planetScreenPos(id), other) : null;
+    if (op) await page.mouse.move(op.x, op.y);
+    const sank = await until(page, () => ['sink', 'close'].includes(window.__home.state().cloud.phase), null, 1500);
+    const moved = await until(page, guideUp, other, 5000);
+    check('定时那只露着的时候指到星球上：它先沉下去，再从那颗星球旁边冒出来', !!other && peeked && up && sank && moved, other ?? '没有显示着的别的名牌');
+    await page.mouse.move(W * 0.5, 12);
+    await until(page, () => !window.__home.state().cloud.active, null, 3000);
   }
 
   // —— 5b. 螺旋星系随便转：左右拖 180° 以后，照样能悬停名牌、点进星球；回首页时回到正面的取景 ——

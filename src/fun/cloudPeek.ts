@@ -4,9 +4,10 @@ import type { App } from '../app';
 import { easeInBack, easeOutBack, easeOutCubic, smooth, span } from '../scenes/ease';
 import type { HomeTuneFolder } from '../scenes/homeTune';
 import { reducedMotion } from '../scenes/transition';
-import type { World } from '../scenes/world';
+import type { PlanetEntry, World } from '../scenes/world';
 import { el } from '../ui/dom';
 import type { CloudPeekState } from '../ui/home';
+import { BALL_C, BALL_R, besideSpot, clearance, footprint, GUIDE, GuideMemo, pointAt, type Box, type Disc } from './cloudPeekMath';
 import type { Coupons } from './coupons';
 import type { HomeTriboo } from './couponsHome';
 import { COUPONS, restPose, shakePose, spitPose, spitTimes, stepHover, type TribooPose } from './couponsMath';
@@ -25,6 +26,10 @@ import { findArms, type Arm } from './tribooRig';
 // 和别的东西错开：场上同一时间只有一只翠宝——冒头前右下角那只先整个缩到画面外，这只沉下去以后它再慢慢探回来；
 // 指着星球或名牌、在拖、镜头还在动、在转场、造星窗口开着、领券窗口开着时不冒；
 // 开场结束后至少等 8 秒；减弱动效时不冒。
+// 悬停时带路（④，同一只、同一套动作）：指针（或键盘焦点）在一颗星球、它的名牌上停 0.6 秒，翠宝从那颗星球旁边的云里冒出来
+// （站在左右两边，名牌在星球正下方那边不站；不压这颗星球、它的名牌，也不压别的），举起一只手指着它、点一下头；
+// 指针一离开就沉回去。前 3 次一定带，之后同一颗星球 30 秒内不再带。带路的那只不接点击（点星球照样进星球）。
+// 定时那只露着的时候指到星球上：它先沉下去，再从那颗星球旁边冒出来
 // 开销：翠宝是开场探头那只（已经加载、编译好）的克隆，几何、材质共用，不编新的着色器，只在露头时显示；
 // 身边的小云是一批朝向镜头的面片（14 片，一次绘制），开场时在后台编好，只在露头时显示
 
@@ -49,7 +54,7 @@ export const CLOUD_PEEK = {
 
 // wait：等右下角那只整个缩到画面外（场上同一时间只有一只翠宝），再让云面鼓起来
 type Phase = 'idle' | 'wait' | 'bulge' | 'rise' | 'stay' | 'sink' | 'close';
-const WAIT_MAX = 1.2; // 最多等多久（秒）
+const WAIT_MAX = 1.2; // 最多等多久（秒）：右下角那只缩不走（正在吐券之类）就这一次不冒了
 type Mode = 'timer' | 'guide';
 
 interface Act {
@@ -58,16 +63,6 @@ interface Act {
   launched: boolean;
 }
 
-interface Box {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-// 翠宝的身形（× 身高，脚底 = 0）：一个圆滚滚的身子（球），两只手在球的两边，脚在下面
-const BALL_C = 0.63; // 球心高度
-const BALL_R = 0.37; // 球的半径
 const COLLAR = 7; // 围在身边的小云（前面和两边：盖住身子和云面相交的那条线）
 const RING = 7; // 合上时散开的一圈小云絮
 const FLUFF = COLLAR + RING;
@@ -177,9 +172,18 @@ export class CloudPeek {
   private readonly button: HTMLButtonElement;
   private creatorNode: HTMLElement | null = null;
   private readonly raycaster = new THREE.Raycaster();
-  private readonly discs: Array<{ x: number; y: number; r: number }> = [];
+  private readonly discs: Disc[] = [];
   private readonly tags: Box[] = [];
   private readonly boxes: Box[] = [];
+  // 悬停时带路
+  private target: PlanetEntry | null = null; // 带路时指着的那颗星球
+  private pointing: PlanetEntry | null = null; // 指针（或键盘焦点）在哪颗星球、哪张名牌上
+  private pointFor = 0; // 在上面停了多久（秒）
+  private pending: PlanetEntry | null = null; // 停够了、要带路的那颗（定时那只先沉下去）
+  private readonly memo = new GuideMemo();
+  private pointSide: 1 | -1 = 1; // 用哪只手指（+1：画面右边那只）
+  private pointUp = Math.PI / 2; // 手举多高
+  private pointTurn = 0; // 身子往星球那边转多少
   private bx = NaN; // 按钮上一次写的位置、大小
   private by = NaN;
   private bw = NaN;
@@ -273,26 +277,54 @@ export class CloudPeek {
 
   // 现在能按时冒出来：没指着星球、名牌，没在拖，镜头停稳了，领券窗口没开，右下角那只没在演
   private allowed(): boolean {
-    return this.world.hovered === null && !this.dragging && this.still > 0.5 && !this.coupons.card.open && !this.corner.busy && this.homeFor > 1.5 && !reducedMotion();
+    return this.world.hovered === null && this.pending === null && !this.dragging && this.still > 0.5 && !this.coupons.card.open && !this.corner.busy && this.homeFor > 1.5 && !reducedMotion();
   }
 
   // ?tune 的 Peek now、自查脚本：马上冒出来（不管定时、开关、指没指着东西；位置照样躲开星球、名牌）。冒不出来返回 false
   peek(force = true): boolean {
     if (!this.ready || reducedMotion() || !this.home() || this.coupons.card.open) return false;
     if (this.phase !== 'idle') return true;
-    return this.start('timer', force);
+    return this.start('timer', () => this.choose(force));
   }
 
-  private start(mode: Mode, force: boolean): boolean {
-    if (!this.choose(force)) return false;
-    this.mode = mode;
+  // 指针（或键盘焦点）在哪颗星球、名牌上、停了多久；停够 GUIDE.delay 秒、这一次该带路（前几次一定带，之后同一颗隔一会儿）就排上
+  private trackPointing(dt: number): void {
+    const now = this.app.galaxyUi.pointing;
+    if (now !== this.pointing) {
+      this.pointing = now;
+      this.pointFor = 0;
+      this.pending = null;
+      return;
+    }
+    if (!now) return;
+    const before = this.pointFor;
+    this.pointFor += dt;
+    if (before >= GUIDE.delay || this.pointFor < GUIDE.delay) return;
+    if (!GUIDE.on || reducedMotion() || this.dragging || this.coupons.card.open) return;
+    if (this.mode === 'guide' && this.target === now && this.active) return;
+    if (this.memo.wants(now.team.id, this.time)) this.pending = now;
+  }
+
+  // 带路：从这颗星球旁边冒出来。挑不到地方就算了（这一次不带）
+  private guide(e: PlanetEntry): void {
+    this.pending = null;
+    // 开场还没演完（右下角那只在打招呼）时不带：场上同一时间只有一只翠宝
+    if (!this.ready || reducedMotion() || !this.home() || !this.corner.opened || this.coupons.card.open || this.pointing !== e) return;
+    this.target = e;
+    if (this.start('guide', () => this.chooseBeside(e))) this.memo.note(e.team.id, this.time);
+    else this.target = null;
+  }
+
+  private start(mode: Mode, pick: () => boolean): boolean {
+    this.mode = mode; // 挑位置按这一种的大小
+    if (!pick()) return false;
     this.phase = 'wait';
     this.t = 0;
     this.act = null;
     this.ours = false;
     this.turnFrom = Math.random() < 0.5 ? -1 : 1;
     this.raise = 0;
-    this.count++;
+    if (mode === 'timer') this.count++;
     if (this.corner.tucked) this.toPhase('bulge');
     return true;
   }
@@ -302,18 +334,12 @@ export class CloudPeek {
     return CLOUD_PEEK.size * Math.min(innerHeight, innerWidth * 1.4);
   }
 
-  // 挑位置：画面上一格一格试（中间偏下优先），每一格按这时的镜头算出露出来的那一块（身子、手、身边的小云）在画面上多大，
-  // 不能压到星球、名牌、标题卡片、右下角的翠宝、左下角的徽章，离它们越远越好；挑中的那一格往云面上打一条线，
-  // 得到冒出来的地方，再按离镜头多远定身高（每一格在画面上一样高）
-  private choose(force: boolean): boolean {
+  // 画面上要躲开的东西：每颗星球的圆，显示着的名牌、标题卡片、徽章、右上角的登录条、右下角的翠宝
+  private gather(): void {
     const w = this.world;
-    const cam = w.rig.camera;
-    const sea = w.atmosphere.objects.sea;
-    if (!sea.visible) return false;
-    const planeY = sea.position.y;
     const W = innerWidth;
     const Hp = innerHeight;
-    cam.updateMatrixWorld();
+    w.rig.camera.updateMatrixWorld();
     const discs = this.discs;
     discs.length = 0;
     for (const e of w.planets.values()) {
@@ -328,11 +354,45 @@ export class CloudPeek {
       if (r && r.width > 0) boxes.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
     }
     boxes.push({ left: W - Math.max(150, W * 0.14), top: Hp - Math.max(230, Hp * 0.3), right: W, bottom: Hp }); // 右下角的翠宝
-    const p = CLOUD_PEEK;
+  }
+
+  // 画面上 (px, py) 这一点往云面上打一条线：打到了、不太远（地平线那边的云又小又雾）就返回那一点的俯视角正弦，否则 null
+  private probe(px: number, py: number): number | null {
+    const w = this.world;
+    const cam = w.rig.camera;
+    _ndc.set((px / innerWidth) * 2 - 1, 1 - (py / innerHeight) * 2);
+    this.raycaster.setFromCamera(_ndc, cam);
+    const ray = this.raycaster.ray;
+    if (ray.direction.y > -0.08) return null;
+    const t = (w.atmosphere.objects.sea.position.y - ray.origin.y) / ray.direction.y;
+    if (!(t > 0) || t > cam.position.distanceTo(w.rig.controls.target) * 2.6) return null;
+    return -ray.direction.y;
+  }
+
+  // 挑中了画面上的 (px, py)：往云面上打一条线得到冒出来的地方，再按离镜头多远定身高（在画面上 full 像素那么高）
+  private settle(px: number, py: number, full: number): void {
+    const cam = this.world.rig.camera;
+    const planeY = this.world.atmosphere.objects.sea.position.y;
+    _ndc.set((px / innerWidth) * 2 - 1, 1 - (py / innerHeight) * 2);
+    this.raycaster.setFromCamera(_ndc, cam);
+    const ray = this.raycaster.ray;
+    this.spot.copy(ray.origin).addScaledVector(ray.direction, (planeY - ray.origin.y) / ray.direction.y);
+    this.planeY = planeY;
+    _v.copy(this.spot).applyMatrix4(cam.matrixWorldInverse);
+    const depth = Math.max(1, -_v.z);
+    this.H = (full / innerHeight) * 2 * depth * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+  }
+
+  // 定时冒出来挑位置：画面上一格一格试（中间偏下优先），每一格按这时的镜头算出露出来的那一块（身子、手、身边的小云）在画面上多大，
+  // 不能压到星球、名牌、标题卡片、右下角的翠宝、左下角的徽章，离它们越远越好
+  private choose(force: boolean): boolean {
+    if (!this.world.atmosphere.objects.sea.visible) return false;
+    this.gather();
+    const W = innerWidth;
+    const Hp = innerHeight;
     const full = this.screenHeight();
-    const c = p.out - (1 - BALL_C); // 球心在云面上多高（× 身高）
+    const c = CLOUD_PEEK.out - (1 - BALL_C); // 球心在云面上多高（× 身高）
     const margin = force ? 4 : 12;
-    const camDist = cam.position.distanceTo(w.rig.controls.target);
     const r: Box = { left: 0, top: 0, right: 0, bottom: 0 };
     let best = -Infinity;
     let bx = 0;
@@ -342,46 +402,14 @@ export class CloudPeek {
       for (let gx = 0; gx <= N; gx++) {
         const px = W * (0.06 + (0.88 * gx) / N);
         const py = Hp * (0.28 + (0.68 * gy) / N); // 云面那一点在画面上的位置
-        _ndc.set((px / W) * 2 - 1, 1 - (py / Hp) * 2);
-        this.raycaster.setFromCamera(_ndc, cam);
-        const ray = this.raycaster.ray;
-        if (ray.direction.y > -0.08) continue;
-        const t = (planeY - ray.origin.y) / ray.direction.y;
-        if (!(t > 0) || t > camDist * 2.6) continue; // 太远：地平线那边的云又小又雾
-        // 露出来那一块在画面上：球（往后仰着，球心按镜头俯视角压扁一点）、举起来的手、前面和两边的小云
-        const sin = -ray.direction.y;
-        const cos = Math.sqrt(Math.max(0, 1 - sin * sin));
-        r.left = px - 0.62 * full;
-        r.right = px + 0.62 * full;
-        r.top = py - (c * cos + BALL_R + 0.16) * full;
-        r.bottom = py + (0.42 * sin + 0.2) * full;
+        const sin = this.probe(px, py);
+        if (sin === null) continue;
+        footprint(px, py, full, c, sin, r);
         if (r.left < 8 || r.right > W - 8 || r.top < 8 || r.bottom > Hp - 6) continue;
-        let clear = Infinity;
-        let ok = true;
-        for (const d of discs) {
-          const cx = Math.min(Math.max(d.x, r.left), r.right);
-          const cy = Math.min(Math.max(d.y, r.top), r.bottom);
-          const gap = Math.hypot(d.x - cx, d.y - cy) - d.r;
-          if (gap < margin) {
-            ok = false;
-            break;
-          }
-          clear = Math.min(clear, gap);
-        }
-        if (!ok) continue;
-        for (const b of boxes) {
-          const dx = Math.max(b.left - r.right, r.left - b.right, 0);
-          const dy = Math.max(b.top - r.bottom, r.top - b.bottom, 0);
-          const gap = dx > 0 || dy > 0 ? Math.hypot(dx, dy) : -1;
-          if (gap < margin) {
-            ok = false;
-            break;
-          }
-          clear = Math.min(clear, gap);
-        }
-        if (!ok) continue;
+        const clear = clearance(r, this.discs, this.boxes, margin);
+        if (clear < 0) continue;
         const cy = (r.top + r.bottom) / 2;
-        const score = -Math.hypot((px - W * 0.5) / W, (cy - Hp * 0.6) / Hp) + (0.6 * Math.min(clear, full * 0.9)) / full * 0.25;
+        const score = -Math.hypot((px - W * 0.5) / W, (cy - Hp * 0.6) / Hp) + (0.15 * Math.min(clear, full * 0.9)) / full;
         if (score > best) {
           best = score;
           bx = px;
@@ -390,16 +418,22 @@ export class CloudPeek {
       }
     }
     if (best === -Infinity) return false;
-    _ndc.set((bx / W) * 2 - 1, 1 - (by / Hp) * 2);
-    this.raycaster.setFromCamera(_ndc, cam);
-    const ray = this.raycaster.ray;
-    const t = (planeY - ray.origin.y) / ray.direction.y;
-    this.spot.copy(ray.origin).addScaledVector(ray.direction, t);
-    this.planeY = planeY;
-    // 身高：这一点离镜头的纵深 × 视角，换算成在画面上 full 像素那么高
-    _v.copy(this.spot).applyMatrix4(cam.matrixWorldInverse);
-    const depth = Math.max(1, -_v.z);
-    this.H = (full / Hp) * 2 * depth * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+    this.settle(bx, by, full);
+    return true;
+  }
+
+  // 带路挑位置：在这颗星球旁边（cloudPeekMath.besideSpot：左右两边、和星球差不多高，不往名牌那边站），不压它、它的名牌和别的
+  private chooseBeside(e: PlanetEntry): boolean {
+    const w = this.world;
+    if (!w.atmosphere.objects.sea.visible) return false;
+    this.gather();
+    if (!w.planetOnScreen(e, _disc)) return false;
+    const planet = { x: _disc.x, y: _disc.y, r: _disc.r };
+    const full = this.screenHeight() * GUIDE.size;
+    const c = CLOUD_PEEK.out - (1 - BALL_C);
+    const spot = besideSpot(planet, full, c, this.discs, this.boxes, { w: innerWidth, h: innerHeight }, (px, py) => this.probe(px, py), 8);
+    if (!spot) return false;
+    this.settle(spot.x, spot.y, full);
     return true;
   }
 
@@ -482,12 +516,20 @@ export class CloudPeek {
     if (!this.ready) return;
     if (!home) {
       if (this.phase !== 'idle') this.reset();
+      this.pointing = null;
+      this.pending = null;
       return;
+    }
+    this.trackPointing(dt);
+    // 要带路：没在场上就冒；定时那只（或上一颗星球的带路）已经沉下去、在合上了，就不等合完，直接到这颗星球旁边冒
+    if (this.pending) {
+      if (this.phase === 'close') this.finish();
+      if (this.phase === 'idle') this.guide(this.pending);
     }
     if (this.phase === 'idle') {
       if (p.enabled && this.sinceOpening >= 0 && !reducedMotion()) {
         this.nextIn -= dt;
-        if (this.nextIn <= 0 && this.allowed() && !this.start('timer', false)) this.nextIn = 3; // 这会儿挑不到位置：过 3 秒再试
+        if (this.nextIn <= 0 && this.allowed() && !this.start('timer', () => this.choose(false))) this.nextIn = 3; // 这会儿挑不到位置：过 3 秒再试
       }
       return;
     }
@@ -526,8 +568,10 @@ export class CloudPeek {
     const p = CLOUD_PEEK;
     this.t += dt;
     const out = this.phase === 'bulge' || this.phase === 'rise' || this.phase === 'stay';
-    // 别的东西开了领券窗口（右下角那只吐的）、开始指着星球或名牌：沉回去（自己吐的券开的窗口照样演完）；还没冒头就直接不冒了
-    if (!this.act && ((this.coupons.card.open && !this.ours) || (this.mode === 'timer' && this.world.hovered !== null))) {
+    // 别的东西开了领券窗口（右下角那只吐的）、开始指着星球或名牌（带路的：指针离开了那颗星球）：沉回去
+    // （自己吐的券开的窗口照样演完）；还没冒头就直接不冒了
+    const leave = this.mode === 'timer' ? this.world.hovered !== null : this.pointing !== this.target;
+    if (!this.act && ((this.coupons.card.open && !this.ours) || leave)) {
       if (this.phase === 'wait') {
         this.finish();
         return;
@@ -551,8 +595,11 @@ export class CloudPeek {
     }
     switch (this.phase) {
       case 'wait':
-        if (this.corner.tucked || this.t >= WAIT_MAX) this.toPhase('bulge');
-        else return;
+        if (this.corner.tucked) this.toPhase('bulge');
+        else {
+          if (this.t >= WAIT_MAX) this.finish();
+          return;
+        }
         break;
       case 'bulge':
         if (this.t >= p.bulge) this.toPhase('rise');
@@ -561,8 +608,8 @@ export class CloudPeek {
         if (this.t >= p.rise) this.toPhase('stay');
         break;
       case 'stay':
-        // 键盘选中、指针指着它、正在吐 / 摇头时一直露着
-        if (!this.act && !this.focused && !this.hovering && this.t >= p.stay) this.toPhase('sink');
+        // 键盘选中、指针指着它、正在吐 / 摇头时一直露着；带路的一直露到指针离开那颗星球
+        if (this.mode === 'timer' && !this.act && !this.focused && !this.hovering && this.t >= p.stay) this.toPhase('sink');
         break;
       case 'sink':
         if (this.t >= p.sink) this.toPhase('close');
@@ -598,21 +645,28 @@ export class CloudPeek {
     const t = this.t;
     const hidden = -(BALL_R + 0.12); // 球心在云面下多深时整个藏住（× 身高）
     const shown = p.out - (1 - BALL_C);
+    const guiding = this.mode === 'guide';
     let c = hidden;
     let turn = 0; // 还没转过来的部分 0..1
     let look = 0;
     let raise = 0;
     let wave = 0;
+    let nod = 0;
     switch (this.phase) {
       case 'rise': {
         const u = Math.min(1, t / p.rise);
         c = hidden + (shown - hidden) * easeOutBack(u, 1.7);
         turn = 1 - easeOutCubic(Math.min(1, u / 0.9));
+        if (guiding) raise = smooth(span(u, 0.55, 1)); // 快出来时就举手指着星球
         break;
       }
       case 'stay': {
         c = shown + Math.sin(this.time * 2.3) * 0.012;
-        if (!this.act) {
+        if (guiding) {
+          // 一直指着星球，点一下头
+          raise = 1;
+          nod = Math.sin(Math.PI * span(t, 0.15, 0.7));
+        } else if (!this.act) {
           // 左右看一看（先往一边、再往另一边），然后挥一下手
           const env = smooth(span(t, 0, 0.2)) * (1 - smooth(span(t, 1.25, 1.5)));
           look = THREE.MathUtils.degToRad(p.look) * Math.sin((t / 1.5) * Math.PI * 2) * env * this.turnFrom;
@@ -624,6 +678,7 @@ export class CloudPeek {
       case 'sink': {
         const u = Math.min(1, t / p.sink);
         c = shown + (hidden - shown) * easeInBack(u, 1.5);
+        if (guiding) raise = 1 - smooth(span(u, 0, 0.6));
         break;
       }
       default:
@@ -649,10 +704,13 @@ export class CloudPeek {
     const face = Math.atan2(dx, dz);
     const elev = Math.atan2(cam.y - this.planeY, Math.hypot(dx, dz));
     const lean = Math.min(THREE.MathUtils.degToRad(38), Math.max(0, elev - THREE.MathUtils.degToRad(10)) * p.lean);
-    const yaw = face + turn * this.turnFrom * THREE.MathUtils.degToRad(p.turn) + look;
+    this.raise += (raise - this.raise) * (1 - Math.exp(-10 * dt));
+    // 带路：身子往星球那边转一点（跟着手举起来）
+    const toward = guiding ? this.pointTurn * this.raise : 0;
+    const yaw = face + turn * this.turnFrom * THREE.MathUtils.degToRad(p.turn) + look + toward;
     const root = this.root;
     _q.setFromAxisAngle(UP, yaw).multiply(_q2.setFromAxisAngle(X, -lean));
-    _e.set(pose.pitch, pose.yaw, pose.roll + look * 0.12, 'YZX');
+    _e.set(pose.pitch + nod * THREE.MathUtils.degToRad(GUIDE.nod), pose.yaw, pose.roll + look * 0.12, 'YZX');
     root.quaternion.copy(_q).multiply(_q2.setFromEuler(_e));
     const k = H / this.modelHeight;
     const b = Math.sin((this.time / 3.2) * Math.PI * 2) * 0.02; // 呼吸
@@ -662,14 +720,29 @@ export class CloudPeek {
     _v.set(0, BALL_C * this.modelHeight * root.scale.y, 0).applyQuaternion(root.quaternion);
     root.position.copy(this.ball).sub(_v);
     root.updateMatrixWorld(true);
-    // 挥手：画面左边那只（模型的 -X），同右下角那只
-    this.raise += (raise - this.raise) * (1 - Math.exp(-10 * dt));
+    // 挥手：画面左边那只（模型的 -X），同右下角那只；带路：星球那边那只手指着星球
+    if (guiding) this.aim();
     for (const arm of this.arms) {
-      const up = arm.side === -1 ? this.raise * (2.8 + THREE.MathUtils.degToRad(22) * wave) : 0; // 往后仰着：举高一点才看得出在挥
+      let up = 0;
+      if (guiding) up = arm.side === this.pointSide ? this.raise * this.pointUp : 0;
+      else if (arm.side === -1) up = this.raise * (2.8 + THREE.MathUtils.degToRad(22) * wave); // 往后仰着：举高一点才看得出在挥
       arm.pivot.rotation.z = arm.rest + arm.side * up;
     }
     this.placeFluff();
     this.measure();
+  }
+
+  // 带路：按画面上身子中心到星球中心的方向定用哪只手、举多高、身子往哪边转
+  private aim(): void {
+    const e = this.target;
+    if (!e || !this.world.planetOnScreen(e, _disc)) return;
+    _v.copy(this.ball).project(this.world.rig.camera);
+    const x = ((_v.x + 1) / 2) * innerWidth;
+    const y = ((1 - _v.y) / 2) * innerHeight;
+    const a = pointAt(x, y, _disc.x, _disc.y);
+    if (Math.abs(_disc.x - x) > 4) this.pointSide = a.side; // 正上方、正下方时不来回换手
+    this.pointUp = a.up;
+    this.pointTurn = a.turn;
   }
 
   // 身边的小云：鼓起来（从云海里拱起来，下半截被云海盖着）→ 往两边让开、围着身子 → 沉的时候往里收、盖住那个洞
@@ -830,8 +903,9 @@ export class CloudPeek {
       nextIn: Number.isFinite(this.nextIn) ? this.nextIn : -1,
       since: this.sinceOpening,
       count: this.count,
+      guides: this.memo.count,
       mode: this.mode,
-      guideFor: null,
+      guideFor: this.mode === 'guide' && this.phase !== 'idle' ? this.target?.team.id ?? null : null,
     };
   }
 }
@@ -858,4 +932,14 @@ export function addCloudPeekTune(folder: HomeTuneFolder, cloud: CloudPeek): void
   ];
   for (const [key, min, max, step, label] of list) f.addBinding(CLOUD_PEEK, key, { min, max, step, label });
   f.addButton({ title: 'Peek now' }).on('click', () => { cloud.peek(true); });
+  // 悬停时带路（④）
+  f.addBinding(GUIDE, 'on', { label: 'Hover guide' });
+  const guide: Array<[keyof typeof GUIDE & string, number, number, number, string]> = [
+    ['delay', 0.1, 3, 0.05, 'guide after hovering s'],
+    ['free', 0, 10, 1, 'always guide first n'],
+    ['again', 0, 120, 1, 'same planet again after s'],
+    ['size', 0.5, 1.4, 0.01, 'guide size'],
+    ['nod', 0, 30, 0.5, 'nod°'],
+  ];
+  for (const [key, min, max, step, label] of guide) f.addBinding(GUIDE, key, { min, max, step, label });
 }

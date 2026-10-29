@@ -16,7 +16,8 @@ export interface CloudPeekState {
   act: string | null; // spit / shake
   nextIn: number; // 还有多久冒下一次（秒）
   since: number; // 开场演完以后过了多久（秒；-1：还没演完）。第一次在开场后 since + nextIn 秒冒出来（≥ 8）
-  count: number; // 开页以来冒了几次
+  count: number; // 开页以来定时（和 Peek now）冒了几次
+  guides: number; // 开页以来悬停带路带了几次
   mode: string; // timer（定时冒出来）/ guide（悬停时带路）
   guideFor: string | null; // 带路时指着哪颗星球
 }
