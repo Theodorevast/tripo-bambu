@@ -197,9 +197,13 @@ try {
   // —— 6. Visit your planet：先弹一下，再穿云进你的星球；星球页上翠宝缩走、名牌收起 ——
   await page.mouse.move(W * 0.5, 40);
   await page.locator('.tb-visit').click();
-  const entered = await until(page, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), you.id, 20000);
+  const entered = await until(page, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), you.id, 30000);
+  // 翠宝缩走（弹簧）、名牌收起要一小会儿：等一下再看
+  await until(page, () => !window.__home.state().triboo.shown && window.__home.state().tags.every((t) => !t.shown), null, 4000);
   st = await homeState(page);
-  check('Visit your planet：进到你的星球；星球页上右下角的翠宝缩走、名牌收起来', entered && !st.triboo.shown && st.tags.every((t) => !t.shown));
+  const hashNow = await page.evaluate(() => location.hash);
+  check('Visit your planet：进到你的星球；星球页上右下角的翠宝缩走、名牌收起来', entered && !st.triboo.shown && st.tags.every((t) => !t.shown),
+    `地址 ${hashNow}，翠宝 ${st.triboo.shown ? '还在' : '缩走了'}（${st.triboo.phase}），名牌显示 ${st.tags.filter((t) => t.shown).length} 张`);
   await page.locator('.topbar button', { hasText: 'Galaxy' }).click();
   const back = await until(page, () => window.__app.routeIdle() && (location.hash === '#/' || location.hash === ''), null, 20000);
   const tagsBack = await until(page, () => window.__home.state().tags.some((t) => t.shown) && !!window.__home.state().triboo.shown, null, 6000);
@@ -243,6 +247,84 @@ try {
   flew = await r.page.evaluate(() => window.__coupons.state().coupons.some((c) => c.phase === 'pickup'));
   check('减少动态效果：不打招呼、点了翠宝券不飞，领券窗口直接淡入', !!rAt && !rIntro && rShown && !flew);
   await r.ctx.close();
+  // —— 9. 标题卡片上的「Tune」按钮：平时不下载调参面板；点一下才加载、右边的面板出来；再点（键盘回车）藏起来；
+  //        开关记在 localStorage，刷新后照旧；星球页的名牌卡片上也有；不压着标题；?tune 照旧开页就打开 ——
+  {
+    const t = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+    const tp = await t.newPage();
+    errors.push(watchErrors(tp));
+    if (WEBGL2) await tp.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
+    const tweakpane = [];
+    tp.on('request', (r) => { if (/tweakpane/i.test(r.url())) tweakpane.push(r.url()); });
+    const loaded = () => until(tp, () => window.__ready === true && window.__app.routeIdle() && !document.querySelector('#boot'), null, 90000);
+    const paneState = () => tp.evaluate(() => {
+      const pane = document.querySelector('.tune-pane');
+      const btn = document.querySelector('.tb-title .tb-tune');
+      return { pane: !!pane, shown: !!pane && !pane.hidden && getComputedStyle(pane).display !== 'none', pressed: btn?.getAttribute('aria-pressed') ?? null };
+    });
+    await tp.goto(`${base}/?nolocal`);
+    await loaded();
+    const geo = await tp.evaluate(() => {
+      const r = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
+      const b = r('.tb-title .tb-tune');
+      const hit = (a) => !!a && !!b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      const card = r('.tb-title');
+      const btn = document.querySelector('.tb-title .tb-tune');
+      return {
+        visible: !!b && b.width > 20,
+        inside: !!b && !!card && b.left >= card.left && b.right <= card.right && b.top >= card.top && b.bottom <= card.bottom,
+        covers: ['.tb-name', '.cb-head .cobrand', '.cb-event', '.tb-tagline', '.tb-visit', '.tb-create'].filter((s) => hit(r(s))),
+        title: btn?.getAttribute('title'),
+        label: btn?.getAttribute('aria-label'),
+        size: b ? `${Math.round(b.width)}×${Math.round(b.height)}` : '-',
+      };
+    });
+    check('Tune 按钮：在左上角标题卡片里，不压着标题、联名标志、说明和按钮；提示文字 Tune', geo.visible && geo.inside && geo.covers.length === 0 && geo.title === 'Tune' && geo.label === 'Tune',
+      `${geo.size}，压到 ${geo.covers.join('、') || '没有'}`);
+    let s = await paneState();
+    const before = tweakpane.length;
+    await tp.locator('.tb-title .tb-tune').click();
+    const opened = await until(tp, () => {
+      const p = document.querySelector('.tune-pane');
+      return !!p && !p.hidden && !document.querySelector('.tune-pane .tune-card')?.hidden && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'true';
+    }, null, 20000);
+    check('Tune 按钮：平时不下载 Tweakpane；点一下才加载，右边的调参面板出来（aria-pressed=true）', !s.pane && before === 0 && opened && tweakpane.length > 0,
+      `点之前 ${before} 个请求、面板 ${s.pane ? '有' : '没有'}；点之后 ${tweakpane.length} 个`);
+    await tp.locator('.tb-title .tb-tune').focus();
+    await tp.keyboard.press('Enter');
+    const closed = await until(tp, () => document.querySelector('.tune-pane')?.hidden === true && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'false', null, 3000);
+    check('Tune 按钮：再按一下（键盘回车）面板整块藏起来（aria-pressed=false）', closed);
+    await tp.reload();
+    await loaded();
+    await tp.waitForTimeout(800);
+    s = await paneState();
+    check('Tune 按钮：关着的刷新以后还是关着', (!s.pane || !s.shown) && s.pressed === 'false', JSON.stringify(s));
+    await tp.locator('.tb-title .tb-tune').click();
+    await until(tp, () => document.querySelector('.tune-pane')?.hidden === false, null, 20000);
+    await tp.reload();
+    await loaded();
+    const restored = await until(tp, () => document.querySelector('.tune-pane')?.hidden === false && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'true', null, 20000);
+    check('Tune 按钮：开着的刷新以后自己打开', restored);
+    // 星球页：名牌卡片上也有，点了关上
+    await tp.evaluate((id) => { location.hash = `#/t/${id}`; }, you.id);
+    await until(tp, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), you.id, 30000);
+    const onPlanet = await tp.evaluate(() => {
+      const b = document.querySelector('.tb-title .tb-tune');
+      const n = document.querySelector('.tb-title .tb-name')?.getBoundingClientRect();
+      const r = b?.getBoundingClientRect();
+      return { shown: !!r && r.width > 20, pressed: b?.getAttribute('aria-pressed'), clear: !!r && !!n && (n.right <= r.left || n.bottom <= r.top) };
+    });
+    await tp.locator('.tb-title .tb-tune').click();
+    const closedOnPlanet = await until(tp, () => document.querySelector('.tune-pane')?.hidden === true, null, 3000);
+    check('Tune 按钮：星球页的名牌卡片上也有（不压着团队名），点了关上', onPlanet.shown && onPlanet.pressed === 'true' && onPlanet.clear && closedOnPlanet, JSON.stringify(onPlanet));
+    // ?tune：照旧开页就打开（记下的是关着也一样）
+    await tp.goto(`${base}/?nolocal&tune`);
+    await loaded();
+    const forced = await until(tp, () => document.querySelector('.tune-pane')?.hidden === false && document.querySelector('.tb-tune')?.getAttribute('aria-pressed') === 'true', null, 20000);
+    check('地址带 ?tune：照旧开页就打开调参面板', forced);
+    await t.close();
+  }
+
   console.log(`backend: ${backend}；${W}×${H}`);
 } catch (e) {
   results.push(`✗ 脚本出错：${e.message}`);

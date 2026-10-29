@@ -22,6 +22,7 @@ import { installWater } from './nature/water';
 import { installCoupons } from './fun/coupons';
 import { installHomeTriboo } from './fun/couponsHome';
 import { installHome } from './ui/home';
+import { installTuneToggle } from './ui/tuneToggle';
 import { installCreatePlanet } from './ui/createPlanet';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
@@ -87,9 +88,8 @@ app.museum = sheet(new MuseumPage(app.root, world, () => app.closeSheet(), (work
   if (team) app.navigate(workId ? { view: 'museum', teamId: team.id, workId } : { view: 'museum', teamId: team.id });
 }));
 // 地址带 ?tune：实时调参面板。动态加载，Tweakpane 打成单独的包，平时不下载
-if (new URLSearchParams(location.search).has('tune')) {
-  import('./tune').then((m) => m.installTune(world), (err: unknown) => console.error(err));
-}
+// 左上角标题卡片上的「Tune」按钮也能打开、关上它（第一次打开才加载；开关记在 localStorage），?tune 照旧开页就打开（ui/tuneToggle.ts）
+installTuneToggle(app.topbar, world);
 await boot.phase('warm');
 // 星球都摆进场景了：开场之前在后台把着色器编译好，开场飞行的第一帧不卡
 await world.warmUp();

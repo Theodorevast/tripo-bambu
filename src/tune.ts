@@ -86,7 +86,8 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-export function installTune(world: World): void {
+// 返回外壳：左上角标题卡片上的「Tune」按钮（ui/tuneToggle.ts）用它整块显示、藏起来
+export function installTune(world: World): TuneShell {
   // 外壳压在顶栏、Members / Museum、查看器上面（tune.css：z-index 30），默认在顶栏下面靠右
   const shell = new TuneShell(() => copy(tuneJson(world)));
   const pane: Folder = shell.root;
@@ -234,4 +235,5 @@ export function installTune(world: World): void {
   perf.addBinding(stats, 'rocks', { label: 'rocks', readonly: true });
   perf.addBinding(stats, 'life', { label: 'life', readonly: true });
   // 「Copy parameters」在外壳底部（TuneShell 构造时传进去的 copy）
+  return shell;
 }
