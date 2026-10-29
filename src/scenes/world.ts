@@ -290,14 +290,16 @@ export class World {
   }
 
   // 运行时加一颗星球（「Create a planet」建好以后）：马上登记（路由、名牌都找得到它），着色器在后台编好以后才挂进场景、从小弹出来；
-  // 首页的版式跟着重排：别的星球慢慢挪到新位置，镜头慢慢飞到新的取景。已经有这个团队时只更新数据
-  addPlanet(team: Team): PlanetEntry {
+  // 首页的版式跟着重排：别的星球慢慢挪到新位置，镜头慢慢飞到新的取景。已经有这个团队时只更新数据。
+  // prebuilt（v2-ui）：造星窗口第三步预热好的那颗（createPlanetLaunch.ts 的 LaunchWarmer.take：配方完全一致、已经编好、状态还原过才给）：
+  // 直接用它，不再新建（新建一颗要在主线程上建着色器模块、传遮罩贴图和几何，100–300 ms）；从这里起它归 World 管。不给时和原来完全一样
+  addPlanet(team: Team, prebuilt?: PlanetObject): PlanetEntry {
     const old = this.planets.get(team.id);
     if (old) {
       this.updateTeam(team);
       return old;
     }
-    const planet = new PlanetObject(team.planet, team.color, team.status === 'under-construction');
+    const planet = prebuilt ?? new PlanetObject(team.planet, team.color, team.status === 'under-construction');
     const hit = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicNodeMaterial());
     hit.visible = false;
     hit.userData.teamId = team.id;
