@@ -1,9 +1,10 @@
 // 首页「云里探头的翠宝」（H2）的录屏（逐帧拼接，同 record-home.mjs）：首页 → 云面鼓起来、翠宝探出来、左右看、挥手
 // → 指针移过去（手形光标、身子一缩）→ 点它（蓄力、弹起来吐券）→ 券飞到画面中间展开成领券窗口
-// → 关掉窗口，再叫它出来，再点（冷却中：摇头）。
+// → 关掉窗口，再叫它出来，再点（冷却中：摇头）
+// → 最后一段：悬停时带路（指针停在你的星球上，翠宝从旁边冒出来指着它、点一下头，指针移开就沉回去）。
 // 时间停住（window.__trans.timeScale(0)），每帧往前走 1/60 秒再截图；名牌、卡片的 Web Animations 也按同样的步子往前拨。
 // node scripts/record-cloud.mjs [输出目录]（默认 .superpowers/sdd/2026-10-27-community-planets/team/home-media/cloud）。
-// WEBGL2=1 走 WebGL2；SIZE=390x844 录手机竖屏；SHAKE=0 不录后面摇头那一段
+// WEBGL2=1 走 WebGL2；SIZE=390x844 录手机竖屏；SHAKE=0 不录摇头那一段；GUIDE=0 不录带路那一段
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -116,6 +117,19 @@ if (process.env.SHAKE !== '0') {
   at2[108] = () => page.mouse.click(t2.x, t2.y);
   await record('cloud-cooldown', 3.4, at2, { shake: 130 });
   console.log(`冷却中点了以后：${JSON.stringify(await cloud())}`);
+}
+
+// 第三段：悬停时带路——指针停在你的星球上 → 0.6 秒后翠宝从旁边冒出来，举手指着它、点一下头 → 指针移开，沉回云里
+if (process.env.GUIDE !== '0') {
+  await page.mouse.move(W * 0.5, 14);
+  await page.waitForFunction(() => !window.__home.state().cloud.active && !window.__home.state().card.open, null, { timeout: 10000 });
+  await page.waitForTimeout(1500);
+  const you = await page.evaluate(() => window.__app.planetScreenPos(window.__home.state().you));
+  const at3 = {};
+  at3[10] = () => page.mouse.move(you.x, you.y);
+  at3[190] = () => page.mouse.move(W * 0.5, 14);
+  await record('cloud-guide', 4.4, at3, { hover: 40, rise: 100, point: 150, leave: 205 });
+  console.log(`带路以后：${JSON.stringify(await cloud())}`);
 }
 console.log(errors.length ? `页面错误：\n${errors.join('\n')}` : '没有页面错误');
 await browser.close();
