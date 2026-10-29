@@ -9,6 +9,7 @@ import { installBadge } from './ui/badge';
 import { GalaxyUi } from './ui/galaxyUi';
 import { toast } from './ui/toast';
 import { Topbar } from './ui/topbar';
+import type { PlanetObject } from './planet/planetObject';
 
 // 星球页上叠加的内容（作品、编辑器）和覆盖整屏的页面（Members、Museum）由 main.ts 装进来
 export interface PlanetLayer {
@@ -131,10 +132,11 @@ export class App {
   // 马上登记，着色器在后台编好才挂进场景，首页版式跟着重排）。是「你」建的就成了「你的星球」：首页把它放到前排正中
   // （别的星球慢慢挪开）、名牌写 You，Visit your planet 也去它那里（ui/home.ts 读 app.you）
   // claim = false：先不让它成为「你的星球」（造星的转场在蓄力时才调 claimYou，原来的你的星球那时才让开）
-  addTeam(team: Team, claim = true): void {
+  // prebuilt：造星窗口里预热好的那颗星球（见 World.addPlanet）；不给时和原来一样新建
+  addTeam(team: Team, claim = true, prebuilt?: PlanetObject): void {
     if (this.teams.some((t) => t.id === team.id)) return;
     this.teams = [...this.teams, team];
-    this.world.addPlanet(team);
+    this.world.addPlanet(team, prebuilt);
     if (team.createdByYou && claim) this.claimYou(team.id);
     if (!this.currentTeamId) this.topbar.showGalaxy(this.teams.length, this.teams.reduce((n, t) => n + t.works.length, 0));
   }
