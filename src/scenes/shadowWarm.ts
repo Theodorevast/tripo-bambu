@@ -4,7 +4,7 @@ import { compileUnculled } from './stager';
 
 // 按 three r186 真正画的时候的状态预编译（stage 角色：展台、花园、作品的投影那一遍；F2：双面半透明拆开的两遍）。
 //
-// 为什么不用 Stager.compileShadow：three r186 的 compileAsync 只在调用的当下把物体排进队列，真正建渲染对象、生成着色器、建管线
+// 为什么不能照常换上阴影材质编（原来的 Stager.compileShadow，已删）：three r186 的 compileAsync 只在调用的当下把物体排进队列，真正建渲染对象、生成着色器、建管线
 // 是在第一个 await 之后一个一个做的。three 画阴影时是按每个物体临时改共用的替换材质：side 翻面（正面剔除改成背面剔除）、
 // positionNode 换成源材质的（风吹的花草）、colorNode 换成按源材质算透明度的那个……画完马上改回去。排在队列里的编译做到的时候，
 // 替换材质早就改回原样了：编出来的阴影管线剔除方向不对、着色器也不是那一份，真正画阴影时又在那一帧同步建一遍（GPU 进程停几十毫秒；

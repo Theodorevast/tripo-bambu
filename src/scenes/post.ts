@@ -368,16 +368,24 @@ export class MainPost {
 
   // 开场时（还没开始出帧）编好后处理自己的几步。光束那两步画到自己的缓冲里，compileAsync 按缓冲的格式编；
   // 最后一步画到画布：画布那一遍的采样数是渲染器在画的那一刻才定的（全屏三角形不多采样），compileAsync 拿不准，
-  // 所以先在后台编着色器（WebGL2 的程序就在这一步编好），再实际画一次（WebGPU 在这里建管线；这时画布还没露出来）
+  // 所以先在后台编着色器（WebGL2 的程序就在这一步编好），再实际画一次（WebGPU 在这里建管线；这时画布还没露出来）。
+  // 这期间别的东西也可能正在后台编（开场的翠宝），三处不能给它们留下错的状态（F2，Triboo 管线报错）：
+  // - 场景缓冲改了大小以后马上在 GPU 上重建：setSize 会扔掉旧的贴图，正在编的东西建管线时读场景缓冲的深度格式，读到空档就报 depthStencil format undefined
+  // - 光束那两步的单通道缓冲只在调 compileAsync 的那一下设为渲染目标（它在第一个 await 之前就按当前的渲染目标排好队），马上换回来：
+  //   three 在后台建节点时按「当前」渲染目标定输出几个分量（NodeBuilder.getOutputType），别的正在编的东西赶上这段，
+  //   就按单通道生成输出，再去配场景缓冲（RGBA16F）建管线时报错。这两步自己按场景缓冲生成四个分量的输出，画进单通道缓冲照样对（多的分量丢掉）
   async compile(): Promise<void> {
     if (!this.on) return;
     const r = this.renderer;
     const saved = r.getRenderTarget();
     try {
       this.resize();
+      r.initRenderTarget(this.target);
       for (const [quad, target] of [[this.maskQuad, this.maskTarget], [this.raysQuad, this.raysTarget]] as const) {
         r.setRenderTarget(target);
-        await r.compileAsync(quad, quad.camera);
+        const done = r.compileAsync(quad, quad.camera);
+        r.setRenderTarget(saved);
+        await done;
       }
       r.setRenderTarget(null);
       await this.withCanvasState(() => r.compileAsync(this.finalQuad, this.finalQuad.camera));
