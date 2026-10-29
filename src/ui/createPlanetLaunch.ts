@@ -246,7 +246,7 @@ class BurstShow {
   private readonly squash = new THREE.Vector3(1, 1, 1); // 这一帧要乘上的拉长 / 压扁
   private readonly applied = new THREE.Vector3(1, 1, 1); // 上一帧乘上去的（下一帧开头先除掉）
   private spin = 0; // 这一帧多转的角度
-  private readonly R: number;
+  private R: number; // 星球在首页里看起来多大（半径 × 落点那一格的大小）：机位、冲多高、特效都按它
   private readonly top: number;
   private holding = true;
   private planned = false;
@@ -300,6 +300,8 @@ class BurstShow {
     const reach = Math.max(1, cam.position.distanceTo(this.world.rig.controls.target));
     this.fromAim.copy(cam.getWorldDirection(_v)).multiplyScalar(reach).add(cam.position);
     this.landingSpot(this.landing);
+    const owner = this.world.planets.get(this.app.you.teamId) ?? this.entry;
+    this.R = this.entry.planet.radius * (this.world.slotOf(owner)?.scale ?? 1);
     this.side.copy(cam.position).sub(this.landing).setY(0);
     if (this.side.lengthSq() < 1e-6) this.side.set(0, 0, 1);
     this.side.normalize();

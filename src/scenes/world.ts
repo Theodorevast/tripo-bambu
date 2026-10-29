@@ -861,10 +861,12 @@ export class World {
   // 首页：镜头再往左转一点（取景算好的 yaw），星系在画面里往右挪、躲开标题卡片。在 rig.update、转场摆好镜头以后转；
   // 镜头每帧都按环绕中心重新摆，不会越转越多。离开首页（聚焦星球）时慢慢回到 0
   private turnForCard(dt: number): void {
-    const goal = this.focused ? 0 : this.homeYawGoal;
+    // 镜头被别人接管着（rig.drive：P3 造星的冲出转场、漫游）：不转。接管的人不一定每帧重新摆镜头，转了会越转越多；
+    // 转过的角度慢慢回到 0，交还以后再从 0 慢慢转回来（不会一下子跳过去）
+    const goal = this.focused || this.rig.drive ? 0 : this.homeYawGoal;
     const d = goal - this.homeYaw;
     this.homeYaw = Math.abs(d) < 1e-4 ? goal : this.homeYaw + d * (1 - Math.exp(-5 * dt));
-    if (this.homeYaw === 0) return;
+    if (this.homeYaw === 0 || this.rig.drive) return;
     this.rig.camera.rotateY(this.homeYaw);
     this.rig.camera.updateMatrixWorld();
   }
