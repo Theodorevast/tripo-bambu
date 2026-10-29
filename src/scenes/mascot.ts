@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { clamp, dot, float, Fn, fwidth, length, min, mix, positionLocal, smoothstep, vec2, vec3 } from 'three/tsl';
+import { clamp, dot, float, Fn, fwidth, length, max, min, mix, positionLocal, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
 import { ModelLibrary } from '../assets/models';
 import { localTribooUrl } from '../play/localAsset';
 
@@ -43,6 +43,10 @@ function bodyMaterial(): THREE.MeshPhysicalNodeMaterial {
   const yc = new THREE.Color(YELLOW);
   const yellow = vec3(yc.r, yc.g, yc.b);
   m.colorNode = mix(mix(black, white, logo.x.mul(front)), yellow, logo.y.mul(front));
+  // logo 亮一下（fun/coupons 蓄力时）：自发光 = 标志的颜色 × userData.logoGlow（平时 0）
+  const glow = uniform(0);
+  m.emissiveNode = mix(white, yellow, logo.y).mul(max(logo.x, logo.y).mul(front)).mul(glow);
+  m.userData.logoGlow = glow;
   return m;
 }
 

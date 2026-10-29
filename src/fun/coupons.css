@@ -1,0 +1,130 @@
+/* 捡到的券展开成的卡片（fun/couponsCard.ts）：暖白的纸面、圆体字、翠宝黄做点缀，和「Made with Tripo」徽章是一套。
+   上面一张券（canvas，和 3D 的券同一个函数画的），下面一张像折着的纸，往下翻开。
+   颜色写死在这里，不跟着界面的深色主题；界面统一（Members / Museum 重做）时再并过去 */
+#app > .coupon-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 24; /* 顶栏、Members / Museum 之上（最高 20），?tune 面板之下（30） */
+  pointer-events: none;
+}
+#app > .coupon-layer.cc-measure { visibility: hidden; }
+.cc-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: radial-gradient(ellipse at 50% 46%, rgba(46, 34, 58, 0.14), rgba(36, 26, 48, 0.42));
+}
+.coupon-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(360px, 92vw);
+  transform: translate(-50%, -54%);
+  pointer-events: auto;
+  font-family: var(--font-ui, 'Nunito', ui-rounded, system-ui, sans-serif);
+  color: #3f3549;
+}
+.cc-ticket {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 1;
+  filter: drop-shadow(0 6px 8px rgba(70, 45, 15, 0.28));
+}
+.cc-fold {
+  position: relative;
+  z-index: 1;
+  margin: -22px 14px 0;
+  padding: 30px 20px 18px;
+  background: #fbf5e8;
+  border: 1.5px solid rgba(74, 64, 88, 0.12);
+  border-top: none;
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 16px 34px rgba(48, 32, 20, 0.28);
+  transform-origin: 50% 0;
+  backface-visibility: hidden;
+}
+.cc-title { margin: 0; font: 800 22px/1.15 var(--font-display, 'Nunito', ui-rounded, sans-serif); color: #2b2233; letter-spacing: 0.005em; }
+.cc-value { margin: 3px 0 8px; font-weight: 700; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: #8b7b52; }
+.cc-value b { font-weight: 800; font-size: 17px; letter-spacing: 0.01em; color: #b98400; margin-right: 2px; }
+.cc-blurb { margin: 0 0 14px; font-weight: 600; font-size: 14px; line-height: 1.45; color: #6a5f72; }
+.cc-code-row { display: flex; gap: 8px; align-items: stretch; }
+.cc-code {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 6px;
+  background: #ffffff;
+  border: 2px dashed #f2b705;
+  border-radius: 12px;
+  font: 800 13px/1.1 var(--font-ui, 'Nunito', ui-rounded, system-ui, sans-serif);
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  white-space: nowrap;
+  color: #2b2233;
+  user-select: all;
+}
+.coupon-card .cc-copy {
+  flex: none;
+  padding: 0 12px;
+  border: none;
+  border-radius: 12px;
+  background: #2b2233;
+  color: #fbf5e8;
+  font: 800 13px/1 var(--font-ui, 'Nunito', ui-rounded, system-ui, sans-serif);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.coupon-card .cc-copy:hover { background: #45395a; color: #fbf5e8; transform: translateY(-1px); }
+.coupon-card .cc-copy:active { transform: scale(0.95); }
+.coupon-card .cc-copy.done { background: #3f8f68; color: #ffffff; }
+.coupon-card .cc-copy.done::before { content: '✓ '; }
+.cc-sample { margin: 8px 0 0; font-weight: 600; font-size: 11.5px; color: #a0949f; text-align: center; }
+.cc-use {
+  display: block;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 999px;
+  background: #f2b705;
+  color: #2b2233;
+  font: 800 15px/1 var(--font-ui, 'Nunito', ui-rounded, system-ui, sans-serif);
+  letter-spacing: 0.01em;
+  text-align: center;
+  text-decoration: none;
+  box-shadow: 0 3px 0 #c18c00;
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.15s;
+}
+.cc-use:hover { transform: translateY(-1px); box-shadow: 0 4px 0 #c18c00; }
+.cc-use:active { transform: translateY(2px); box-shadow: 0 1px 0 #c18c00; }
+.cc-arrow { font-weight: 700; }
+.coupon-card .cc-close {
+  position: absolute;
+  z-index: 3;
+  top: -10px;
+  right: -10px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(74, 64, 88, 0.16);
+  background: #fbf5e8;
+  color: #3f3549;
+  font: 800 19px/1 var(--font-ui, 'Nunito', ui-rounded, system-ui, sans-serif);
+  box-shadow: 0 3px 8px rgba(48, 32, 20, 0.2);
+  cursor: pointer;
+}
+.coupon-card .cc-close:hover { border-color: #f2b705; color: #2b2233; }
+.coupon-card button:focus-visible, .cc-use:focus-visible { outline: 3px solid #f2b705; outline-offset: 2px; }
+.cc-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 480px) {
+  .cc-fold { margin: -18px 10px 0; padding: 26px 16px 16px; }
+  .cc-title { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coupon-card .cc-copy, .cc-use { transition: none; }
+}

@@ -15,6 +15,8 @@ import { installPlanetLookTune, planetLookParams } from './nature/planetLook';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
 import { tuneWater, WATER, WATER_COLORS, WATER_ICE } from './nature/water';
 import { toast } from './ui/toast';
+import { addCouponsTune } from './fun/couponsTune';
+import { COUPONS } from './fun/couponsMath';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
 // 分组（I1 整理）：
@@ -67,6 +69,7 @@ export function tuneJson(world?: World): string {
       look: LOOK_TUNE,
       water: { ...WATER, colors: WATER_COLORS, ice: WATER_ICE },
       stage: STAGE_TUNE,
+      coupons: COUPONS,
       ...TRANSITION_TUNE,
     },
     (_key, v: unknown) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v),
@@ -172,6 +175,7 @@ export function installTune(world: World): void {
   for (const k of LIFE_EFFECTS) fx.addBinding(effects, k).on('change', () => world.life.setEnabled(k, effects[k]));
 
   addTransitionTune(pane, world); // —— Transitions ——（scenes/transitionTune.ts：转场的分镜表、开场探头、演示按钮）
+  addCouponsTune(pane); // —— Coupons ——（fun/couponsTune.ts：点翠宝吐券每一步的时长、券的飞行和寿命、捡券）
 
   // —— Camera ——
   const cam = pane.addFolder({ title: 'Camera', expanded: false });

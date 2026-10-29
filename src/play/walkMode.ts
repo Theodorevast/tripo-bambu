@@ -56,6 +56,8 @@ export class WalkMode {
   ready = false; // 角色模型加载、预编译好了
   triboo = false; // 用的是翠宝模型（否则是胶囊体占位）
   onStep: (() => void) | null = null; // 每帧走完、镜头摆好之后调：自查脚本记轨迹用
+  onClick: ((x: number, y: number) => boolean) | null = null; // 点了画面先问它（fun/coupons：点到翠宝、券），返回 true 就不走过去
+  onInteract: (() => void) | null = null; // 附近没有作品时按 E（fun/coupons：翠宝吐券）
   private readonly app: App;
   private readonly screen: PlanetScreen;
   private entry: PlanetEntry | null = null;
@@ -425,6 +427,7 @@ export class WalkMode {
     }
     if (down && e.code === 'KeyE') {
       if (this.near) this.openCard(this.near);
+      else if (!e.repeat) this.onInteract?.();
       return;
     }
     if (!(e.code in MOVE_KEYS)) return;
@@ -479,7 +482,7 @@ export class WalkMode {
     const d = this.drag;
     if (!d || e.pointerId !== d.id) return;
     this.endDrag();
-    if (!d.moved && this.active) this.walkTo(e.clientX, e.clientY);
+    if (!d.moved && this.active && !this.onClick?.(e.clientX, e.clientY)) this.walkTo(e.clientX, e.clientY);
   }
 
   private endDrag(): void {
