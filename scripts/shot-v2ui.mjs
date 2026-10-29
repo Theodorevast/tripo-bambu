@@ -115,6 +115,26 @@ for (const [W, H] of SIZES) {
     await until(p, '你的星球', () => !!document.querySelector('#app')?.dataset.planetReady && window.__app.routeIdle(), null, 90000);
     await p.waitForTimeout(1800);
     await shot('planet');
+    if (want('label') || want('workcard')) {
+      const at = await p.evaluate(() => {
+        for (const id of window.__app.placedIds()) {
+          const q = window.__app.workScreenPos(id);
+          if (q && q.x > 80 && q.x < innerWidth - 80 && q.y > 150 && q.y < innerHeight - 90) return q;
+        }
+        return null;
+      });
+      if (at) {
+        await p.mouse.move(at.x, at.y, { steps: 4 });
+        await p.waitForTimeout(700);
+        await shot('label');
+        await p.mouse.click(at.x, at.y);
+        await p.waitForTimeout(900);
+        await shot('workcard');
+        await p.locator('.work-card .wc-close').click().catch(() => {});
+        await p.mouse.move(W / 2, 20);
+        await p.waitForTimeout(400);
+      }
+    }
   });
   await step('members', async () => {
     await p.getByRole('button', { name: 'Members', exact: true }).click();
@@ -144,6 +164,17 @@ for (const [W, H] of SIZES) {
     await until(p, 'Museum 关掉', () => document.querySelector('section.museum')?.hidden === true, null, 5000);
     await p.waitForTimeout(800);
   });
+  await step('toast', async () => {
+    if (!want('toast')) return;
+    // 地址里的作品不在这个 Museum：Museum 打开、底部一条提示条
+    await p.evaluate(() => { location.hash = `#/t/${location.hash.split('/')[2]}/museum/nope`; });
+    await until(p, '提示条', () => !!document.querySelector('#app > .toast.show'), null, 15000);
+    await p.waitForTimeout(700);
+    await shot('toast');
+    await p.keyboard.press('Escape');
+    await until(p, 'Museum 关掉', () => document.querySelector('section.museum')?.hidden === true, null, 5000);
+    await p.waitForTimeout(600);
+  });
   await step('edit', async () => {
     if (!want('edit')) return;
     await p.locator('.topbar button.primary').click();
@@ -170,6 +201,58 @@ for (const [W, H] of SIZES) {
     await p.waitForTimeout(1800);
     await shot('walk');
     await p.keyboard.press('Escape');
+  });
+  await step('tune', async () => {
+    if (!want('tune')) return;
+    const t = await ctx.newPage();
+    errors.push(watchErrors(t));
+    await t.goto(`${base}/?nolocal&tune#/t/lumen-guild`);
+    await until(t, '调参面板', () => window.__ready === true && document.querySelector('.tune-pane')?.hidden === false && !!document.querySelector('#app')?.dataset.planetReady, null, 90000);
+    await t.waitForTimeout(1500);
+    const file = join(OUT, `tune-${W}.png`);
+    await t.screenshot({ path: file });
+    log.push(file);
+    await t.close();
+  });
+  await step('launch', async () => {
+    if (!want('launch')) return;
+    const l = await ctx.newPage();
+    errors.push(watchErrors(l));
+    await l.goto(`${base}/?nolocal#/create`);
+    await until(l, '造星窗口', () => window.__ready === true && window.__create?.state().open && window.__create.state().previewReady, null, 90000);
+    await l.locator('#cp-name').fill('Quiet Comets');
+    for (const s of ['look', 'crew', 'launch']) {
+      await l.locator('.cp-next').click();
+      await until(l, s, (x) => window.__create.state().step === x, s);
+    }
+    await until(l, '替身备好', () => window.__create.state().twinReady, null, 30000);
+    await l.locator('.cp-next').click();
+    for (const [phase, wait] of [['charge', 380], ['burst', 140], ['settle', 260]]) {
+      await l.waitForFunction((x) => window.__create.state().launch.phase === x, phase, { timeout: 30000, polling: 'raf' });
+      await l.waitForTimeout(wait);
+      const file = join(OUT, `launch-${phase}-${W}.png`);
+      await l.screenshot({ path: file });
+      log.push(file);
+    }
+    await l.close();
+  });
+  await step('focus', async () => {
+    if (!want('focus')) return;
+    const f = await ctx.newPage();
+    errors.push(watchErrors(f));
+    await f.goto(`${base}/?nolocal`);
+    await until(f, '首页就绪', () => window.__ready === true && window.__app.routeIdle() && !document.querySelector('#boot'), null, 90000);
+    await until(f, '开场演完', () => !window.__home.state().intro, null, 20000);
+    await f.waitForTimeout(800);
+    // Tab 到「Visit your planet」截一张，再 Tab 到第一张名牌截一张
+    for (let i = 0; i < 12 && !(await f.evaluate(() => document.activeElement?.classList.contains('tb-visit'))); i++) await f.keyboard.press('Tab');
+    await f.waitForTimeout(400);
+    await f.screenshot({ path: join(OUT, `focus-visit-${W}.png`) });
+    for (let i = 0; i < 12 && !(await f.evaluate(() => document.activeElement?.classList.contains('planet-tag'))); i++) await f.keyboard.press('Tab');
+    await f.waitForTimeout(700);
+    await f.screenshot({ path: join(OUT, `focus-tag-${W}.png`) });
+    log.push(join(OUT, `focus-visit-${W}.png`), join(OUT, `focus-tag-${W}.png`));
+    await f.close();
   });
   await ctx.close();
 }
