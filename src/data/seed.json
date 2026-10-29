@@ -21,21 +21,9 @@
           "role": "builder"
         },
         {
-          "id": "m-mia-makes",
-          "handle": "mia_makes",
-          "displayName": "mia_makes",
-          "role": "builder"
-        },
-        {
-          "id": "m-kenji-polys",
-          "handle": "kenji_polys",
-          "displayName": "kenji_polys",
-          "role": "builder"
-        },
-        {
-          "id": "m-liam-lowpoly",
-          "handle": "liam_lowpoly",
-          "displayName": "liam_lowpoly",
+          "id": "m-ember-sculpts",
+          "handle": "ember_sculpts",
+          "displayName": "ember_sculpts",
           "role": "builder"
         },
         {
@@ -47,36 +35,36 @@
       ],
       "works": [
         {
-          "id": "ph-01",
-          "title": "Brass Lantern",
-          "authorId": "m-mia-makes",
-          "file": "",
-          "thumb": "",
-          "tris": 12840
+          "id": "artimus-builder-of-the-keep",
+          "title": "Artimus, Builder of the Keep",
+          "authorId": "m-ember-sculpts",
+          "file": "artimus-builder-of-the-keep.glb",
+          "thumb": "artimus-builder-of-the-keep.webp",
+          "tris": 299998
         },
         {
-          "id": "ph-02",
-          "title": "Tidal Shrine",
-          "authorId": "m-mia-makes",
-          "file": "",
-          "thumb": "",
-          "tris": 48210
+          "id": "demon-armor",
+          "title": "Demon Armor",
+          "authorId": "m-ember-sculpts",
+          "file": "demon-armor.glb",
+          "thumb": "demon-armor.webp",
+          "tris": 299993
         },
         {
-          "id": "ph-03",
-          "title": "Paper Crane Mk II",
-          "authorId": "m-kenji-polys",
-          "file": "",
-          "thumb": "",
-          "tris": 6420
+          "id": "dragon-head",
+          "title": "Dragon Head",
+          "authorId": "m-ember-sculpts",
+          "file": "dragon-head.glb",
+          "thumb": "dragon-head.webp",
+          "tris": 299997
         },
         {
-          "id": "ph-11",
-          "title": "Glass Greenhouse",
-          "authorId": "m-liam-lowpoly",
-          "file": "",
-          "thumb": "",
-          "tris": 9480
+          "id": "fantasy-sorcerer",
+          "title": "Fantasy Sorcerer",
+          "authorId": "m-ember-sculpts",
+          "file": "fantasy-sorcerer.glb",
+          "thumb": "fantasy-sorcerer.webp",
+          "tris": 299998
         }
       ],
       "planet": {
@@ -86,7 +74,7 @@
         "atmosphere": true,
         "placements": [
           {
-            "workId": "ph-01",
+            "workId": "artimus-builder-of-the-keep",
             "dir": [
               -0.46733433089791093,
               0.6548067686832146,
@@ -96,7 +84,7 @@
             "scale": 1
           },
           {
-            "workId": "ph-02",
+            "workId": "demon-armor",
             "dir": [
               -0.11945978397401137,
               0.8258223502870652,
@@ -106,7 +94,7 @@
             "scale": 1
           },
           {
-            "workId": "ph-03",
+            "workId": "dragon-head",
             "dir": [
               0.2667447628352011,
               0.8258223502870652,
@@ -116,7 +104,7 @@
             "scale": 1
           },
           {
-            "workId": "ph-11",
+            "workId": "fantasy-sorcerer",
             "dir": [
               0.6129570274368181,
               0.6548067686832145,
@@ -149,56 +137,44 @@
           "role": "builder"
         },
         {
-          "id": "m-zoe-sculpts",
-          "handle": "zoe_sculpts",
-          "displayName": "zoe_sculpts",
-          "role": "builder"
-        },
-        {
-          "id": "m-arno-builds",
-          "handle": "arno_builds",
-          "displayName": "arno_builds",
-          "role": "builder"
-        },
-        {
-          "id": "m-otto-bevel",
-          "handle": "otto_bevel",
-          "displayName": "otto_bevel",
+          "id": "m-frostbyte",
+          "handle": "frostbyte",
+          "displayName": "frostbyte",
           "role": "builder"
         }
       ],
       "works": [
         {
-          "id": "ph-04",
-          "title": "Rusty Courier Bot",
-          "authorId": "m-zoe-sculpts",
-          "file": "",
-          "thumb": "",
-          "tris": 88730
+          "id": "athena-statue",
+          "title": "Athena Statue",
+          "authorId": "m-frostbyte",
+          "file": "athena-statue.glb",
+          "thumb": "athena-statue.webp",
+          "tris": 299996
         },
         {
-          "id": "ph-05",
-          "title": "Moss Golem",
-          "authorId": "m-zoe-sculpts",
-          "file": "",
-          "thumb": "",
-          "tris": 132400
+          "id": "ice-golem",
+          "title": "Ice Golem",
+          "authorId": "m-frostbyte",
+          "file": "ice-golem.glb",
+          "thumb": "ice-golem.webp",
+          "tris": 299987
         },
         {
-          "id": "ph-06",
-          "title": "Lighthouse at Dusk",
-          "authorId": "m-arno-builds",
-          "file": "",
-          "thumb": "",
-          "tris": 21950
+          "id": "ice-toad",
+          "title": "Ice Toad",
+          "authorId": "m-frostbyte",
+          "file": "ice-toad.glb",
+          "thumb": "ice-toad.webp",
+          "tris": 299998
         },
         {
-          "id": "ph-14",
-          "title": "Coral Throne",
-          "authorId": "m-otto-bevel",
-          "file": "",
-          "thumb": "",
-          "tris": 72050
+          "id": "jade-guardian-lion",
+          "title": "Jade Guardian Lion",
+          "authorId": "m-frostbyte",
+          "file": "jade-guardian-lion.glb",
+          "thumb": "jade-guardian-lion.webp",
+          "tris": 299999
         }
       ],
       "planet": {
@@ -208,7 +184,7 @@
         "atmosphere": true,
         "placements": [
           {
-            "workId": "ph-04",
+            "workId": "athena-statue",
             "dir": [
               -0.46733433089791093,
               0.6548067686832146,
@@ -218,7 +194,7 @@
             "scale": 1
           },
           {
-            "workId": "ph-05",
+            "workId": "ice-golem",
             "dir": [
               -0.11945978397401137,
               0.8258223502870652,
@@ -228,7 +204,7 @@
             "scale": 1
           },
           {
-            "workId": "ph-06",
+            "workId": "ice-toad",
             "dir": [
               0.2667447628352011,
               0.8258223502870652,
@@ -238,7 +214,7 @@
             "scale": 1
           },
           {
-            "workId": "ph-14",
+            "workId": "jade-guardian-lion",
             "dir": [
               0.6129570274368181,
               0.6548067686832145,
@@ -271,42 +247,44 @@
           "role": "builder"
         },
         {
-          "id": "m-felix-uv",
-          "handle": "felix_uv",
-          "displayName": "felix_uv",
-          "role": "builder"
-        },
-        {
-          "id": "m-sana-vertex",
-          "handle": "sana_vertex",
-          "displayName": "sana_vertex",
+          "id": "m-castle-keeper",
+          "handle": "castle_keeper",
+          "displayName": "castle_keeper",
           "role": "builder"
         }
       ],
       "works": [
         {
-          "id": "ph-08",
-          "title": "Orbital Kiosk",
-          "authorId": "m-felix-uv",
-          "file": "",
-          "thumb": "",
-          "tris": 17330
+          "id": "castle",
+          "title": "Castle",
+          "authorId": "m-castle-keeper",
+          "file": "castle.glb",
+          "thumb": "castle.webp",
+          "tris": 299998
         },
         {
-          "id": "ph-09",
-          "title": "Clockwork Owl",
-          "authorId": "m-felix-uv",
-          "file": "",
-          "thumb": "",
-          "tris": 64120
+          "id": "fantasy-beehive-cottage",
+          "title": "Fantasy Beehive Cottage",
+          "authorId": "m-castle-keeper",
+          "file": "fantasy-beehive-cottage.glb",
+          "thumb": "fantasy-beehive-cottage.webp",
+          "tris": 299995
         },
         {
-          "id": "ph-07",
-          "title": "Tea House",
-          "authorId": "m-sana-vertex",
-          "file": "",
-          "thumb": "",
-          "tris": 35600
+          "id": "fantasy-castle",
+          "title": "Fantasy Castle",
+          "authorId": "m-castle-keeper",
+          "file": "fantasy-castle.glb",
+          "thumb": "fantasy-castle.webp",
+          "tris": 299999
+        },
+        {
+          "id": "post-apocalyptic-lighthouse",
+          "title": "Post-Apocalyptic Lighthouse",
+          "authorId": "m-castle-keeper",
+          "file": "post-apocalyptic-lighthouse.glb",
+          "thumb": "post-apocalyptic-lighthouse.webp",
+          "tris": 300000
         }
       ],
       "planet": {
@@ -316,33 +294,43 @@
         "atmosphere": true,
         "placements": [
           {
-            "workId": "ph-08",
+            "workId": "castle",
             "dir": [
-              -0.30296293692191445,
-              0.7602866147233474,
-              0.5746109312605882
+              -0.46733433089791093,
+              0.6548067686832146,
+              0.5939921875335139
             ],
-            "yaw": 0.2558184896337032,
+            "yaw": 0.3175860840445027,
             "scale": 1
           },
           {
-            "workId": "ph-09",
+            "workId": "fantasy-beehive-cottage",
             "dir": [
-              0.07375050726181145,
-              0.848048096156426,
-              0.52476212638117
+              -0.11945978397401137,
+              0.8258223502870652,
+              0.5511322942626666
             ],
-            "yaw": 0.13962634015954634,
+            "yaw": 0.19701560874227753,
             "scale": 1
           },
           {
-            "workId": "ph-07",
+            "workId": "fantasy-castle",
             "dir": [
-              0.4496109042682255,
-              0.7602866147233476,
-              0.468843575444541
+              0.2667447628352011,
+              0.8258223502870652,
+              0.49685478488824114
             ],
-            "yaw": 0.023434190685389492,
+            "yaw": 0.08223707157681524,
+            "scale": 1
+          },
+          {
+            "workId": "post-apocalyptic-lighthouse",
+            "dir": [
+              0.6129570274368181,
+              0.6548067686832145,
+              0.4421671383113707
+            ],
+            "yaw": -0.038333403725409824,
             "scale": 1
           }
         ]
@@ -369,42 +357,36 @@
           "role": "builder"
         },
         {
-          "id": "m-ivy-retopo",
-          "handle": "ivy_retopo",
-          "displayName": "ivy_retopo",
-          "role": "builder"
-        },
-        {
-          "id": "m-noor-mesh",
-          "handle": "noor_mesh",
-          "displayName": "noor_mesh",
+          "id": "m-pumpkin-patch",
+          "handle": "pumpkin_patch",
+          "displayName": "pumpkin_patch",
           "role": "builder"
         }
       ],
       "works": [
         {
-          "id": "ph-12",
-          "title": "Fox Spirit",
-          "authorId": "m-ivy-retopo",
-          "file": "",
-          "thumb": "",
-          "tris": 27710
+          "id": "dinosaur-skeleton",
+          "title": "Dinosaur Skeleton",
+          "authorId": "m-pumpkin-patch",
+          "file": "dinosaur-skeleton.glb",
+          "thumb": "dinosaur-skeleton.webp",
+          "tris": 17237
         },
         {
-          "id": "ph-13",
-          "title": "Windmill No. 9",
-          "authorId": "m-ivy-retopo",
-          "file": "",
-          "thumb": "",
-          "tris": 15260
+          "id": "medic-knight",
+          "title": "Medic Knight",
+          "authorId": "m-pumpkin-patch",
+          "file": "medic-knight.glb",
+          "thumb": "medic-knight.webp",
+          "tris": 299999
         },
         {
-          "id": "ph-10",
-          "title": "Desert Rover",
-          "authorId": "m-noor-mesh",
-          "file": "",
-          "thumb": "",
-          "tris": 41890
+          "id": "pumpkin-girl",
+          "title": "Pumpkin Girl",
+          "authorId": "m-pumpkin-patch",
+          "file": "pumpkin-girl.glb",
+          "thumb": "pumpkin-girl.webp",
+          "tris": 48566
         }
       ],
       "planet": {
@@ -414,7 +396,7 @@
         "atmosphere": true,
         "placements": [
           {
-            "workId": "ph-12",
+            "workId": "dinosaur-skeleton",
             "dir": [
               -0.30296293692191445,
               0.7602866147233474,
@@ -424,7 +406,7 @@
             "scale": 1
           },
           {
-            "workId": "ph-13",
+            "workId": "medic-knight",
             "dir": [
               0.07375050726181145,
               0.848048096156426,
@@ -434,7 +416,191 @@
             "scale": 1
           },
           {
-            "workId": "ph-10",
+            "workId": "pumpkin-girl",
+            "dir": [
+              0.4496109042682255,
+              0.7602866147233476,
+              0.468843575444541
+            ],
+            "yaw": 0.023434190685389492,
+            "scale": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "ember-forge",
+      "name": "Ember Forge",
+      "motto": "Hard surfaces, warm hearts.",
+      "color": "#d1694a",
+      "status": "active",
+      "foundedDaysAgo": 12,
+      "members": [
+        {
+          "id": "m-anvil-ash",
+          "handle": "anvil_ash",
+          "displayName": "Ash Calloway",
+          "role": "captain"
+        },
+        {
+          "id": "m-bevel-bo",
+          "handle": "bevel_bo",
+          "displayName": "Bo Nakamura",
+          "role": "builder"
+        },
+        {
+          "id": "m-rust-and-rivet",
+          "handle": "rust_and_rivet",
+          "displayName": "rust_and_rivet",
+          "role": "builder"
+        }
+      ],
+      "works": [
+        {
+          "id": "military-tank",
+          "title": "Military Tank",
+          "authorId": "m-rust-and-rivet",
+          "file": "military-tank.glb",
+          "thumb": "military-tank.webp",
+          "tris": 299998
+        },
+        {
+          "id": "post-apocalyptic-robot",
+          "title": "Post-Apocalyptic Robot",
+          "authorId": "m-rust-and-rivet",
+          "file": "post-apocalyptic-robot.glb",
+          "thumb": "post-apocalyptic-robot.webp",
+          "tris": 299994
+        },
+        {
+          "id": "weathered-rocket",
+          "title": "Weathered Rocket",
+          "authorId": "m-rust-and-rivet",
+          "file": "weathered-rocket.glb",
+          "thumb": "weathered-rocket.webp",
+          "tris": 299998
+        }
+      ],
+      "planet": {
+        "seed": 5501,
+        "preset": "volcanic",
+        "ring": true,
+        "atmosphere": true,
+        "placements": [
+          {
+            "workId": "military-tank",
+            "dir": [
+              -0.30296293692191445,
+              0.7602866147233474,
+              0.5746109312605882
+            ],
+            "yaw": 0.2558184896337032,
+            "scale": 1
+          },
+          {
+            "workId": "post-apocalyptic-robot",
+            "dir": [
+              0.07375050726181145,
+              0.848048096156426,
+              0.52476212638117
+            ],
+            "yaw": 0.13962634015954634,
+            "scale": 1
+          },
+          {
+            "workId": "weathered-rocket",
+            "dir": [
+              0.4496109042682255,
+              0.7602866147233476,
+              0.468843575444541
+            ],
+            "yaw": 0.023434190685389492,
+            "scale": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "tidepool-atelier",
+      "name": "Tidepool Atelier",
+      "motto": "Everything floats here.",
+      "color": "#6fb7b0",
+      "status": "active",
+      "foundedDaysAgo": 8,
+      "members": [
+        {
+          "id": "m-kelp-kira",
+          "handle": "kelp_kira",
+          "displayName": "Kira Volk",
+          "role": "captain"
+        },
+        {
+          "id": "m-retopo-rex",
+          "handle": "retopo_rex",
+          "displayName": "Rex Adler",
+          "role": "builder"
+        },
+        {
+          "id": "m-old-time-garage",
+          "handle": "old_time_garage",
+          "displayName": "old_time_garage",
+          "role": "builder"
+        }
+      ],
+      "works": [
+        {
+          "id": "tufted-armchair",
+          "title": "Tufted Armchair",
+          "authorId": "m-old-time-garage",
+          "file": "tufted-armchair.glb",
+          "thumb": "tufted-armchair.webp",
+          "tris": 34780
+        },
+        {
+          "id": "vintage-car",
+          "title": "Vintage Car",
+          "authorId": "m-old-time-garage",
+          "file": "vintage-car.glb",
+          "thumb": "vintage-car.webp",
+          "tris": 299998
+        },
+        {
+          "id": "vintage-luggage-cart",
+          "title": "Vintage Luggage Cart",
+          "authorId": "m-old-time-garage",
+          "file": "vintage-luggage-cart.glb",
+          "thumb": "vintage-luggage-cart.webp",
+          "tris": 300000
+        }
+      ],
+      "planet": {
+        "seed": 6607,
+        "preset": "coral",
+        "ring": true,
+        "atmosphere": true,
+        "placements": [
+          {
+            "workId": "tufted-armchair",
+            "dir": [
+              -0.30296293692191445,
+              0.7602866147233474,
+              0.5746109312605882
+            ],
+            "yaw": 0.2558184896337032,
+            "scale": 1
+          },
+          {
+            "workId": "vintage-car",
+            "dir": [
+              0.07375050726181145,
+              0.848048096156426,
+              0.52476212638117
+            ],
+            "yaw": 0.13962634015954634,
+            "scale": 1
+          },
+          {
+            "workId": "vintage-luggage-cart",
             "dir": [
               0.4496109042682255,
               0.7602866147233476,
