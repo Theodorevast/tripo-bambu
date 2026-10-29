@@ -130,7 +130,7 @@ export function homeLayout(teams: HomeTeam[], youId: string | null, shape: HomeS
       const s = tier === 'built' ? p.builtScale * (1 - p.builtFalloff * k) : p.buildingScale * (1 - p.buildingFalloff * k);
       const w = walk[arm];
       // 沿臂往外走：离上一颗至少差均匀的角度（step × 0.9）、离得够远（两颗半径之和 × (1 + gap)），而且不比 minR 近
-      const need = Number.isNaN(w.x) ? 0 : (w.s + s) * R * (1 + p.gap * (shape === 'tall' ? 0.6 : 1));
+      const need = Number.isNaN(w.x) ? 0 : (w.s + s) * R * (1 + p.gap);
       if (!Number.isNaN(w.x)) w.theta = Math.max(w.theta, w.last + step * 0.8);
       let guard = 0;
       for (;;) {

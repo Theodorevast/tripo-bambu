@@ -340,7 +340,7 @@ export class GalaxyUi {
     // 名牌一律放在自己星球的正下方；和更近的名牌、更近的星球叠在一起就淡掉（你的星球的名牌一直在）
     if (ok) {
       if (hover) slot = 0;
-      else if (t.rank === 0) slot = this.fits(t, ys[0], placed) || !this.fits(t, ys[2], placed) ? 0 : 2; // 你的星球：下面压到别的星球时放到它上面（一直显示）
+      else if (t.rank === 0) slot = 0; // 你的星球：名牌一律在正下方、一直显示（先摆它，别的名牌给它让开）
       else if (t.entry.team.status === 'under-construction') slot = -1; // 建设中的：平时不显示，悬停时才有
       else if (this.fits(t, ys[0], placed)) slot = 0;
     }
