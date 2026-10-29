@@ -78,6 +78,7 @@ const bootAt = (p, phase) => until(p, `启动画面停在 ${phase}`, (x) => {
 // 截启动画面之前：字体下好、翠宝动图的淡入放完（没有动图时直接过）
 const bootSettled = (p) => p.evaluate(async () => {
   await document.fonts.ready;
+  // 第二版没有动图了（天体仪是 index.html 里的线稿，data-art="orrery"）；留着这一句，旧版本的动图也照样等
   await Promise.all(document.querySelector('#boot .boot-gif')?.getAnimations().map((a) => a.finished.catch(() => {})) ?? []);
 });
 
@@ -142,18 +143,20 @@ try {
     Object.defineProperty(window, '__ready', { configurable: true, get: () => ready, set: (v) => { ready = v; if (v) performance.mark('smoke:ready'); } });
   });
 
-  await step('打开星系：启动画面撤掉，开场飞完；Nunito 500/600/700/800 都已经下好', 'galaxy', async () => {
+  // 第二版（v2-ui）换了字体：原来查「Nunito 500/600/700/800 都下好」，现在查 fonts-v2.css 的三种字体（Cinzel、Cormorant Garamond 正体和斜体、Inter）。
+  // 都是可变字重、一种一个文件，所以按「字体名 + 正斜体」查是不是 loaded，不再按字重一个个查
+  await step('打开星系：启动画面撤掉，开场飞完；Cinzel、Cormorant Garamond（正体、斜体）、Inter 都已经下好', 'galaxy', async () => {
     await page.goto(`${base}/${QUERY}`);
     await until(page, '首页就绪', () => window.__ready === true && window.__app.routeIdle() && !document.querySelector('#boot'), null, 60000);
     await until(page, '星系标题', () => document.querySelector('.tb-name')?.textContent === 'Community Planets');
     backend = await page.evaluate(() => window.__app.backend());
     const t = await page.evaluate(() => {
       const at = (name) => Math.round(performance.getEntriesByName(name)[0]?.startTime ?? NaN);
-      const fonts = [...document.fonts].filter((f) => f.family.replace(/"/g, '') === 'Nunito' && f.status === 'loaded' && f.unicodeRange.startsWith('U+0-FF')).map((f) => Number(f.weight));
-      return { fcp: at('first-contentful-paint'), sky: at('boot:sky'), warm: at('boot:warm'), land: at('boot:land'), leave: at('boot:leave'), done: at('boot:done'), fonts: at('boot:fonts'), ready: at('smoke:ready'), weights: fonts.sort() };
+      const fonts = [...document.fonts].filter((f) => f.status === 'loaded').map((f) => `${f.family.replace(/["']/g, '')}${f.style === 'italic' ? ' italic' : ''}`);
+      return { fcp: at('first-contentful-paint'), sky: at('boot:sky'), warm: at('boot:warm'), land: at('boot:land'), leave: at('boot:leave'), done: at('boot:done'), fonts: at('boot:fonts'), ready: at('smoke:ready'), faces: [...new Set(fonts)].sort() };
     });
     numbers = `首帧（启动画面）${t.fcp} ms · 建天空 ${t.sky} · 预热 ${t.warm} · 落地 ${t.land} · 开始散开 ${t.leave} · 撤掉 ${t.done} · 字体到齐 ${t.fonts} · __ready ${t.ready}`;
-    for (const w of [500, 600, 700, 800]) if (!t.weights.includes(w)) throw new Error(`Nunito ${w} 没下载（已有 ${t.weights.join('/')}）`);
+    for (const f of ['Cinzel', 'Cormorant Garamond', 'Cormorant Garamond italic', 'Inter']) if (!t.faces.includes(f)) throw new Error(`${f} 没下载（已有 ${t.faces.join(' / ')}）`);
     // 首帧画的就是启动画面（散开之前）；构建版的脚本很快，可能比首帧还早开始，所以不比首帧和「建天空」谁先
     if (!(t.fcp < t.leave && t.sky < t.warm && t.warm < t.land && t.land <= t.leave && t.leave < t.done)) throw new Error(`阶段顺序不对：${numbers}`);
   });
@@ -327,7 +330,7 @@ try {
 } finally {
   // 中途抛错也走到这里：把已有的结果和收集到的页面错误都打出来，再关掉浏览器和服务器
   const errors = errorLists.flatMap(([name, list]) => list.map((e) => `[${name}] ${e}`));
-  console.log(`base: ${base} · backend: ${backend} · 翠宝动图: ${art === 'gif' ? '有（public/brand/ 的品牌素材）' : art === 'dots' ? '没有，用圆点' : art}`);
+  console.log(`base: ${base} · backend: ${backend} · 启动画面的图: ${art === 'orrery' ? '天体仪和翠宝剪影（第二版，线稿）' : art === 'gif' ? '像素翠宝动图' : art === 'dots' ? '没有，用圆点' : art}`);
   if (numbers) console.log(numbers);
   console.log(results.join('\n'));
   if (fatal) console.log(`✗ 脚本中断：${fatal?.stack ?? fatal}`);

@@ -1,8 +1,5 @@
-// 圆体字 Nunito（OFL，Fontsource 自托管；卡通版分支挑过来的）：顶栏、卡片、按钮都用它
-import '@fontsource/nunito/500.css';
-import '@fontsource/nunito/600.css';
-import '@fontsource/nunito/700.css';
-import '@fontsource/nunito/800.css';
+// 第二版的字体（OFL，自托管，src/assets/fonts/）：Cinzel 写大写标题，Cormorant Garamond 写副标题和说明，Inter 写界面小字。不再用 Nunito
+import './ui/fonts-v2.css';
 import './ui/styles.css';
 import { App, type Sheet } from './app';
 import { applyLocalWorks } from './assets/localWorks';
@@ -26,9 +23,12 @@ import { installTuneToggle } from './ui/tuneToggle';
 import { installCreatePlanet } from './ui/createPlanet';
 import { installCloudTriboo } from './scenes/homeCloudTriboo';
 import { installHomeTribooTune } from './scenes/homeTribooTune';
+// 第二版的界面主题（午夜天文台：深色半透明面板、香槟金细线、衬线字）：放在所有 import 的最后，
+// 盖过 styles.css 和各模块自带的 CSS（cobrand、badge、coupons、createPlanet、walk）；旧的 CSS 文件不动
+import './ui/theme-v2.css';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
-// 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后云散开；Nunito 的几个字重从这里开始在后台预加载
+// 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后淡出；界面用到的几种字体从这里开始在后台预加载
 const boot = startBoot();
 // 本机有私有的真实模型时（开发环境，.tmp/local-models/），「你的星球」上的占位作品换成它们（assets/localWorks.ts）
 const seed = await applyLocalWorks(seedJson as unknown as Seed);
