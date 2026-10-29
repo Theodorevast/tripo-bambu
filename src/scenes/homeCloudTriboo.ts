@@ -21,6 +21,7 @@ export const CLOUD_TRIBOO = {
   drift: 0.35, // 一个周期里慢慢飘多远（× 身子半径）
   opacity: 0.92,
   gold: 0.95, // 胸口那一点淡金色的 V（0 = 没有）
+  afterIntro: 2.6, // 开场星尘放完以后等多久才第一次聚（秒：让右边的翠宝先打完招呼）
 };
 
 // —— 形状：身上每一团（翠宝的平面坐标，身子半径 = 1，y 朝上；z 往镜头那边鼓一点）——
@@ -224,6 +225,8 @@ export class CloudTriboo {
     this.t += dt;
     switch (this.phase) {
       case 'hidden':
+        // 开场的星尘拼标志在放：放完以后再等一会儿（右边的翠宝这时探头打招呼），一个一个来
+        if (world.galaxy.shapeState.t >= 0) this.wait = Math.max(this.wait, CLOUD_TRIBOO.afterIntro);
         this.wait -= dt;
         if (this.wait <= 0 && calm && this.place()) {
           this.phase = 'gather';

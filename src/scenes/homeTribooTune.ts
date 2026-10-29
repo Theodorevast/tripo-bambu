@@ -16,6 +16,7 @@ export function installHomeTribooTune(world: World): void {
     cloud.addBinding(CLOUD_TRIBOO, 'drift', { label: 'drift ×body', min: 0, max: 2, step: 0.05 });
     cloud.addBinding(CLOUD_TRIBOO, 'opacity', { min: 0.2, max: 1, step: 0.01 });
     cloud.addBinding(CLOUD_TRIBOO, 'gold', { label: 'chest V glow', min: 0, max: 1.5, step: 0.01 });
+    cloud.addBinding(CLOUD_TRIBOO, 'afterIntro', { label: 'wait after stardust (s)', min: 0, max: 8, step: 0.1 });
     cloud.addButton({ title: 'Replay (scatter & regather)' }).on('click', () => cloudTriboo()?.replay());
     const dust = home.addFolder({ title: 'Stardust Triboo', expanded: false });
     dust.addBinding(STARDUST_TRIBOO, 'on', { label: 'play at opening', min: 0, max: 1, step: 1 });

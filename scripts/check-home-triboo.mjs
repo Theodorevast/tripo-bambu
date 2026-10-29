@@ -29,13 +29,15 @@ async function open(viewport, query = '') {
   await page.addInitScript(() => {
     window.__gaps = null;
     window.__events = [];
+    window.__bothMs = 0; // 星尘拼成标志（进度 > 0.5）的时候右下角的翠宝也露在画面里的时长
     let last = 0;
     const tick = (t) => {
       if (window.__gaps && last) window.__gaps.push(t - last);
-      last = t;
       const s = window.__world?.galaxy?.shapeState;
       const p = s ? s.progress : 0;
       const greet = window.__home?.state().intro ?? false;
+      if (last && p > 0.5 && window.__home?.state().triboo?.shown) window.__bothMs += t - last;
+      last = t;
       const ev = window.__events;
       const prev = ev.at(-1);
       const cur = `${p > 0.01 ? 'shape' : '-'}|${greet ? 'greet' : '-'}`;
@@ -47,8 +49,12 @@ async function open(viewport, query = '') {
   await page.goto(`${base}/?nolocal${query}`);
   return page;
 }
-const cloudState = (page) => page.evaluate(async () => (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo()?.state ?? null);
-const waitShown = (page) => page.waitForFunction(async () => (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo()?.state.phase === 'show', null, { timeout: 60000 });
+// Playwright 的 waitForFunction 不等异步的判断（返回的 Promise 本身就算「真」，马上就过了）：先把模块挂到 window 上，判断写成同步的
+const hookCloud = (page) => page.evaluate(async () => { window.__cloudTriboo = (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo; });
+const waitShown = async (page) => {
+  await hookCloud(page);
+  return page.waitForFunction(() => window.__cloudTriboo?.()?.state.phase === 'show', null, { timeout: 60000 });
+};
 
 // 云在屏幕上的圆，和星球（连名牌）、标题卡片有没有压到
 const overlap = (page) => page.evaluate(async () => {
@@ -75,6 +81,39 @@ const overlap = (page) => page.evaluate(async () => {
   return { x: Math.round(x), y: Math.round(y), r: Math.round(r), inView: x - r >= 0 && x + r <= innerWidth && y - r >= 0 && y + r <= innerHeight, hits, onCard };
 });
 
+async function measureAndTilt(p) {
+  await p.evaluate(() => { window.__gaps = []; });
+  await p.evaluate(async () => (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo()?.replay());
+  await p.waitForTimeout(12000);
+  const gaps = await p.evaluate(() => { const g = window.__gaps; window.__gaps = null; return g; });
+  const maxGap = Math.max(...gaps);
+  numbers.push(`首页 12 秒（含云散开、换地方再聚）：帧间隔 p50 ${pct(gaps, 0.5).toFixed(1)} / p95 ${pct(gaps, 0.95).toFixed(1)} / 最长 ${maxGap.toFixed(1)} ms（${tag}，1440×900 DPR 1）`);
+  check('首页最长帧 ≤ 33 ms', maxGap <= 33.5, `${maxGap.toFixed(1)} ms`);
+  await waitShown(p);
+  await p.waitForTimeout(300);
+  await p.screenshot({ path: `${OUT}/cloud-triboo-regathered-${tag}.png` });
+
+  // —— 3：更俯视 ——
+  await p.evaluate(() => {
+    const w = window.__world;
+    const c = w.rig.controls;
+    c.minPolarAngle = 0.05;
+    const off = w.rig.camera.position.clone().sub(c.target);
+    const sph = { r: off.length(), phi: Math.acos(off.y / off.length()), theta: Math.atan2(off.x, off.z) };
+    sph.phi = Math.max(0.12, sph.phi - (18 * Math.PI) / 180);
+    w.rig.camera.position.set(Math.sin(sph.phi) * Math.sin(sph.theta), Math.cos(sph.phi), Math.sin(sph.phi) * Math.cos(sph.theta)).multiplyScalar(sph.r).add(c.target);
+    c.update();
+  });
+  await p.waitForTimeout(600);
+  await p.screenshot({ path: `${OUT}/cloud-triboo-topdown-asis-${tag}.png` });
+  await p.evaluate(async () => (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo()?.replay());
+  await waitShown(p);
+  await p.waitForTimeout(400);
+  await p.screenshot({ path: `${OUT}/cloud-triboo-topdown-${tag}.png` });
+  const ot = await overlap(p);
+  check('更俯视的角度：重新聚的云也在画面里、不压星球', ot.inView && ot.hits.length === 0, JSON.stringify(ot));
+}
+
 try {
   // —— 1、2：开场、默认视角 ——
   const page = await open({ width: 1440, height: 900 }, '&gputime');
@@ -87,7 +126,10 @@ try {
   const greetOn = ev.find((e) => e.s.endsWith('greet'));
   const both = ev.some((e) => e.s === 'shape|greet');
   check('开场：星尘拼了标志（进度涨到 1 又回到 0）', !!shapeOn && !!shapeOff, ev.map((e) => `${e.s}@${e.at}`).join(' '));
-  check('开场：右边的翠宝在星尘放完以后才探头（两个不同时出现）', !!greetOn && !both && (!shapeOff || greetOn.at >= shapeOff.at), greetOn ? `探头 @${greetOn.at}，星尘结束 @${shapeOff?.at}` : '没有探头');
+  check('开场：右边的翠宝在星尘放完以后才探头挥手', !!greetOn && !both && (!shapeOff || greetOn.at >= shapeOff.at), greetOn ? `探头 @${greetOn.at}，星尘结束 @${shapeOff?.at}` : '没有探头');
+  // 右下角的翠宝（H2，couponsHome.ts）落地 0.5 秒内就自己出来站着（homeFor > 0.5 → started），不等探头：标志停着的时候它已经露出来了
+  const bothMs = await page.evaluate(() => window.__bothMs);
+  check('开场：星尘拼成标志的时候右下角的翠宝还没露出来（两个不同时出现）', bothMs < 50, `同时在画面里 ${Math.round(bothMs)} ms`);
   await waitShown(page);
   await page.waitForTimeout(400);
   const o = await overlap(page);
@@ -125,50 +167,40 @@ try {
   const dGpu = pct(on, 0.5) - pct(off, 0.5);
   numbers.push(`GPU（${tag}）：云朵翠宝开着 p50 ${pct(on, 0.5).toFixed(3)} ms / 关掉 ${pct(off, 0.5).toFixed(3)} ms，差 ${dGpu.toFixed(3)} ms（${on.length}/${off.length} 个样本）`);
   check('云朵翠宝的 GPU 开销 ≤ 0.1 ms', !(dGpu > 0.1), `${dGpu.toFixed(3)} ms`);
-  // 首页 12 秒：中间让云散开、换地方再聚一次（Replay），量最长帧
-  await page.evaluate(() => { window.__gaps = []; });
-  await page.evaluate(async () => (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo()?.replay());
-  await page.waitForTimeout(12000);
-  const gaps = await page.evaluate(() => { const g = window.__gaps; window.__gaps = null; return g; });
-  const maxGap = Math.max(...gaps);
-  numbers.push(`首页 12 秒（含云散开、换地方再聚）：帧间隔 p50 ${pct(gaps, 0.5).toFixed(1)} / p95 ${pct(gaps, 0.95).toFixed(1)} / 最长 ${maxGap.toFixed(1)} ms（${tag}，1440×900 DPR 1）`);
-  check('首页最长帧 ≤ 33 ms', maxGap <= 33.5, `${maxGap.toFixed(1)} ms`);
-  await waitShown(page);
-  await page.waitForTimeout(300);
-  await page.screenshot({ path: `${OUT}/cloud-triboo-regathered-${tag}.png` });
-
-  // —— 3：更俯视 ——
-  await page.evaluate(() => {
-    const w = window.__world;
-    const c = w.rig.controls;
-    c.minPolarAngle = 0.05;
-    const off = w.rig.camera.position.clone().sub(c.target);
-    const sph = { r: off.length(), phi: Math.acos(off.y / off.length()), theta: Math.atan2(off.x, off.z) };
-    sph.phi = Math.max(0.12, sph.phi - (18 * Math.PI) / 180);
-    w.rig.camera.position.set(Math.sin(sph.phi) * Math.sin(sph.theta), Math.cos(sph.phi), Math.sin(sph.phi) * Math.cos(sph.theta)).multiplyScalar(sph.r).add(c.target);
-    c.update();
-  });
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: `${OUT}/cloud-triboo-topdown-asis-${tag}.png` });
-  await page.evaluate(async () => (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo()?.replay());
-  await waitShown(page);
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${OUT}/cloud-triboo-topdown-${tag}.png` });
-  const ot = await overlap(page);
-  check('更俯视的角度：重新聚的云也在画面里、不压星球', ot.inView && ot.hits.length === 0, JSON.stringify(ot));
   await page.close();
+  // 首页 12 秒：另开一页（不带 ?gputime：时间戳回读本身会让页面停一下），中间让云散开、换地方再聚一次（Replay），量最长帧
+  const page2 = await open({ width: 1440, height: 900 });
+  await page2.waitForFunction(() => window.__ready === true && !document.querySelector('#boot'), null, { timeout: 90000 });
+  await waitShown(page2);
+  await page2.waitForTimeout(1000);
+  await measureAndTilt(page2);
+  await page2.close();
 
   // —— 5：手机竖屏 ——
   const phone = await open({ width: 390, height: 844 });
   await phone.waitForFunction(() => window.__ready === true && !document.querySelector('#boot'), null, { timeout: 90000 });
-  // 手机上标题卡片量好以后镜头会重新取景：云发现压到星球会提前散开、换个地方再聚。等它安定下来再看
-  let shown = await waitShown(phone).then(() => true, () => false);
-  await phone.waitForTimeout(1500);
-  shown = await waitShown(phone).then(() => true, () => false);
-  await phone.waitForTimeout(400);
+  // 手机上标题卡片量好以后镜头会重新取景：云发现压到星球会提前散开、换个地方再聚。等它聚好、连续 1.5 秒没再动地方再看
+  await hookCloud(phone);
+  const settled = await phone.waitForFunction(() => {
+    const st = window.__cloudTriboo?.()?.state;
+    const key = st && st.phase === 'show' ? st.center.map((v) => Math.round(v / 20)).join(',') : '';
+    const now = performance.now();
+    if (!key || key !== window.__cloudKey) {
+      window.__cloudKey = key;
+      window.__cloudSince = now;
+      return false;
+    }
+    return now - window.__cloudSince > 1500;
+  }, null, { timeout: 60000, polling: 250 }).then(() => true, () => false);
   await phone.screenshot({ path: `${OUT}/cloud-triboo-phone-${tag}.png` });
-  const op = shown ? await overlap(phone) : null;
-  check('手机竖屏：云朵翠宝聚起来了、在画面里、不压星球', shown && op.inView && op.hits.length === 0, JSON.stringify(op ?? (await cloudState(phone))));
+  const op = settled ? await overlap(phone) : null;
+  // 没聚起来时把它内部的状态打出来（预热完没有、在不在首页、镜头在不在飞、星尘放完没有）
+  const why = op ?? (await phone.evaluate(async () => {
+    const ct = (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo();
+    const w = window.__world;
+    return ct && { ...ct.state, warmed: ct.warmed, fade: ct.fade, focused: !!w.focused, busy: w.director.busy, flying: w.rig.flying, drive: !!w.rig.drive, shape: w.galaxy.shapeState.t };
+  }));
+  check('手机竖屏：云朵翠宝聚起来了、在画面里、不压星球', settled && op.inView && op.hits.length === 0, JSON.stringify(why));
   await phone.close();
 } catch (err) {
   check('脚本中断', false, String(err?.stack ?? err).split('\n')[0]);
