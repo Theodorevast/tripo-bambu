@@ -15,7 +15,8 @@ import { GatedStager } from './gatedStager';
 import { Dressing } from './dressing';
 import { fitHomeCamera, HOME_FIT, HOME_SPIRAL, homeLayout, homeShape, type HomeCard, type HomeShape, type HomeSlot } from './homeLayout';
 import { PlanetMotion } from './homeMotion';
-import { GalaxyDecor, STARDUST_TRIBOO } from './homeGalaxy';
+import { GalaxyDecor, HOME_DUST, STARDUST_TRIBOO } from './homeGalaxy';
+import { keepGalaxy, type GalaxyBuild } from './galaxyExtent';
 import { reducedMotion } from './transition';
 import { MainPost } from './post';
 import { homeFraming, INTRO, planetFraming, SHOTS } from './shots';
@@ -281,12 +282,25 @@ export class World {
     this.buildGalaxy();
   }
 
-  // 螺旋臂上的星尘按星系的大小撒（臂一直延伸到最外那颗星球外面）；手机竖屏沿纵深拉长
+  // 螺旋臂上的星尘按星系的大小撒（臂一直延伸到最外那颗星球外面）；手机竖屏沿纵深拉长。
+  // 外沿只是一点点变化（造星以后多了一颗）时沿用现在的星尘，不重撒（galaxyExtent.ts，v2-ui）：Launch 那一帧不用重算几万粒、
+  // 重传 4 个属性，星尘的图案在 Launch 前后也不跳；版式顺带转的那一点点，整片星尘跟着转（你的星球在正中，转的是整个平面）。
+  // 横竖屏、参数变了，外沿变得多了，照旧重撒
+  private galaxyBuilt: GalaxyBuild | null = null;
   private buildGalaxy(): void {
     const stretch = this.shape === 'tall' ? Math.max(1, HOME_SPIRAL.tallStretch) : 1;
+    const rotation = this.layoutMeta.rotation;
     let maxR = 0;
     for (const s of this.slots.values()) maxR = Math.max(maxR, Math.hypot(s.pos[0], s.pos[2] / stretch));
-    this.galaxy.build(PLANET_RADIUS, { maxR, stretch, rotation: this.layoutMeta.rotation });
+    const next: GalaxyBuild = { maxR, stretch, rotation, params: JSON.stringify([HOME_SPIRAL, HOME_DUST]) };
+    const built = this.galaxyBuilt;
+    if (built && keepGalaxy(built, next, PLANET_RADIUS, HOME_DUST.extra)) {
+      this.galaxy.group.rotation.y = built.rotation - rotation; // 撒点时按 rotation 转的（和 three 的 rotation.y 方向相反）
+      return;
+    }
+    this.galaxyBuilt = next;
+    this.galaxy.group.rotation.y = 0;
+    this.galaxy.build(PLANET_RADIUS, { maxR, stretch, rotation });
   }
 
   // 运行时加一颗星球（「Create a planet」建好以后）：马上登记（路由、名牌都找得到它），着色器在后台编好以后才挂进场景、从小弹出来；
