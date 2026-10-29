@@ -50,6 +50,21 @@ export function bezier(out: V3, a: V3, c: V3, b: V3, u: number): V3 {
   return out.set(k * k * a.x + 2 * u * k * c.x + u * u * b.x, k * k * a.y + 2 * u * k * c.y + u * u * b.y, k * k * a.z + 2 * u * k * c.z + u * u * b.z);
 }
 
+// 等主画面走过 seconds 秒（World 的 dt：跟着转场调试的时间流速、逐帧录屏走；标签页在后台时不走）
+export function worldDelay(world: World, seconds: number): Promise<void> {
+  if (seconds <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let t = 0;
+    const hook = (dt: number) => {
+      t += dt;
+      if (t < seconds) return;
+      world.frameHooks.delete(hook);
+      resolve();
+    };
+    world.frameHooks.add(hook);
+  });
+}
+
 // 云海平均的云顶高度（世界 y）：星球在云海上投影子的那一层（atmosphere.seaTop）
 export function cloudTopY(world: World): number {
   return world.atmosphere.seaTop;
@@ -254,6 +269,13 @@ function puffTexture(): THREE.Texture {
     blob(42, 66, 30, 0.85);
     blob(86, 64, 32, 0.85);
     blob(62, 48, 30, 0.8);
+    // 下半团压暗、偏冷一点（和云海的背光面一个调子）：一团有体积，不是一块平的白片
+    g.globalCompositeOperation = 'source-atop';
+    const shade = g.createLinearGradient(0, 40, 0, 120);
+    shade.addColorStop(0, 'rgba(150,145,190,0)');
+    shade.addColorStop(1, 'rgba(150,145,190,0.42)');
+    g.fillStyle = shade;
+    g.fillRect(0, 0, size, size);
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -275,23 +297,22 @@ export async function riseIntoGalaxy(app: App, team: Team, burst: CloudBurst | n
     state.phase = 'enter';
     app.navigate({ view: 'planet', teamId: team.id }, { replace: true });
   };
-  if (reducedMotion()) {
-    app.addTeam(team);
-    const entry = world.planets.get(team.id);
-    // 编好就在位置上（addPlanet 编好时挂上；这里排在它后面，resolve 时已经挂好了）
-    if (entry) await world.stage.precompile(entry.planet.group).catch(() => {});
-    await hold;
-    enter();
-    return;
-  }
+  // 先把镜头停在原地（接管）：首页加星球时看到镜头被接管，就不自己飞到新的取景。减少动态效果时也要停：
+  // 那一下镜头飞行（0.9 秒）还没飞完就进星球的话，淡入淡出的转场把镜头跳到星球前面以后，它还会接着把镜头拉回星系
   const rig = world.rig;
   rig.controls.enabled = false; // 接管期间手动转动不累积，交还时镜头不跳
-  rig.drive = () => {}; // 先停在原地：首页加星球时看到镜头被接管，就不自己飞到新的取景
+  rig.drive = () => {};
   app.addTeam(team);
   const entry = world.planets.get(team.id);
-  if (!entry) {
+  const release = () => {
     rig.drive = null;
     rig.controls.enabled = true;
+  };
+  if (reducedMotion() || !entry) {
+    // 不飞、不升：编好就在位置上（addPlanet 编好时挂上；这里排在它后面，resolve 时已经挂好了），淡入淡出进星球
+    if (entry) await world.stage.precompile(entry.planet.group).catch(() => {});
+    await hold;
+    release();
     enter();
     return;
   }

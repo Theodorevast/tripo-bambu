@@ -62,7 +62,7 @@ export class PlanetPreview {
   private accentT = 1;
   private running = false;
   private disposed = false;
-  private last = 0;
+  private pendingDt = 0; // 主画面这几帧走过的时间（World.frameHooks 的 dt：跟着转场调试的时间流速、逐帧录屏走）
   private uses = 0;
   private warming = false;
   private frozen = false; // Launch 以后不再在后台备别的预设
@@ -85,6 +85,8 @@ export class PlanetPreview {
     );
     this.canvas.setAttribute('aria-hidden', 'true');
     this.scene.add(this.sun, this.sun.target, this.holder);
+    // 预览的时间跟着主画面走（主画面在预览开着时照常跑）：转场调试的慢放、逐帧录屏时两边一起慢、一起一帧一帧走
+    world.frameHooks.add((dt) => { if (this.running) this.pendingDt += dt; });
     // 环境光：借主场景的解析天空（和天空、主画面的 PBR 物体同一套颜色）。节点只是算式，两个渲染器各编各的
     (this.scene as THREE.Scene & { environmentNode?: unknown }).environmentNode = (world.scene as THREE.Scene & { environmentNode?: unknown }).environmentNode;
   }
@@ -100,7 +102,7 @@ export class PlanetPreview {
     this.rendererReady ??= this.createRenderer();
     void this.rendererReady.then((r) => {
       if (!this.running || this.disposed) return;
-      this.last = performance.now();
+      this.pendingDt = 0;
       r.setAnimationLoop(() => this.frame());
       if (this.wanted) this.apply();
     });
@@ -184,7 +186,7 @@ export class PlanetPreview {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) renderer.setAnimationLoop(null);
       else if (this.running && !this.disposed) {
-        this.last = performance.now();
+        this.pendingDt = 0;
         renderer.setAnimationLoop(() => this.frame());
       }
     });
@@ -313,9 +315,8 @@ export class PlanetPreview {
   private frame(): void {
     const renderer = this.renderer;
     if (!renderer || !this.running) return;
-    const now = performance.now();
-    const dt = Math.min(0.1, (now - this.last) / 1000);
-    this.last = now;
+    const dt = Math.min(0.1, this.pendingDt);
+    this.pendingDt = 0;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     if (!w || !h) return;

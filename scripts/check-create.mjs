@@ -241,6 +241,13 @@ try {
     numbers.push(`减少动态效果：Launch → 星球就绪最长帧间隔 ${max.toFixed(1)} ms，转场 ${r.kinds.join(', ')}`);
     check('减少动态效果：转场是 fade、没有升起来那一段', r.kinds.length > 0 && r.kinds.every((k) => k === 'fade'), r.kinds.join(', '));
     check('减少动态效果：最长帧间隔 ≤ 50 ms', max <= 50, `${max.toFixed(1)} ms`);
+    await p.waitForTimeout(1200); // 首页加星球时的镜头飞行（0.9 秒）要是还在飞，会把镜头拉回星系：等它飞完再看
+    const cam = await p.evaluate(() => {
+      const w = window.__world;
+      const e = w.planets.get('quiet-comets');
+      return w.rig.camera.position.distanceTo(e.home) / e.planet.radius;
+    });
+    check('减少动态效果：落地以后镜头在新星球前面（约 2.8 个半径）', Math.abs(cam - 2.8) < 0.3, `${cam.toFixed(2)} 个半径`);
     await c.close();
   });
 
