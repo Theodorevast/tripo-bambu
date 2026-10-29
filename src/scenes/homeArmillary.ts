@@ -8,8 +8,8 @@ import { FineLines, type FineSegment } from './fineLines';
 export const ARMILLARY = {
   on: 1, // 0 = 不要
   rings: 3, // 几圈（1–3）
-  radius: 1.38, // 最里那圈的半径（× 你的星球在首页上的半径）
-  spacing: 0.14, // 一圈比一圈大多少（× 半径）
+  radius: 1.3, // 最里那圈的半径（× 你的星球在首页上的半径）（main 05:45：收小一点，1.38 → 1.3）
+  spacing: 0.11, // 一圈比一圈大多少（× 半径）（0.14 → 0.11）
   tilt: 1, // 倾斜的倍数（0 = 都平放）
   speed: 1, // 转动速度的倍数
   ticks: 1, // 刻度（0 = 没有，1 = 默认）
@@ -34,6 +34,13 @@ const RINGS: RingDef[] = [
   { euler: [0.3 + 0.41, 0.7, 0.18], minor: 36, majorEvery: 9, alpha: 0.7 },
   { euler: [1.42, 0.35, 0], minor: 24, majorEvery: 6, alpha: 0.55 },
 ];
+
+// 天体仪环最外面伸到离星球中心多远（× 你的星球在首页上的半径，连刻度）；关掉时是 0。
+// 首页你的星球的名牌（ui/galaxyUi.ts）按它往下挪，名牌落在环的外面，不被环穿过
+export function armillaryReach(): number {
+  if (ARMILLARY.on <= 0) return 0;
+  return ARMILLARY.radius + ARMILLARY.spacing * (THREE.MathUtils.clamp(Math.round(ARMILLARY.rings), 1, 3) - 1) + 0.075 * Math.min(1, ARMILLARY.ticks);
+}
 
 export class Armillary {
   readonly group = new THREE.Group();
