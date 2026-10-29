@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import type { CouponTicket } from '../data/coupons';
-import { COUPONS, flightAcross, flightArc, flipAngle, flutterWeight, lifeOpacity, pickupCurve } from './couponsMath';
+import { COUPONS, flightAcross, flightArc, flipAngle, flutterWeight, lifeOpacity, pickupProgress } from './couponsMath';
 import { CAPACITY, GlowDiscs, Sparks, TicketMesh } from './couponsFx';
 import { smooth, span } from '../scenes/ease';
 
@@ -59,6 +59,7 @@ interface Slot {
   from: THREE.Vector3; // pickup：从哪飞起
   fromQuat: THREE.Quaternion;
   fromSize: number;
+  fromDist: number; // pickup：起飞时离镜头多远
   hop: THREE.Vector3;
   reduced: boolean;
 }
@@ -107,7 +108,7 @@ export class CouponField {
         land: new THREE.Vector3(), ground: new THREE.Vector3(), normal: new THREE.Vector3(0, 1, 0),
         yaw0: 0, spinDir: 1, phase0: 0, flips: 2, restYaw: 0, nextTwinkle: 0, highlight: 0, hovered: false,
         pos: new THREE.Vector3(), quat: new THREE.Quaternion(), size: 0, opacity: 0,
-        from: new THREE.Vector3(), fromQuat: new THREE.Quaternion(), fromSize: 0, hop: new THREE.Vector3(), reduced: false,
+        from: new THREE.Vector3(), fromQuat: new THREE.Quaternion(), fromSize: 0, fromDist: 1, hop: new THREE.Vector3(), reduced: false,
       });
     }
     this.syncVisible();
@@ -189,10 +190,11 @@ export class CouponField {
     return this.find(id)?.ticket ?? null;
   }
 
-  // 被点了：从现在的位置飞向镜头（减弱动效时就地淡出）
-  pickUp(id: number): boolean {
+  // 被点了：从现在的位置飞向镜头（减弱动效时就地淡出）。camPos：镜头位置（飞的时候离镜头的距离按等比缩短）
+  pickUp(id: number, camPos: THREE.Vector3): boolean {
     const s = this.find(id);
     if (!s || (s.phase !== 'rest' && s.phase !== 'fly' && s.phase !== 'appear')) return false;
+    s.fromDist = s.pos.distanceTo(camPos);
     s.from.copy(s.pos);
     s.fromQuat.copy(s.quat);
     s.fromSize = s.size;
@@ -389,13 +391,13 @@ export class CouponField {
           break;
         }
         const u = Math.min(1, s.t / COUPONS.pickup);
-        const e = pickupCurve(u);
+        const e = pickupProgress(u, s.fromDist, pickTarget.pos.distanceTo(camPos));
         // 二次贝塞尔：起点 → 起点上方 → 镜头前
         _b.copy(s.from).add(s.hop);
         const iu = 1 - e;
         s.pos.copy(s.from).multiplyScalar(iu * iu).addScaledVector(_b, 2 * iu * e).addScaledVector(pickTarget.pos, e * e);
-        // 转着飞过去：从原来的朝向转到正对镜头，路上绕自己的竖轴多转一圈
-        s.quat.copy(s.fromQuat).slerp(pickTarget.quat, e).multiply(_q2.setFromAxisAngle(Y, Math.PI * 2 * (1 - smooth(u))));
+        // 飞过去：从原来的朝向转到正对镜头，路上左右轻轻摆几下、越摆越小（不整圈转：转到侧面时只剩一条边，正在变大的时候看不清）
+        s.quat.copy(s.fromQuat).slerp(pickTarget.quat, e).multiply(_q2.setFromAxisAngle(Y, 0.45 * Math.sin(u * Math.PI * 3) * (1 - u)));
         s.size = s.fromSize + (pickTarget.size - s.fromSize) * e;
         s.opacity = 1;
         break;

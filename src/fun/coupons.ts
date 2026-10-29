@@ -402,7 +402,7 @@ export class Coupons {
     this.measure();
     const at = this.card.prepare(ticket);
     this.picking = { id, x: at.x, y: at.y, width: at.width };
-    if (!this.field.pickUp(id)) {
+    if (!this.field.pickUp(id, this.world.rig.camera.position)) {
       this.picking = null;
       this.card.hide();
       return;

@@ -11,6 +11,7 @@ import {
   flipAngle,
   landingSpot,
   lifeOpacity,
+  pickupProgress,
   restPose,
   shakePose,
   spitPose,
@@ -165,6 +166,16 @@ describe('券的轨迹', () => {
     expect(flightAcross(1)).toBe(1);
   });
 
+  it('捡券：离镜头的距离按等比缩短（看上去一样快地变大），起点 0、终点 1', () => {
+    expect(pickupProgress(0, 80, 1.4)).toBe(0);
+    expect(pickupProgress(1, 80, 1.4)).toBeCloseTo(1);
+    // 时间过半时离镜头 √(80 × 1.4) 米（两头距离的几何平均）
+    const s = pickupProgress(0.5, 80, 1.4);
+    expect(80 - s * (80 - 1.4)).toBeCloseTo(Math.sqrt(80 * 1.4), 6);
+    // 已经很近了（起点和终点差不多远）：退回普通的缓动
+    expect(pickupProgress(0.5, 1.45, 1.4)).toBeCloseTo(0.5);
+  });
+
   it('翻转：落地时正好翻完整数圈（立着）', () => {
     for (const n of [1, 2, 3]) expect(flipAngle(1, n)).toBeCloseTo(Math.PI * 2 * n);
     expect(flipAngle(0, 2)).toBe(0);
@@ -255,13 +266,23 @@ describe('地上的券（对象池）', () => {
     expect(field.busy).toBe(false);
   });
 
-  it('捡一张：飞到镜头前（停在目标点），卡片接手后收回池子；别的照旧浮着', () => {
-    const { field, step, arrived } = makeField();
+  it('捡一张：飞到镜头前（离镜头的距离等比缩短，最后停在目标点），卡片接手后收回池子；别的照旧浮着', () => {
+    const { field, camera, step, arrived } = makeField();
     const ids = field.spawn(drawCoupons(mulberry32(6), 3), anchor(), new THREE.Vector3(0, R + 0.8, 0.36), 1, [{ x: -1, z: 1 }, { x: 0, z: 1.3 }, { x: 1, z: 1 }], false);
     step(COUPONS.flight * 1.2 + 0.3);
-    expect(field.pickUp(ids[1])).toBe(true);
-    step(COUPONS.pickup + 0.05);
+    expect(field.pickUp(ids[1], camera.position)).toBe(true);
+    const dists: number[] = [];
+    for (let t = 0; t < COUPONS.pickup; t += 1 / 60) {
+      step(1 / 60);
+      const c = field.snapshot().find((x) => x.id === ids[1]);
+      if (c && c.phase === 'pickup') dists.push(new THREE.Vector3(...c.pos).distanceTo(camera.position));
+    }
+    // 离镜头越来越近（一路单调），最后停在 1.4 米处的目标点
+    expect(dists.every((d, i) => i === 0 || d <= dists[i - 1] + 1e-6)).toBe(true);
+    const target = new THREE.Vector3(0, 0, -1.4).applyMatrix4(camera.matrixWorld);
+    step(1 / 60);
     expect(arrived).toEqual([ids[1]]);
+    expect(target.distanceTo(camera.position)).toBeCloseTo(1.4);
     step(0.3);
     const left = field.snapshot();
     expect(left.map((c) => c.id).sort()).toEqual([ids[0], ids[2]].sort());

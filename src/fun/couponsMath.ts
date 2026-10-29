@@ -197,9 +197,14 @@ export function couponCount(rand: () => number, p: CouponParams = COUPONS): numb
   return lo + Math.min(hi - lo, Math.floor(rand() * (hi - lo + 1)));
 }
 
-// 捡券：先往上一跳，再加速飞向镜头前（二次贝塞尔：起点 → 起点上方 → 终点）。返回 [沿路径的进度, 往上跳的权重]
-export function pickupCurve(u: number): number {
-  return easeInOutCubic(clamp01(u));
+// 捡券：先往上一跳，再飞到镜头前（二次贝塞尔：起点 → 起点上方 → 终点）。返回沿路径的进度 0..1。
+// 离镜头的距离按等比缩短（d0 → d1）：看上去是一样快地变大。按路程匀速的话，星球视图里（离镜头 80 米）券一路都是个小点，
+// 最后 0.1 秒才猛地变大
+export function pickupProgress(u: number, d0: number, d1: number): number {
+  const v = smooth(clamp01(u));
+  if (!(d0 > d1 * 1.05) || !(d1 > 0)) return v;
+  const d = d0 * Math.pow(d1 / d0, v);
+  return clamp01((d0 - d) / (d0 - d1));
 }
 
 // 落地以后的寿命：浮着 life 秒，然后 fade 秒淡出。返回不透明度（0 = 该收走了）
