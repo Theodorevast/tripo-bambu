@@ -25,7 +25,7 @@ export const PLANET_LOOK = {
   cloudBrightness: 0.72, // 云的反照率：压暗，不然在亮天空下是一片死白
   cloudSpeed: 1, // 云层转动的速度倍数
   cloudShadow: 0.3, // 云影的深度
-  seaShadow: 1, // 星系里星球在云海上的影子（浓度）
+  seaShadow: 0.7, // 星系里星球在云海上的影子（浓度；首页的云海是暖奶油色，影子也偏暖、淡一点）
   rimLight: 1, // 星系里星球朝阳一侧边缘的暖光（让星球从云海里跳出来）
 };
 
@@ -243,7 +243,7 @@ function shadowMaterial(fade: F): THREE.MeshBasicNodeMaterial {
   const r = length(positionLocal.xz);
   // 一块平平的影子（中间一大片差不多一样深，边缘柔和），中心再深一点点：读起来是「投在云上的影子」，不是一个暗点
   const soft = smoothstep(1.0, 0.3, r).mul(0.78).add(smoothstep(0.55, 0.0, r).mul(0.22));
-  m.colorNode = mix(vec3(1, 1, 1), vec3(0.42, 0.45, 0.68), soft.mul(U.seaShadow).mul(fade).clamp(0, 1));
+  m.colorNode = mix(vec3(1, 1, 1), vec3(0.66, 0.56, 0.58), soft.mul(U.seaShadow).mul(fade).clamp(0, 1)); // 偏暖的灰紫，不是冷蓝
   m.opacityNode = float(1);
   return m;
 }

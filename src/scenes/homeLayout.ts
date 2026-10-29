@@ -12,20 +12,21 @@ export type HomeShape = 'wide' | 'tall';
 
 export const HOME_SPIRAL = {
   arms: 2, // 几条螺旋臂
-  turns: 0.9, // 螺旋臂从里到外绕多少圈（星尘画到这里；星球多了会接着往外排）
-  inner: 2.2, // 第一颗星球离中心多远（× 半径；再近也要让开中间的你的星球）
-  outer: 3.0, // 螺旋臂外端和里端的半径比（越大越「张开」）
-  gap: 0.3, // 同一条臂上相邻两颗星球之间的空隙（× 两颗半径之和）
-  ringGap: 0.2, // 建好的和建设中的之间多空出来一点（× 半径）：里圈、外圈分得开
-  spread: 0.22, // 横着离开螺旋臂的随机偏移（× 半径）
-  bob: 0.45, // 上下的随机偏移（× 半径）
-  youScale: 1.5, // 你的星球放大多少
-  builtScale: 1.0, // 建好的第一颗多大
-  builtFalloff: 0.22, // 建好的越往外缩多少（到最外那颗缩到 1 − falloff）
-  buildingScale: 0.66, // 建设中的第一颗多大
+  turns: 0.85, // 螺旋臂从里到外绕多少圈（星球按角度大致均匀地铺满这一段；多了接着往外排）
+  inner: 3.1, // 第一颗星球离中心多远（× 半径；再近也要让开中间的你的星球）
+  outer: 4.2, // 螺旋臂外端和里端的半径比（越大越「张开」）
+  gap: 0.6, // 同一条臂上相邻两颗星球之间的空隙（× 两颗半径之和）
+  ringGap: 0.5, // 建好的和建设中的之间多空出来一点（× 半径）：里圈、外圈分得开
+  spread: 0.25, // 横着离开螺旋臂的随机偏移（× 半径）
+  bob: 0.4, // 上下的随机偏移（× 半径）
+  youScale: 1.75, // 你的星球放大多少
+  builtScale: 1.3, // 建好的第一颗多大
+  builtFalloff: 0.2, // 建好的越往外缩多少（到最外那颗缩到 1 − falloff）
+  buildingScale: 0.78, // 建设中的第一颗多大
   buildingFalloff: 0.3,
-  buildingDim: 0.16, // 建设中的往天色里淡多少（最里那颗）
-  dimFalloff: 0.24, // 越往外再淡多少
+  buildingDim: 0.14, // 建设中的往天色里淡多少（最里那颗）
+  dimFalloff: 0.22, // 越往外再淡多少
+  tallStretch: 1.45, // 手机竖屏：星系沿镜头的纵深方向拉长多少（长的方向对着竖屏）
 };
 
 export type HomeSpiral = typeof HOME_SPIRAL;
@@ -99,7 +100,8 @@ interface Placed {
 }
 
 // 排版：teams 按数据里的顺序给，返回同样顺序的槽位
-export function homeLayout(teams: HomeTeam[], youId: string | null, _shape: HomeShape, radius: number, p: HomeSpiral = HOME_SPIRAL): HomeSlot[] {
+// meta.rotation：整个星系在平面里转了多少（弧度）：把星系长的方向转到画面长的那一边（宽屏横着、手机竖着）；星尘跟着转同样的角度
+export function homeLayout(teams: HomeTeam[], youId: string | null, shape: HomeShape, radius: number, p: HomeSpiral = HOME_SPIRAL, meta?: { rotation: number }): HomeSlot[] {
   const R = radius;
   const arms = Math.max(1, Math.round(p.arms));
   const you = teams.find((t) => t.id === youId) ?? null;
@@ -126,7 +128,7 @@ export function homeLayout(teams: HomeTeam[], youId: string | null, _shape: Home
       const s = tier === 'built' ? p.builtScale * (1 - p.builtFalloff * k) : p.buildingScale * (1 - p.buildingFalloff * k);
       const w = walk[arm];
       // 沿臂往外走：离上一颗至少差均匀的角度（step × 0.9）、离得够远（两颗半径之和 × (1 + gap)），而且不比 minR 近
-      const need = Number.isNaN(w.x) ? 0 : (w.s + s) * R * (1 + p.gap);
+      const need = Number.isNaN(w.x) ? 0 : (w.s + s) * R * (1 + p.gap * (shape === 'tall' ? 0.6 : 1));
       if (!Number.isNaN(w.x)) w.theta = Math.max(w.theta, w.last + step * 0.8);
       let guard = 0;
       for (;;) {
@@ -184,9 +186,25 @@ export function homeLayout(teams: HomeTeam[], youId: string | null, _shape: Home
     }
     if (!moved) break;
   }
+  // 星系长的方向（主轴）：宽屏转到横着（x），手机转到纵深（z，画面上是竖着）；转的是整个平面，形状不变
+  let sxx = 0;
+  let szz = 0;
+  let sxz = 0;
+  for (const q of placed) {
+    sxx += q.x * q.x;
+    szz += q.z * q.z;
+    sxz += q.x * q.z;
+  }
+  const axis = placed.length > 2 ? 0.5 * Math.atan2(2 * sxz, sxx - szz) : 0;
+  const rot = (shape === 'tall' ? Math.PI / 2 : 0) - axis;
+  if (meta) meta.rotation = rot;
+  const c = Math.cos(rot);
+  const sn = Math.sin(rot);
+  // 手机竖屏：再沿纵深（z，镜头那边）拉长，长的方向对着竖屏（拉长只会让星球离得更远，不会叠起来）
+  const sz = shape === 'tall' ? Math.max(1, p.tallStretch) : 1;
   for (const q of placed) {
     const s = out.get(q.team.id)!;
-    s.pos = [q.x, q.y, q.z];
+    s.pos = [q.x * c - q.z * sn, q.y, (q.x * sn + q.z * c) * sz];
   }
   return teams.map((t) => out.get(t.id)!);
 }
@@ -196,7 +214,7 @@ export function homeLayout(teams: HomeTeam[], youId: string | null, _shape: Home
 export interface HomeFit {
   fov: number; // 竖直视角（度）
   elevation: number; // 仰角（度）：从斜上方多少度看星系中心
-  // 画面里的安全区（NDC，-1..1）：整个星系（转到哪个角度都一样）连同名牌都要落在里面
+  // 画面里能用的范围（NDC，-1..1）：星系连同名牌都要落在里面；左上角的标题卡片另外躲开（HomeCard）
   left: number;
   right: number;
   top: number;
@@ -205,114 +223,115 @@ export interface HomeFit {
 }
 
 export const HOME_FIT: Record<HomeShape, HomeFit> = {
-  // 宽屏：左上角标题卡片（上沿由 World 按卡片的实际高度再压低）、右下角翠宝、左下角徽章
-  wide: { fov: 38, elevation: 50, left: -0.8, right: 0.8, top: 0.62, bottom: -0.88, tagPx: 30 },
-  // 竖屏：更接近俯视，星系是一个差不多圆的盘，横着撑满
-  tall: { fov: 46, elevation: 64, left: -0.96, right: 0.96, top: 0.5, bottom: -0.8, tagPx: 24 },
+  // 宽屏：星系占满标题卡片以外的地方（宽度七八成），太挤时往右下挪、躲开左上角的标题卡片
+  wide: { fov: 38, elevation: 44, left: -0.88, right: 0.78, top: 0.9, bottom: -0.84, tagPx: 30 },
+  // 竖屏：更接近俯视，星系沿纵深拉长（homeLayout 的 tallStretch），长的方向对着竖屏，占满标题卡片下面
+  tall: { fov: 46, elevation: 66, left: -0.95, right: 0.88, top: 0.94, bottom: -0.84, tagPx: 24 },
 };
+
+// 标题卡片在画面上占的地方（NDC）：右边、下边。星系躲开 x < right 且 y > bottom 那一块
+export interface HomeCard {
+  right: number;
+  bottom: number;
+}
 
 export interface HomeCamera {
   target: THREE.Vector3; // 星系中心（转镜头时绕它转）
   position: THREE.Vector3;
   distance: number;
   fov: number;
-  lift: number; // 画面中心比星系中心高多少（世界单位）：星系在画面里往下挪，让开上面的标题卡片
+  lift: number; // 画面中心比星系中心高多少（世界单位）：镜头抬头，星系在画面里往下挪
+  yaw: number; // 镜头再往左转多少（弧度）：星系在画面里往右挪（躲开左上角的标题卡片）
 }
 
 const _f = new THREE.Vector3();
 const _r = new THREE.Vector3();
 const _u = new THREE.Vector3();
 const _d = new THREE.Vector3();
-const _q = new THREE.Quaternion();
 
-interface Bounds {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-}
-
-// 镜头在 eye、看向 target、再抬头 atan(lift / 距离) 时，这些点（球心、半径）和下面的名牌在画面上占的范围（NDC）
-function project(points: Array<{ p: THREE.Vector3; r: number; tag: boolean }>, eye: THREE.Vector3, target: THREE.Vector3, lift: number, tanH: number, aspect: number, tagNdc: number, out: Bounds): Bounds {
-  _f.copy(target).sub(eye);
-  const dist = _f.length();
-  _f.divideScalar(dist || 1);
+// 星系的外沿（一圈点：宽屏是圆，手机是沿纵深拉长的椭圆）连同名牌、中间你的星球，在镜头 eye 看 target 时的画面坐标（NDC）
+function projectAll(points: Array<{ p: THREE.Vector3; r: number; tag: boolean }>, eye: THREE.Vector3, target: THREE.Vector3, tanH: number, aspect: number, tagNdc: number, out: Array<[number, number, number, number]>): void {
+  _f.copy(target).sub(eye).normalize();
   _r.crossVectors(_f, THREE.Object3D.DEFAULT_UP).normalize();
   _u.crossVectors(_r, _f);
-  const pitch = Math.atan2(lift, dist || 1);
-  _q.setFromAxisAngle(_r, pitch);
-  _f.applyQuaternion(_q);
-  _u.applyQuaternion(_q);
-  out.minX = Infinity;
-  out.maxX = -Infinity;
-  out.minY = Infinity;
-  out.maxY = -Infinity;
+  out.length = 0;
   for (const s of points) {
     _d.copy(s.p).sub(eye);
     const z = Math.max(1e-3, _d.dot(_f));
     const x = _d.dot(_r) / (z * tanH * aspect);
     const y = _d.dot(_u) / (z * tanH);
     const ry = s.r / Math.sqrt(Math.max(1e-6, z * z - s.r * s.r)) / tanH;
-    const rx = ry / aspect;
-    out.minX = Math.min(out.minX, x - rx);
-    out.maxX = Math.max(out.maxX, x + rx);
-    out.minY = Math.min(out.minY, y - ry - (s.tag ? tagNdc : 0));
-    out.maxY = Math.max(out.maxY, y + ry);
+    out.push([x - ry / aspect, x + ry / aspect, y - ry - (s.tag ? tagNdc : 0), y + ry]);
   }
-  return out;
 }
 
-// 取景：镜头从仰角 elevation 的方向（方位角 0，+Z 那一侧）看星系中心，找最近的距离，使整个星系放得进安全区；再用抬头（lift）
-// 把它在安全区里上下居中。按「圆盘」算：星系外圈半径上一圈点，左右转到哪个角度画面里都放得下。
-// width / height：画布的 CSS 像素（名牌留的高度按像素算）
-export function fitHomeCamera(slots: HomeSlot[], radius: number, width: number, height: number, fit: HomeFit): HomeCamera {
+// 取景：镜头从仰角 elevation 的方向（方位角 0，+Z 那一侧）看星系中心；找最近的距离，使星系放得进画面，而且挪一挪（往右、往下）
+// 能躲开左上角的标题卡片。挪是用镜头抬头（lift）、往左转（yaw）做的，绕的还是星系中心：左右转镜头时星系不会甩出去。
+// width / height：画布的 CSS 像素（名牌留的高度按像素算）；card：标题卡片（NDC），没有就不躲
+export function fitHomeCamera(slots: HomeSlot[], radius: number, width: number, height: number, fit: HomeFit, card: HomeCard | null = null, stretch = 1): HomeCamera {
   const aspect = width / Math.max(1, height);
   const tanH = Math.tan(THREE.MathUtils.degToRad(fit.fov) / 2);
   const tagNdc = (fit.tagPx / Math.max(1, height)) * 2;
-  let disc = radius * 2;
-  let yMin = -radius;
-  let yMax = radius;
-  for (const s of slots) {
-    disc = Math.max(disc, Math.hypot(s.pos[0], s.pos[2]) + radius * s.scale * 1.1);
-    yMin = Math.min(yMin, s.pos[1] - radius * s.scale);
-    yMax = Math.max(yMax, s.pos[1] + radius * s.scale);
-  }
-  // 外圈一圈点（星球那么大的球，带名牌）+ 中间你的星球
-  const points: Array<{ p: THREE.Vector3; r: number; tag: boolean }> = [];
-  const ringR = disc - radius * 0.8;
-  for (let i = 0; i < 36; i++) {
-    const a = (i / 36) * Math.PI * 2;
-    points.push({ p: new THREE.Vector3(Math.cos(a) * ringR, (yMin + yMax) / 2, Math.sin(a) * ringR), r: radius * 0.8, tag: false });
-  }
-  const center = slots.find((s) => s.tier === 'you');
-  points.push({ p: new THREE.Vector3(0, 0, 0), r: radius * (center?.scale ?? 1) * 1.08, tag: true });
+  // 默认的角度下每颗星球（连同建好的、你的星球下面的名牌）都放得下；转到别的角度时有的会出画，拉远就看得到
+  void stretch;
+  const points: Array<{ p: THREE.Vector3; r: number; tag: boolean }> = slots.map((s) => ({ p: new THREE.Vector3(...s.pos), r: radius * s.scale * 1.1, tag: s.tier !== 'building' }));
+  if (!points.length) points.push({ p: new THREE.Vector3(), r: radius, tag: true });
   const target = new THREE.Vector3(0, 0, 0);
   const el = THREE.MathUtils.degToRad(fit.elevation);
   const dir = new THREE.Vector3(0, Math.sin(el), Math.cos(el));
   const eye = new THREE.Vector3();
-  const b: Bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
-  const safeW = fit.right - fit.left;
-  const safeH = fit.top - fit.bottom;
-  let lift = 0;
-  const fits = (D: number) => {
+  const boxes: Array<[number, number, number, number]> = [];
+  // 距离 D 时能不能放下：返回往右、往上挪多少（NDC），放不下返回 null
+  const place = (D: number): [number, number] | null => {
     eye.copy(target).addScaledVector(dir, D);
-    project(points, eye, target, lift, tanH, aspect, tagNdc, b);
-    return b.maxX - b.minX <= safeW && b.maxY - b.minY <= safeH;
-  };
-  let D = radius * 10;
-  for (let pass = 0; pass < 4; pass++) {
-    let lo = radius * 2;
-    let hi = radius * 600;
-    for (let i = 0; i < 40; i++) {
-      const mid = (lo + hi) / 2;
-      if (fits(mid)) hi = mid;
-      else lo = mid;
+    projectAll(points, eye, target, tanH, aspect, tagNdc, boxes);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [x0, x1, y0, y1] of boxes) {
+      minX = Math.min(minX, x0);
+      maxX = Math.max(maxX, x1);
+      minY = Math.min(minY, y0);
+      maxY = Math.max(maxY, y1);
     }
-    D = hi;
-    fits(D);
-    // 上下居中：抬头把画面往下挪（lift 变大，星系在画面里往下）
-    const dy = (b.minY + b.maxY) / 2 - (fit.top + fit.bottom) / 2;
-    lift += dy * D * tanH;
+    if (maxX - minX > fit.right - fit.left || maxY - minY > fit.top - fit.bottom) return null;
+    // 先居中；躲不开标题卡片时往右、往下挪（挪得最少的那个）
+    const dx0 = (fit.left + fit.right) / 2 - (minX + maxX) / 2;
+    const dy0 = (fit.top + fit.bottom) / 2 - (minY + maxY) / 2;
+    const dxMax = fit.right - maxX;
+    const dyMin = fit.bottom - minY;
+    const clear = (dx: number, dy: number): boolean => {
+      if (!card) return true;
+      for (const [x0, , , y1] of boxes) if (x0 + dx < card.right && y1 + dy > card.bottom) return false;
+      return true;
+    };
+    let best: [number, number] | null = null;
+    let cost = Infinity;
+    for (let i = 0; i <= 8; i++) {
+      for (let j = 0; j <= 8; j++) {
+        const dx = dx0 + ((dxMax - dx0) * i) / 8;
+        const dy = dy0 + ((dyMin - dy0) * j) / 8;
+        const c = (dx - dx0) ** 2 + (dy - dy0) ** 2;
+        if (c < cost && clear(dx, dy)) {
+          cost = c;
+          best = [dx, dy];
+        }
+      }
+    }
+    return best;
+  };
+  let lo = radius * 2;
+  let hi = radius * 600;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (place(mid)) hi = mid;
+    else lo = mid;
   }
-  return { target, position: target.clone().addScaledVector(dir, D), distance: D, fov: fit.fov, lift };
+  const D = hi;
+  const [dx, dy] = place(D) ?? [0, 0];
+  // 画面上挪 (dx, dy)：往上抬头（lift 为正时内容往下）、往左转（yaw 为正时内容往右）
+  const lift = -dy * D * tanH;
+  const yaw = Math.atan(dx * tanH * aspect);
+  return { target, position: target.clone().addScaledVector(dir, D), distance: D, fov: fit.fov, lift, yaw };
 }

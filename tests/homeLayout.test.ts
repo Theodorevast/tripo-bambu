@@ -78,27 +78,28 @@ describe('首页版式：螺旋星系（homeLayout）', () => {
     expect(HOME_FIT.tall.elevation).toBeGreaterThan(HOME_FIT.wide.elevation);
   });
 
-  it('取景：看向星系中心；左右转到哪个角度，所有星球都在画面的安全区里', () => {
+  it('取景：看向星系中心；默认角度下所有星球都在画面里，躲开左上角的标题卡片（往右下挪）', () => {
+    const card = { right: -0.35, bottom: 0.4 };
     for (const [w, h] of [[1440, 900], [1280, 800], [390, 844], [820, 1180]]) {
       const shape: HomeShape = homeShape(w / h);
       const fit = HOME_FIT[shape];
       const slots = homeLayout(teams(6, 10), 'b0', shape, R);
-      const cam = fitHomeCamera(slots, R, w, h, fit);
+      const cam = fitHomeCamera(slots, R, w, h, fit, shape === 'wide' ? card : null);
       expect(cam.target.length()).toBe(0);
       const dir = cam.position.clone().sub(cam.target).normalize();
       expect(THREE.MathUtils.radToDeg(Math.asin(dir.y))).toBeCloseTo(fit.elevation, 6);
-      for (const turn of [0, 90, 180, 270]) {
-        const camera = new THREE.PerspectiveCamera(fit.fov, w / h, 0.1, 1e5);
-        camera.position.copy(cam.position).applyAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(turn));
-        camera.lookAt(cam.target);
-        camera.rotateX(Math.atan2(cam.lift, cam.distance));
-        camera.updateMatrixWorld();
-        for (const s of slots) {
-          const p = new THREE.Vector3(...s.pos).project(camera);
-          expect(Math.abs(p.x), `${w}×${h} 转 ${turn}° ${s.id}`).toBeLessThan(1);
-          expect(p.y, `${w}×${h} 转 ${turn}° ${s.id}`).toBeLessThan(fit.top + 0.05);
-          expect(p.y, `${w}×${h} 转 ${turn}° ${s.id}`).toBeGreaterThan(fit.bottom - 0.05);
-        }
+      // 和镜头一样摆：看向中心、抬头（lift）、再往左转（yaw）
+      const camera = new THREE.PerspectiveCamera(fit.fov, w / h, 0.1, 1e5);
+      camera.position.copy(cam.position);
+      camera.lookAt(cam.target);
+      camera.rotateX(Math.atan2(cam.lift, cam.distance));
+      camera.rotateY(cam.yaw);
+      camera.updateMatrixWorld();
+      for (const s of slots) {
+        const q = new THREE.Vector3(...s.pos).project(camera);
+        expect(Math.abs(q.x), `${w}×${h} ${s.id}`).toBeLessThan(1);
+        expect(Math.abs(q.y), `${w}×${h} ${s.id}`).toBeLessThan(1);
+        if (shape === 'wide') expect(q.x < card.right && q.y > card.bottom, `${w}×${h} ${s.id} 在标题卡片底下`).toBe(false);
       }
     }
   });

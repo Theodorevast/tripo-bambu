@@ -337,19 +337,11 @@ export class GalaxyUi {
     const below = _c.y + _c.r * 1.02 + 6;
     const ys = [below, below + t.h + 4, _c.y - _c.r * 1.02 - 6 - t.h];
     let slot = -1;
+    // 名牌一律放在自己星球的正下方；和更近的名牌、更近的星球叠在一起就淡掉（你的星球的名牌一直在）
     if (ok) {
-      if (hover) slot = t.slot;
+      if (hover || t.rank === 0) slot = 0;
       else if (t.entry.team.status === 'under-construction') slot = -1; // 建设中的：平时不显示，悬停时才有
-      else {
-        // 正下方放不下时试「再往下一格」「星球上方」（上一帧选的位置还空着就不换，转镜头时不来回跳）
-        const order = t.slot > 0 ? [t.slot, 0, 1, 2] : [0, 1, 2];
-        for (const k of order) {
-          if (this.fits(t, ys[k], placed)) {
-            slot = k;
-            break;
-          }
-        }
-      }
+      else if (this.fits(t, ys[0], placed)) slot = 0;
     }
     const free = slot >= 0;
     if (free) {
@@ -386,7 +378,7 @@ export class GalaxyUi {
       // 矩形和圆：圆心到矩形最近点的距离
       const cx = Math.min(Math.max(d.x, l), r);
       const cy = Math.min(Math.max(d.y, y), y + t.h);
-      if (Math.hypot(d.x - cx, d.y - cy) < d.r * 0.82) return false;
+      if (Math.hypot(d.x - cx, d.y - cy) < d.r * 0.6) return false; // 擦到边上可以，压到星球身上不行
     }
     return true;
   }

@@ -51,15 +51,17 @@ export function addHomeTune(pane: HomeTuneFolder, world: World): void {
     ['buildingFalloff', 0, 0.8, 0.01, 'building size falloff'],
     ['buildingDim', 0, 0.8, 0.01, 'building faded'],
     ['dimFalloff', 0, 0.8, 0.01, 'fade falloff'],
+    ['tallStretch', 1, 2.5, 0.01, 'phone: stretch toward camera'],
   ]);
   spiral.on('change', apply);
   const dust = home.addFolder({ title: 'Stardust & wisps', expanded: false });
   sliders(dust, HOME_DUST, [
     ['density', 0, 2.5, 0.01, 'stardust density'],
     ['size', 0.2, 3, 0.01, 'stardust size'],
-    ['glow', 0, 2, 0.01, 'stardust brightness'],
+    ['glow', 0, 3, 0.01, 'stardust brightness'],
+    ['width', 0.2, 3, 0.01, 'arm width'],
     ['wisps', 0, 3, 0.01, 'cloud wisps'],
-    ['extra', 0, 1.5, 0.01, 'arm length past planets'],
+    ['extra', 0, 6, 0.05, 'arm past outermost planet ×R'],
     ['halo', 0, 2, 0.01, 'glow around your planet'],
   ]);
   dust.on('change', apply);
@@ -99,6 +101,8 @@ export function addHomeTune(pane: HomeTuneFolder, world: World): void {
     ['streaks', 0, 1, 0.01, 'sky streaks off'],
     ['puffs', 0, 1, 0.01, 'far cumulus off'],
     ['steps', 0, 0.8, 0.01, 'fewer march steps'],
+    ['cream', 0, 1, 0.01, 'warm cream'],
+    ['dim', 0, 0.5, 0.01, 'darker (dust glows)'],
   ]);
   const motion = home.addFolder({ title: 'Planet hover & press', expanded: false });
   sliders(motion, HOME_MOTION, [

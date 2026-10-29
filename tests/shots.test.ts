@@ -11,7 +11,7 @@ afterEach(() => {
 
 describe('镜头表：距离都按星球半径换算', () => {
   it('首页：镜头放在 fitHomeCamera 给的位置，不自转；远近只让拉一点，上下只让转 tilt 度（星球视图的取景不受影响）', () => {
-    const cam = { target: new THREE.Vector3(3, -2, 1), position: new THREE.Vector3(3, 40, 300), distance: Math.hypot(42, 299), fov: 40, lift: 0 };
+    const cam = { target: new THREE.Vector3(3, -2, 1), position: new THREE.Vector3(3, 40, 300), distance: Math.hypot(42, 299), fov: 40, lift: 0, yaw: 0 };
     const f = homeFraming(cam);
     expect(f.target.equals(cam.target)).toBe(true);
     expect(f.position.equals(cam.position)).toBe(true);
@@ -52,7 +52,7 @@ describe('镜头表：距离都按星球半径换算', () => {
     SHOTS.galaxy.zoomIn = 0.5;
     SHOTS.planet.lift = 0.2;
     SHOTS.planet.elevation = 50;
-    const g = homeFraming({ target: new THREE.Vector3(), position: new THREE.Vector3(0, 0, 100), distance: 100, fov: 40, lift: 0 });
+    const g = homeFraming({ target: new THREE.Vector3(), position: new THREE.Vector3(0, 0, 100), distance: 100, fov: 40, lift: 0, yaw: 0 });
     expect(g.minDistance).toBeCloseTo(50, 9);
     expect(planetFraming(new THREE.Vector3(), SHOTS.planet, 30).lift).toBeCloseTo(6, 9);
     expect(planetViewDir().y).toBeCloseTo(Math.sin(THREE.MathUtils.degToRad(50)), 9);
