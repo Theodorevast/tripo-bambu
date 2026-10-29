@@ -117,16 +117,20 @@ export class App {
   // 新团队加入（P3：「Create a planet」建好以后，ui/createPlanetLaunch.ts 调）：记进团队列表，星系里加一颗星球（World.addPlanet：
   // 马上登记，着色器在后台编好才挂进场景，首页版式跟着重排）。是「你」建的就成了「你的星球」：首页把它放到前排正中
   // （别的星球慢慢挪开）、名牌写 You，Visit your planet 也去它那里（ui/home.ts 读 app.you）
-  addTeam(team: Team): void {
+  // claim = false：先不让它成为「你的星球」（造星的转场在蓄力时才调 claimYou，原来的你的星球那时才让开）
+  addTeam(team: Team, claim = true): void {
     if (this.teams.some((t) => t.id === team.id)) return;
     this.teams = [...this.teams, team];
     this.world.addPlanet(team);
-    if (team.createdByYou) {
-      this.you.teamId = team.id;
-      this.world.setYou(team.id, true);
-      this.galaxyUi.setYou(team.id);
-    }
+    if (team.createdByYou && claim) this.claimYou(team.id);
     if (!this.currentTeamId) this.topbar.showGalaxy(this.teams.length, this.teams.reduce((n, t) => n + t.works.length, 0));
+  }
+
+  // 这个团队成了「你的星球」：首页把它放到你的位置（别的星球慢慢挪开）、名牌写 You，Visit your planet 也去它那里
+  claimYou(teamId: string): void {
+    this.you.teamId = teamId;
+    this.world.setYou(teamId, true);
+    this.galaxyUi.setYou(teamId);
   }
 
   // 返回的 Promise 在这次跳转（或取代它的更新的那次）处理完时 resolve

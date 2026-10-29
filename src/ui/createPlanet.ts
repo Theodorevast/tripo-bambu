@@ -4,7 +4,8 @@ import type { PlanetStore } from '../data/store';
 import type { PresetId, Team } from '../data/types';
 import { PRESETS, PRESET_IDS } from '../planet/presets';
 import { BURST, BurstFx } from './createPlanetBurst';
-import { LaunchWarmer, riseIntoGalaxy, worldDelay, type LaunchState } from './createPlanetLaunch';
+import { LaunchWarmer, replayBurst, riseIntoGalaxy, worldDelay, type LaunchState } from './createPlanetLaunch';
+import { setBurstReplay } from './createPlanetTune';
 import { buildTeam, charCount, checkFriend, checkMotto, checkName, DEFAULT_MOTTO, inviteLink, LIMITS, newDraft, PRESET_BLURBS, randomSeed, teamIdFor, TEAM_COLORS, type Captain, type Check, type Draft } from './createPlanetModel';
 import { PlanetPreview } from './createPlanetPreview';
 import { el, initials } from './dom';
@@ -121,6 +122,8 @@ export class CreatePlanet implements CreatorLayer {
     this.captain = captain;
     this.preview = new PlanetPreview(app.world);
     this.warmer = new LaunchWarmer(app.world);
+    // ?tune → Create → Replay：你的星球在首页上再冲出来一次（调手感用）
+    setBurstReplay(() => void replayBurst(app, this.burst, this.launchState).then((ok) => { if (!ok) toast('Replay works on the galaxy view'); }));
     this.buildWindow();
     app.root.append(this.node);
     this.syncCreateButton();

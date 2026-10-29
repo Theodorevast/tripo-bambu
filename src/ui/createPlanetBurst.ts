@@ -1,14 +1,15 @@
 import * as THREE from 'three/webgpu';
-import { attribute, length, smoothstep, uniform, uv } from 'three/tsl';
+import { attribute, length, mix, positionWorld, smoothstep, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { sharedAudio } from '../fun/couponsAudio';
 import { blendPalette, clonePalette, PRESETS, RAIN_MIX, RAIN_PALETTE } from '../nature/atmosphere';
 import type { World } from '../scenes/world';
 
 // 「星球从云里冲出来」的特效（P3，createPlanetLaunch.ts 的转场用）：
-// - 云团（PuffPool）：一个 InstancedMesh 画所有的云团（朝向镜头的软边面片，每个实例自己的颜色、透明度），用对象池循环用：
-//   蓄力时落点下面的云打旋、鼓起来；冲出来时被推开往外翻；星球拖出来的云尾巴
-// - 星星（StarPool）：另一个 InstancedMesh：冲出来时的星尘、落定时飘的星星彩纸
-// - 云里的光（glow）：落点下面一块暖光，蓄力时慢慢亮起来，冲出来时一闪再暗下去（加色混合；暖黄偏奶油，不是霓虹）
+// - 云团（Pool）：一个 InstancedMesh 画所有的云团（朝向镜头的软边面片），用对象池循环用。每团上亮下暗（按面片的上下渐变，
+//   底下是云海的中间调），大小不一、互相叠着；面片低于云顶的部分渐渐透明：看起来一半沉在云海里。
+//   蓄力时落点下面的云一边打旋、一边往中心收拢、中间鼓起来；冲出来时被甩开往外翻；星球拖出来的云尾巴也是它们
+// - 星星（Pool）：另一个 InstancedMesh：冲出来时的星尘、落定时飘的星星彩纸
+// - 云里的光（glow）：落点下面一块暖光，蓄力时慢慢亮起来，冲出来时一闪再暗下去（暖金色，不是霓虹）
 // - 冲击环（ring）：云面上一圈往外推开的环
 // - 镜头抖动（Shake）：trauma² 的做法，抖动量 = trauma²，方向用几条正弦叠的平滑噪声（不随机），trauma 每秒线性回落
 // - 声音：Web Audio 现场合成（借 coupons 的 AudioContext，用户交互过以后才有）：蓄力时低沉的隆隆、冲出来时「呼——」
@@ -17,12 +18,12 @@ import type { World } from '../scenes/world';
 // ?tune → Create 调这张表（ui/createPlanetTune.ts）
 export const BURST = {
   aim: 1.2, // 1. 窗口收起、镜头转到看得清落点的角度（秒）
-  charge: 0.55, // 2. 蓄力：云鼓起、发光、打旋，隆隆声，镜头轻轻抖
+  charge: 0.55, // 2. 蓄力：云鼓起、发光、打旋，隆隆声，镜头轻轻抖。原来的「你的星球」这时让开（让完了才冲，可能比这个长一点）
   burst: 0.4, // 3. 冲出来
   settle: 0.65, // 4. 落定：冲过头、回弹、压扁再弹回，名牌弹出来、飘星星
   hold: 1.0, // 5. 收尾前停一拍
   after: 0, // 收尾：0 = 回首页、停在新星球上；1 = 照常穿云进这颗星球
-  distance: 8.5, // 镜头离落点（× 半径）
+  distance: 9.5, // 镜头离落点（× 半径）：周围看得到一部分星系
   elevation: 26, // 镜头往下看（度）
   sink: 1.5, // 星球一开始在云顶以下几个半径
   overshoot: 0.85, // 冲过头多高（× 半径）
@@ -63,7 +64,9 @@ interface Particle {
   color: THREE.Color;
   ang: number;
   rad: number;
+  r0: number; // 打旋的起始半径（往中心收拢按它算）
   h: number;
+  h0: number; // 打旋时静止的高度（负的：一半沉在云海里）
 }
 
 // 一池朝向镜头的面片：一个 InstancedMesh，每帧在 CPU 上摆好每个实例（位置、朝镜头、大小）、写透明度；死掉的缩成 0
@@ -73,21 +76,18 @@ class Pool {
   private readonly alpha: THREE.InstancedBufferAttribute;
   private next = 0;
 
-  constructor(n: number, map: THREE.Texture, blending: THREE.Blending, name: string, renderOrder: number) {
+  constructor(n: number, material: THREE.Material, name: string, renderOrder: number) {
     const geo = new THREE.PlaneGeometry(1, 1);
     this.alpha = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
     this.alpha.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('aAlpha', this.alpha);
-    const m = new THREE.MeshBasicNodeMaterial({ map, transparent: true, depthWrite: false, fog: false, blending });
-    m.name = name;
-    m.opacityNode = attribute('aAlpha', 'float'); // 最后的透明度 = 贴图的透明度 × 这个实例的透明度
-    this.mesh = new THREE.InstancedMesh(geo, m, n);
+    this.mesh = new THREE.InstancedMesh(geo, material, n);
     this.mesh.name = name;
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = renderOrder;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < n; i++) {
-      this.items.push({ live: false, orbit: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), drag: 0, gravity: 0, age: 0, life: 1, fadeIn: 0.1, size0: 1, size1: 1, rot: 0, spin: 0, alpha: 1, color: new THREE.Color(1, 1, 1), ang: 0, rad: 0, h: 0 });
+      this.items.push({ live: false, orbit: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), drag: 0, gravity: 0, age: 0, life: 1, fadeIn: 0.1, size0: 1, size1: 1, rot: 0, spin: 0, alpha: 1, color: new THREE.Color(1, 1, 1), ang: 0, rad: 0, r0: 0, h: 0, h0: 0 });
       this.mesh.setColorAt(i, this.items[i].color);
       this.mesh.setMatrixAt(i, _m.makeScale(0, 0, 0));
     }
@@ -116,7 +116,7 @@ class Pool {
     p.gravity = 0;
     p.age = 0;
     p.fadeIn = 0.12;
-    p.rot = Math.random() * Math.PI * 2;
+    p.rot = (Math.random() - 0.5) * 0.4; // 云团基本立着（上亮下暗的渐变按面片的上下）
     p.spin = 0;
     p.alpha = 1;
     return p;
@@ -132,7 +132,7 @@ class Pool {
     return n;
   }
 
-  // 每帧：走一步、摆好实例。center、camera：打旋的中心、朝向镜头
+  // 每帧：走一步、摆好实例。center：打旋的中心
   update(dt: number, camera: THREE.Camera, center: V3): void {
     camera.getWorldQuaternion(_q);
     const items = this.items;
@@ -162,7 +162,7 @@ class Pool {
       // 打旋的云不按年龄淡入淡出（透明度由蓄力的进度直接给）
       const a = p.orbit ? p.alpha : p.alpha * Math.min(1, k / Math.max(1e-3, p.fadeIn)) * (1 - smooth(Math.max(0, (k - 0.45) / 0.55)));
       this.alpha.setX(i, a);
-      const size = p.size0 + (p.size1 - p.size0) * (1 - (1 - k) * (1 - k));
+      const size = p.orbit ? p.size1 : p.size0 + (p.size1 - p.size0) * (1 - (1 - k) * (1 - k));
       _q2.setFromAxisAngle(_z, p.rot);
       _s.setScalar(Math.max(1e-4, size));
       this.mesh.setMatrixAt(i, _m.compose(p.pos, _q3.copy(_q).multiply(_q2), _s));
@@ -215,23 +215,35 @@ export class BurstFx {
   private readonly glowColor = uniform(new THREE.Color(1.9, 1.35, 0.62));
   private readonly ringAlpha = uniform(0);
   private readonly ringColor = uniform(new THREE.Color(1, 0.97, 0.9));
+  private readonly seaTop = uniform(0); // 云顶（世界 y）：云团低于它的部分渐渐透明（沉在云海里）
+  private readonly sink = uniform(10); // 沉下去的那一段多软（世界单位）
+  private readonly shade = uniform(new THREE.Color(0.55, 0.5, 0.72)); // 云团底下（相对受光面的倍数）：云海的中间调
   private readonly center = new THREE.Vector3();
   private R = 30;
   private ringT = -1; // 冲击环放了多久（< 0：没在放）
   private flashT = -1; // 冲出来那一下的闪光
   private charge = 0; // 蓄力的进度 0..1
   private readonly lit = new THREE.Color();
-  private readonly mid = new THREE.Color();
-  private readonly warm = new THREE.Color(1.6, 1.15, 0.55);
+  private readonly warm = new THREE.Color(1.5, 1.08, 0.55);
   private prepared: Promise<void> | null = null;
 
   constructor() {
     this.group.name = 'create-burst';
-    this.puffs = new Pool(110, puffTexture(), THREE.NormalBlending, 'create-puffs', -6);
-    this.stars = new Pool(90, starTexture(), THREE.NormalBlending, 'create-stars', -4);
-    // 云里的光：水平的一块，中心最亮，往外软软地淡掉（加色混合）
+    const puffMap = puffTexture();
+    // 云团：上亮下暗（底下乘云海的中间调），低于云顶的部分渐渐透明
+    const pm = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
+    pm.name = 'create-puffs';
+    const tex = texture(puffMap, uv());
+    const lift = smoothstep(0.08, 0.85, uv().y);
+    pm.colorNode = vec4(mix(this.shade as unknown as THREE.Node<'vec3'>, vec3(1, 1, 1), lift).mul(tex.rgb), tex.a);
+    pm.opacityNode = attribute('aAlpha', 'float').mul(smoothstep(this.seaTop.sub(this.sink), this.seaTop.add(this.sink.mul(0.6)), positionWorld.y));
+    this.puffs = new Pool(130, pm, 'create-puffs', -6);
+    const sm = new THREE.MeshBasicNodeMaterial({ map: starTexture(), transparent: true, depthWrite: false, fog: false });
+    sm.name = 'create-stars';
+    sm.opacityNode = attribute('aAlpha', 'float');
+    this.stars = new Pool(90, sm, 'create-stars', -4);
+    // 云里的光：水平的一块，中心最亮，往外软软地淡掉
     const glowGeo = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
-    // 普通混合、比云亮一些的暖金色（HDR）：加色混合叠在很亮的云上，色调映射以后几乎看不出来
     const gm = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
     gm.name = 'create-glow';
     const rg = length(uv().sub(0.5)).mul(2);
@@ -274,14 +286,17 @@ export class BurstFx {
     const atm = world.atmosphere;
     const pal = clonePalette(PRESETS[atm.preset]);
     blendPalette(pal, PRESETS[atm.preset], RAIN_PALETTE, atm.rain * RAIN_MIX);
-    this.lit.copy(pal.cloudLit).multiplyScalar(0.78);
-    this.mid.copy(pal.cloudMid);
+    this.lit.copy(pal.cloudLit).multiplyScalar(0.72);
+    // 底下 = 中间调 / 受光面（按通道），夹一下：不至于太黑
+    this.shade.value.setRGB(
+      THREE.MathUtils.clamp(pal.cloudMid.r / Math.max(1e-3, pal.cloudLit.r), 0.3, 0.9),
+      THREE.MathUtils.clamp(pal.cloudMid.g / Math.max(1e-3, pal.cloudLit.g), 0.3, 0.9),
+      THREE.MathUtils.clamp(pal.cloudMid.b / Math.max(1e-3, pal.cloudLit.b), 0.3, 0.95),
+    );
     this.ringColor.value.copy(pal.cloudLit).multiplyScalar(0.85);
-    this.center.copy(at);
     this.R = R;
-    this.glow.position.copy(at).y += 0.06 * R;
-    this.glow.scale.setScalar(2.3 * R);
-    this.ring.position.copy(at).y += 0.08 * R;
+    this.seaTop.value = at.y;
+    this.sink.value = 0.35 * R;
     this.puffs.clear();
     this.stars.clear();
     this.charge = 0;
@@ -289,44 +304,56 @@ export class BurstFx {
     this.flashT = -1;
     this.glowAmount.value = 0;
     this.ringAlpha.value = 0;
+    this.moveTo(at);
     this.group.visible = true;
     if (!this.group.parent) world.scene.add(this.group);
-    // 打旋的云：一圈一圈绕着落点，离中心近的转得快；一开始贴着云面、看不见，蓄力时淡进来、鼓起来
-    for (let i = 0; i < 34; i++) {
+    // 打旋的云：大小不一（小的多、大的少），一层叠一层绕着落点；一半沉在云海里，蓄力时淡进来、往中心收拢、中间鼓起来
+    for (let i = 0; i < 52; i++) {
       const p = this.puffs.take();
       p.orbit = true;
+      const u = Math.random();
+      p.size0 = p.size1 = R * (0.28 + 1.0 * u * u);
       p.ang = Math.random() * Math.PI * 2;
-      p.rad = R * (0.35 + 2.1 * Math.sqrt(Math.random()));
-      p.h = 0;
+      p.r0 = p.rad = R * (0.3 + 2.2 * Math.sqrt(Math.random()));
+      p.h0 = p.h = -p.size0 * (0.18 + 0.2 * Math.random());
       p.life = 99;
       p.fadeIn = 0.004;
       p.alpha = 0;
-      p.size0 = p.size1 = R * (0.55 + 0.45 * Math.random());
-      p.color.copy(this.mid).lerp(this.lit, 0.55 + 0.4 * Math.random());
+      p.color.copy(this.lit).multiplyScalar(0.86 + 0.2 * Math.random());
     }
   }
 
-  // 蓄力：k 0..1（云打旋、鼓起来、发光）
+  // 落点挪了（版式换了）：特效跟过去
+  moveTo(at: V3): void {
+    this.center.copy(at);
+    this.glow.position.copy(at).y += 0.06 * this.R;
+    this.glow.scale.setScalar(2.3 * this.R);
+    this.ring.position.copy(at).y += 0.08 * this.R;
+  }
+
+  // 蓄力：k 0..1（云打旋、收拢、鼓起来、发光）
   setCharge(k: number): void {
     this.charge = k;
   }
 
-  // 冲出来的那一下：打旋的云被推开往外翻，冲击环放出去，光一闪
+  // 冲出来的那一下：打旋的云被甩开往外翻，冲击环放出去，光一闪
   blast(): void {
     const R = this.R;
     for (const p of this.puffs.items) {
       if (!p.live || !p.orbit) continue;
       p.orbit = false;
       const out = new THREE.Vector3(Math.cos(p.ang), 0, Math.sin(p.ang));
-      p.vel.copy(out).multiplyScalar(R * (5 + 4 * Math.random()));
-      p.vel.y = R * (0.5 + 1.1 * Math.random());
+      // 甩出去：往外 + 沿着打旋的方向（切向）
+      const tangent = new THREE.Vector3(-Math.sin(p.ang), 0, Math.cos(p.ang));
+      p.vel.copy(out).multiplyScalar(R * (5 + 4 * Math.random())).addScaledVector(tangent, R * 2.5);
+      p.vel.y = R * (0.4 + 1.0 * Math.random());
       p.drag = 3.2;
-      p.gravity = R * 0.4;
+      p.gravity = R * 0.5;
       p.age = 0;
       p.life = 0.9 + 0.5 * Math.random();
       p.fadeIn = 0.001;
-      p.alpha = 0.95;
-      p.size1 = p.size0 * 1.6;
+      p.alpha = Math.max(0.6, p.alpha);
+      p.size1 = p.size0 * 1.5;
     }
     this.ringT = 0;
     this.flashT = 0;
@@ -342,10 +369,9 @@ export class BurstFx {
     p.life = 0.7 + 0.35 * Math.random();
     p.fadeIn = 0.05;
     p.alpha = 0.9;
-    p.size0 = R * (0.35 + 0.25 * Math.random());
+    p.size0 = R * (0.3 + 0.35 * Math.random());
     p.size1 = p.size0 * 2.1;
-    p.spin = (Math.random() - 0.5) * 1.5;
-    p.color.copy(this.mid).lerp(this.lit, 0.65 + 0.3 * Math.random());
+    p.color.copy(this.lit).multiplyScalar(0.92 + 0.15 * Math.random());
   }
 
   // 星尘：在星球边上（center 周围 r）放几颗小亮点，往外、往下飘
@@ -362,6 +388,7 @@ export class BurstFx {
       p.alpha = 1;
       p.size0 = this.R * (0.07 + 0.07 * Math.random());
       p.size1 = p.size0 * 0.4;
+      p.rot = Math.random() * Math.PI * 2;
       p.spin = (Math.random() - 0.5) * 8;
       p.color.setRGB(1, 0.94, 0.72).multiplyScalar(1.4 + Math.random() * 0.6);
     }
@@ -385,6 +412,7 @@ export class BurstFx {
       p.alpha = 1;
       p.size0 = this.R * (0.13 + 0.1 * Math.random());
       p.size1 = p.size0 * 0.85;
+      p.rot = Math.random() * Math.PI * 2;
       p.spin = (Math.random() - 0.5) * 6;
       p.color.setHex(palette[i % palette.length]).convertSRGBToLinear().multiplyScalar(1.6);
     }
@@ -399,23 +427,24 @@ export class BurstFx {
     if (!this.group.visible) return;
     const R = this.R;
     const k = this.charge;
-    // 打旋的云：越来越快，往中心收一点，中间鼓起来（一个圆顶），离中心近的被下面的光染暖
+    const ks = smooth(k);
+    // 打旋的云：越转越快（离中心近的更快），往中心收拢，中间鼓起来（一个圆顶）；离中心近的被下面的光染暖一点
     for (const p of this.puffs.items) {
       if (!p.live || !p.orbit) continue;
-      const w = (1.0 + 4.2 * k) / (0.45 + p.rad / R);
+      const w = (0.8 + 4.4 * k) / (0.4 + p.rad / R);
       p.ang += w * dt;
-      p.rad = Math.max(R * 0.25, p.rad * (1 - 0.18 * k * dt));
-      const dome = Math.max(0, 1 - (p.rad / (2.7 * R)) ** 2);
-      p.h = R * (0.05 + 1.0 * smooth(k) * dome);
-      p.alpha = 0.95 * smooth(Math.min(1, k * 2.5));
-      p.color.copy(this.mid).lerp(this.lit, 0.7).lerp(this.warm, 0.55 * smooth(k) * dome * BURST.glow);
-      p.size1 = p.size0 * (1 + 0.3 * k);
+      p.rad = p.r0 * (1 - 0.45 * ks);
+      const dome = Math.max(0, 1 - (p.rad / (2.4 * R)) ** 2);
+      p.h = p.h0 + R * 0.95 * ks * dome;
+      p.alpha = 0.92 * smooth(Math.min(1, k * 2.2));
+      p.size1 = p.size0 * (1 + 0.35 * ks * dome);
+      p.color.copy(this.lit).lerp(this.warm, 0.35 * ks * dome * Math.min(1, BURST.glow));
       p.age = 0;
     }
     this.puffs.update(dt, camera, this.center);
     this.stars.update(dt, camera, this.center);
     // 光：蓄力时亮起来（带一点起伏），冲出来时一闪再暗下去
-    let g = smooth(k) * (0.75 + 0.25 * Math.sin(performance.now() * 0.025));
+    let g = ks * (0.75 + 0.25 * Math.sin(performance.now() * 0.025));
     if (this.flashT >= 0) {
       this.flashT += dt;
       const f = this.flashT / 0.55;
@@ -518,7 +547,7 @@ export function whoosh(): void {
 }
 
 // —— 贴图 ——
-// 一团软边的积云：几个重叠的圆，下半团压暗偏冷一点（有体积）
+// 一团软边的积云：几个大小不一的圆叠在一起，底边平一点（像浮在云面上的一团），边缘很软；明暗在着色器里按上下渐变做
 function puffTexture(): THREE.Texture {
   const size = 128;
   const canvas = document.createElement('canvas');
@@ -527,25 +556,21 @@ function puffTexture(): THREE.Texture {
   const g = canvas.getContext('2d');
   if (g) {
     const blob = (x: number, y: number, r: number, a: number) => {
-      const grad = g.createRadialGradient(x, y, r * 0.15, x, y, r);
+      const grad = g.createRadialGradient(x, y, r * 0.05, x, y, r);
       grad.addColorStop(0, `rgba(255,255,255,${a})`);
-      grad.addColorStop(0.6, `rgba(255,255,255,${a * 0.75})`);
+      grad.addColorStop(0.55, `rgba(255,255,255,${a * 0.8})`);
       grad.addColorStop(1, 'rgba(255,255,255,0)');
       g.fillStyle = grad;
       g.beginPath();
       g.arc(x, y, r, 0, Math.PI * 2);
       g.fill();
     };
-    blob(64, 72, 46, 0.9);
-    blob(42, 66, 30, 0.85);
-    blob(86, 64, 32, 0.85);
-    blob(62, 48, 30, 0.8);
-    g.globalCompositeOperation = 'source-atop';
-    const shade = g.createLinearGradient(0, 40, 0, 120);
-    shade.addColorStop(0, 'rgba(150,145,190,0)');
-    shade.addColorStop(1, 'rgba(150,145,190,0.42)');
-    g.fillStyle = shade;
-    g.fillRect(0, 0, size, size);
+    blob(64, 78, 44, 0.85);
+    blob(38, 80, 28, 0.8);
+    blob(92, 78, 30, 0.8);
+    blob(54, 56, 30, 0.75);
+    blob(78, 50, 26, 0.7);
+    blob(64, 40, 18, 0.55);
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
