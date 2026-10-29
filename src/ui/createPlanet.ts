@@ -3,7 +3,8 @@ import type { App, CreatorLayer } from '../app';
 import type { PlanetStore } from '../data/store';
 import type { PresetId, Team } from '../data/types';
 import { PRESETS, PRESET_IDS } from '../planet/presets';
-import { CloudBurst, LaunchWarmer, riseIntoGalaxy, worldDelay, type LaunchState } from './createPlanetLaunch';
+import { BURST, BurstFx } from './createPlanetBurst';
+import { LaunchWarmer, riseIntoGalaxy, worldDelay, type LaunchState } from './createPlanetLaunch';
 import { buildTeam, charCount, checkFriend, checkMotto, checkName, DEFAULT_MOTTO, inviteLink, LIMITS, newDraft, PRESET_BLURBS, randomSeed, teamIdFor, TEAM_COLORS, type Captain, type Check, type Draft } from './createPlanetModel';
 import { PlanetPreview } from './createPlanetPreview';
 import { el, initials } from './dom';
@@ -77,7 +78,7 @@ export class CreatePlanet implements CreatorLayer {
   private readonly counter = el('span', { className: 'cp-progress mono' });
   private readonly live = el('p', { className: 'cp-live' });
   private readonly preview: PlanetPreview;
-  private readonly burst = new CloudBurst();
+  private readonly burst = new BurstFx(); // 星球冲出来时的云、光、冲击环、星星（createPlanetBurst.ts）
   private readonly warmer: LaunchWarmer; // 样子定下来以后，主画面的渲染器里先把新星球独有的着色器备好（Launch 时不卡）
   private burstReady: Promise<void> | null = null;
   // 第一步
@@ -167,7 +168,6 @@ export class CreatePlanet implements CreatorLayer {
     this.node.dataset.step = STEPS[this.step].id;
     this.refreshAll();
     this.preview.start();
-    this.burstReady ??= this.burst.prepare(this.app.world).catch(() => {}); // Launch 时翻开的云团：现在就在主画面的渲染器里编好
     this.presence.show(() => this.enter());
     addEventListener('keydown', this.onKey);
     this.focusStep();
@@ -614,6 +614,8 @@ export class CreatePlanet implements CreatorLayer {
     if (STEPS[i].id === 'crew') this.refreshCrew();
     // 离开「选样子」：预览不再在后台备别的预设；样子定了，主画面里先把这颗星球的着色器备好（见 LaunchWarmer）
     this.preview.pauseWarm(i !== 1);
+    // 冲出来用的云团、光、冲击环、星星：第二、三步时在主画面的渲染器里预编译（不挤在打开窗口那一下）
+    if (i >= 1) this.burstReady ??= this.burst.prepare(this.app.world).catch(() => {});
     if (i >= 2) void this.warmer.warm(this.look());
     if (STEPS[i].id === 'launch') this.refreshSummary();
     this.refreshStepper();
@@ -768,7 +770,7 @@ export class CreatePlanet implements CreatorLayer {
     this.say(`${created.name} is launching`);
     removeEventListener('keydown', this.onKey);
     this.preview.freeze();
-    await this.burstReady;
+    await (this.burstReady ??= this.burst.prepare(this.app.world).catch(() => {}));
     const collapse = this.collapse();
     // 替身一般进第三步时就备好了；还在编（很快就点了 Launch）就先等它编完（最多 1.5 秒，窗口照常收起），
     // 真的星球再加进来：两边的着色器不挤在一起编。镜头等窗口收得差不多、预览手上正在编的也编完了才起飞
@@ -785,7 +787,8 @@ export class CreatePlanet implements CreatorLayer {
     await rise;
     setTimeout(() => this.warmer.release(), 2500); // 真的星球画上了：替身放掉
     this.launching = false;
-    toast(saved ? `Welcome to ${created.name}! Press Edit to decorate it.` : `Welcome to ${created.name}! This browser can't save it, so it lasts until you close the tab.`, 4200);
+    const where = BURST.after >= 0.5 ? 'Press Edit to decorate it.' : 'Click it to land and decorate.';
+    toast(saved ? `${created.name} is in the sky! ${where}` : `${created.name} is in the sky! This browser can't save it, so it lasts until you close the tab.`, 4200);
   }
 
   // 窗口收起：纸卡往下缩、淡掉，预览的小窗从卡里「拿出来」（钉在屏幕上原来的位置），转着往下掉进云里。减弱动效时一起淡掉

@@ -810,6 +810,11 @@ export class World {
     for (const hook of this.renderHooks) hook();
   }
 
+  // 首页现在的取景（P3：造星的转场落定以后镜头飞回首页用）
+  homeFraming(): Framing {
+    return this.galaxyView();
+  }
+
   // 首页的取景：按版式（homeLayout.ts）和当前窗口算，所有星球连同名牌都在画面的安全区里。slots：按这套槽位算（还没摆上去的新版式）
   private galaxyView(slots?: HomeSlot[]): Framing {
     const fit = { ...HOME_FIT[this.shape] };
