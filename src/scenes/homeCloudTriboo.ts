@@ -142,6 +142,7 @@ export class CloudTriboo {
   private readonly drift = new THREE.Vector3();
   private readonly base = new THREE.Vector3();
   private fade = 0;
+  private recheck = 0; // 每隔一会儿看一下现在这个地方还空不空（镜头重新取景、版式变了以后可能压到星球）
   private warmed = false; // 开场预热完以前一直显示着（compileAsync 跳过不显示的），透明度是 0
 
   constructor(world: World) {
@@ -218,7 +219,8 @@ export class CloudTriboo {
     );
     const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     // 只在首页、镜头不在飞的时候换地方（换地方要按镜头现在的方向挑）
-    const calm = home && !world.rig.flying && !world.rig.drive;
+    // 开场的星尘拼标志在放的时候也不聚（一个一个来）
+    const calm = home && !world.rig.flying && !world.rig.drive && world.galaxy.shapeState.t < 0;
     this.t += dt;
     switch (this.phase) {
       case 'hidden':
@@ -240,6 +242,17 @@ export class CloudTriboo {
       }
       case 'show': {
         this.uScatter.value = 0;
+        // 镜头重新取景（标题卡片量好了、窗口变了）、版式变了以后这里可能压到星球：提前散开，换个空的地方
+        this.recheck -= dt;
+        if (this.recheck <= 0 && calm) {
+          this.recheck = 0.5;
+          const card = document.querySelector('#app .tb-title')?.getBoundingClientRect() ?? null;
+          if (this.clearance(this.uCenter.value, this.uScale.value, [...world.planets.values()], card) < -6) {
+            this.phase = 'scatter';
+            this.t = 0;
+            break;
+          }
+        }
         // 慢慢飘：沿镜头的左右方向来回一点
         if (!reduce) {
           const k = Math.min(1, this.t / Math.max(1, CLOUD_TRIBOO.cycle));
@@ -283,7 +296,8 @@ export class CloudTriboo {
     // 身子在画面里多大（像素）→ 世界里多大：按镜头到星系中心的距离换算
     const H = Math.max(1, innerHeight);
     const W = Math.max(1, innerWidth);
-    const px = Math.min(W * 0.085, H * 0.07) * CLOUD_TRIBOO.size;
+    // 窄屏（手机竖屏）星球排得满：小一点
+    const px = Math.min(W * (W < 700 ? 0.052 : 0.085), H * 0.07) * CLOUD_TRIBOO.size;
     const dist = cam.position.length();
     const S = (px * dist * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2)) / (H / 2);
     const plane = world.atmosphere.seaTop + S * 1.12; // 云的中心在云顶以上这么高（脚沉在云里）
@@ -293,9 +307,12 @@ export class CloudTriboo {
     // 右下角的翠宝、画面边缘还有多少空（像素）。没压到东西的格子里挑最空的；在螺旋臂外面、离上一次远的加分
     let best: THREE.Vector3 | null = null;
     let bestScore = -Infinity;
-    for (let gy = 0; gy < 5; gy++) {
-      for (let gx = 0; gx < 7; gx++) {
-        _v.set(((gx + 0.5) / 7) * 2 - 1, -(((gy + 0.5) / 5) * 2 - 1), 0.5).unproject(cam).sub(cam.position).normalize();
+    // 竖屏的格子竖着多、横着少（手机上空的地方小，格子细一点）
+    const NX = W >= H ? 7 : 6;
+    const NY = W >= H ? 5 : 11;
+    for (let gy = 0; gy < NY; gy++) {
+      for (let gx = 0; gx < NX; gx++) {
+        _v.set(((gx + 0.5) / NX) * 2 - 1, -(((gy + 0.5) / NY) * 2 - 1), 0.5).unproject(cam).sub(cam.position).normalize();
         if (_v.y > -1e-3) continue;
         const t = (plane - cam.position.y) / _v.y;
         if (t <= 0) continue;
@@ -338,8 +355,8 @@ export class CloudTriboo {
       room = Math.min(room, Math.hypot(nx - x, ny - y) - r);
     };
     if (card) rect(card.left - 8, card.top - 8, card.right + 8, card.bottom + 8);
-    rect(0, H - 90, 210, H); // Made with Tripo
-    rect(W - 170, H * 0.45, W, H); // 右下角躲着的翠宝（H2）
+    rect(0, H - 60, Math.min(210, W * 0.4), H); // Made with Tripo
+    rect(W - Math.min(170, W * 0.24), H * (W < H ? 0.8 : 0.45), W, H); // 右下角躲着的翠宝（H2）：竖屏上它只占右下角一小块
     for (const e of planets) {
       if (!this.world.planetOnScreen(e, _c)) continue;
       const pr = _c.r + 10;
