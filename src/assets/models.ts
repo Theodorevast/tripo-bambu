@@ -55,13 +55,23 @@ function startDecoderWorkers(): void {
   MeshoptDecoder.useWorkers(2);
 }
 
-// 每个渲染器用自己的实例：GPU 资源不跨渲染器共享
+// 每个渲染器用自己的实例：GPU 资源不跨渲染器共享。
+// oneAtATime（主画面用，F2）：GLB 照常同时下载（整块读，不走 FileLoader 把数据一块一块交给 JS 的流），解析一次只解析一件。
+// 几件同时解析时，建对象、拷贝贴图数据、meshopt 的结果回来这些主线程上的活挤在同几帧里，进星球、跳星球的转场开头掉到 33–50 ms
 export class ModelLibrary {
   private readonly loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   private readonly cache = new Map<string, Promise<THREE.Object3D>>();
+  private parsing: Promise<unknown> = Promise.resolve();
+  private readonly oneAtATime: boolean;
 
-  constructor() {
+  constructor(oneAtATime = false) {
+    this.oneAtATime = oneAtATime;
     startDecoderWorkers();
+  }
+
+  // 只下载、解析进缓存，不给克隆（指着星球、名牌时先准备它的作品）；失败了也不报，真正要用时再报
+  preload(work: Pick<Work, 'file'>): void {
+    if (work.file) this.fetch(modelUrl(work.file)).catch(() => {});
   }
 
   async load(work: Pick<Work, 'id' | 'file'>): Promise<LoadedModel> {
@@ -78,7 +88,7 @@ export class ModelLibrary {
     let p = this.cache.get(url);
     if (!p) {
       // 各向异性要在第一次上传贴图之前设好（WebGL2 在上传时设采样参数，WebGPU 按它建采样器）
-      p = this.loader.loadAsync(url).then((gltf) => {
+      p = (this.oneAtATime ? this.loadOneAtATime(url) : this.loader.loadAsync(url)).then((gltf) => {
         applyAnisotropy(gltf.scene, anisotropy);
         return gltf.scene;
       });
@@ -86,6 +96,16 @@ export class ModelLibrary {
       p.catch(() => this.cache.delete(url));
     }
     return p;
+  }
+
+  // 下载照常（几件同时下载），解析排队：前一件解析完才开始下一件
+  private async loadOneAtATime(url: string): Promise<{ scene: THREE.Group }> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`);
+    const data = await res.arrayBuffer();
+    const run = this.parsing.then(() => this.loader.parseAsync(data, THREE.LoaderUtils.extractUrlBase(url)));
+    this.parsing = run.catch(() => {});
+    return run;
   }
 }
 
