@@ -297,8 +297,8 @@ export class CouponField {
         this.onArrive?.(s.id);
       }
       this.write(s, hero);
-      // 浮着的券偶尔闪一颗小星星
-      if (s.phase === 'rest') {
+      // 浮着的券偶尔闪一颗小星星（减弱动效时不闪）
+      if (s.phase === 'rest' && !s.reduced) {
         s.nextTwinkle -= dt;
         if (s.nextTwinkle <= 0) {
           s.nextTwinkle = 0.9 + this.rand() * 1.4;

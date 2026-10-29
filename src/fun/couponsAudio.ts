@@ -1,8 +1,8 @@
 import { COUPONS } from './couponsMath';
 
-// 吐券的声音：Web Audio 现场合成，不放音频文件。只有用户和页面交互过（点过、按过键）以后才建 AudioContext、才出声：
-// 浏览器的自动播放规则也是这样，而且第一次建 AudioContext 要打开音频设备（几到几十毫秒），放在用户第一次按下的时候做，
-// 等到真的点翠宝时已经准备好了，不在那一帧里卡。
+// 吐券的声音：Web Audio 现场合成，不放音频文件。只有用户和页面交互过（点过、按过键）以后才出声（浏览器的自动播放规则也是这样）。
+// 建 AudioContext 要打开音频设备：实测 Chrome 主线程上一次 37 ms，放在用户点翠宝的那一下里就掉一帧。所以开场时
+// （coupons 装上的时候，启动画面还盖着）先建好，这时它是 suspended，不出声；用户第一次按下（指针、按键）时只 resume()，从这以后才出声。
 // - pop：「啵」——正弦波从高音很快滑到低音，前面垫一小下带通噪声当「p」的气音
 // - sparkle：券飞出去时三个很短的高音（叮铃）
 // - charge：蓄力时一声很轻的往上滑的「嗯——」
@@ -15,20 +15,19 @@ type Voice = 'pop' | 'sparkle' | 'charge' | 'nope' | 'pickup' | 'tick';
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let noise: AudioBuffer | null = null;
-let armed = false;
+let armed = false; // 用户已经和页面交互过
 
-// 页面上第一次按下（指针、按键）时调：从这以后才允许出声
-export function armAudio(): void {
-  if (armed || typeof window === 'undefined') return;
+// 开场时建好（suspended，不出声）：打开音频设备的那几十毫秒藏在启动画面后面
+export function prepareAudio(): void {
+  if (ctx || typeof window === 'undefined') return;
   const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Ctor) return;
-  armed = true;
   try {
     ctx = new Ctor({ latencyHint: 'interactive' });
     master = ctx.createGain();
     master.gain.value = 0.5;
     master.connect(ctx.destination);
-    // 一小段白噪声（0.2 秒），「p」的气音和翻纸的沙沙声都用它
+    // 一小段白噪声（0.2 秒），「p」的气音用它
     noise = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.2), ctx.sampleRate);
     const data = noise.getChannelData(0);
     let seed = 12345;
@@ -41,20 +40,21 @@ export function armAudio(): void {
   }
 }
 
-// 在用户第一次交互时自动 arm：capture 阶段、只听一次
+// 用户第一次按下（capture 阶段、只听一次）：从这以后允许出声，把 AudioContext 唤醒
 export function armOnFirstGesture(): void {
   if (typeof addEventListener !== 'function') return;
   const once = () => {
     removeEventListener('pointerdown', once, true);
     removeEventListener('keydown', once, true);
-    armAudio();
+    armed = true;
+    if (ctx?.state === 'suspended') void ctx.resume().catch(() => {});
   };
   addEventListener('pointerdown', once, true);
   addEventListener('keydown', once, true);
 }
 
 export function audioReady(): boolean {
-  return ctx !== null;
+  return ctx !== null && armed;
 }
 
 function tone(type: OscillatorType, from: number, to: number, at: number, length: number, peak: number, attack = 0.004): void {
@@ -91,7 +91,7 @@ function hiss(at: number, length: number, freq: number, q: number, peak: number)
 
 // 放一个声音（没 arm、音量是 0、页面在后台时什么也不做）。pitch：整体升降（1 = 原调），每次稍微变一点听起来不机械
 export function play(voice: Voice, pitch = 1): void {
-  if (!ctx || !master || COUPONS.volume <= 0) return;
+  if (!ctx || !master || !armed || COUPONS.volume <= 0) return;
   if (ctx.state === 'suspended') void ctx.resume();
   master.gain.value = Math.min(1, COUPONS.volume);
   const t = ctx.currentTime + 0.005;

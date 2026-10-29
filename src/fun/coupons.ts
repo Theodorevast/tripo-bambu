@@ -11,7 +11,7 @@ import { reducedMotion } from '../scenes/transition';
 import { WEATHER, type PlanetEntry, type World } from '../scenes/world';
 import type { PlanetScreen } from '../ui/planetScreen';
 import { drawAtlas, fontsReady } from './couponsArt';
-import { armOnFirstGesture, audioReady, play } from './couponsAudio';
+import { armOnFirstGesture, audioReady, play, prepareAudio } from './couponsAudio';
 import { CouponCard } from './couponsCard';
 import { CouponField, type CouponAnchor, type CouponGround, type PickupTarget } from './couponsField';
 import { updateCouponLight } from './couponsFx';
@@ -70,6 +70,8 @@ export interface CouponsDebug {
     t: number;
     cooldown: number;
     hover: boolean;
+    squash: number; // 悬停时「轻轻一缩」的弹簧（0..1）
+    clock: number; // 游戏时间（秒，按每帧的 dt 累加：券的寿命按它算）
     cursor: string;
     stand: { shown: boolean; at: ScreenPos | null; scale: number };
     walker: { at: ScreenPos | null };
@@ -148,6 +150,7 @@ export class Coupons {
     canvas.addEventListener('pointerup', (e) => this.onUp(e));
     addEventListener('resize', () => this.measure());
     this.measure();
+    prepareAudio(); // 启动画面还盖着：先把 AudioContext 建好（suspended，不出声），第一次按下时只唤醒
     armOnFirstGesture();
     this.world.frameHooks.add((dt) => this.frame(dt));
     this.installDebug();
@@ -302,23 +305,30 @@ export class Coupons {
     return true;
   }
 
-  // 戳一下翠宝：冷却中摇头，否则吐券
+  // 戳一下翠宝：冷却中摇头，否则吐券。正在吐、正在摇头时不打断动作：吐完以后还在冷却里就接着摇一下头
   poke(who: Who): boolean {
     if (!this.interactive()) return false;
-    if (this.act.mode === 'spit' && !this.act.launched) return false; // 正在蓄力、还没吐：这一下不算
-    const reduced = reducedMotion();
-    if (this.clock < this.cooldownUntil || this.act.mode === 'spit') {
-      if (this.act.mode === 'shake' && this.act.t < 0.25) return true;
-      this.begin(who, 'shake', reduced);
-      this.counts.shakes++;
-      play('nope', 0.97 + this.rand() * 0.06);
+    if (this.act.mode !== 'idle') {
+      if (this.act.mode === 'spit' && this.act.launched) this.pendingShake = who;
       return true;
     }
-    this.begin(who, 'spit', reduced);
+    if (this.clock < this.cooldownUntil) {
+      this.shake(who);
+      return true;
+    }
+    this.begin(who, 'spit', reducedMotion());
     this.counts.spits++;
     play('charge');
     return true;
   }
+
+  private shake(who: Who): void {
+    this.begin(who, 'shake', reducedMotion());
+    this.counts.shakes++;
+    play('nope', 0.97 + this.rand() * 0.06);
+  }
+
+  private pendingShake: Who | null = null;
 
   private begin(who: Who, mode: 'spit' | 'shake', reduced: boolean): void {
     if (this.act.who && this.act.who !== who) this.logo(this.act.who, 0);
@@ -331,6 +341,7 @@ export class Coupons {
     a.turning = false;
     a.faceYaw = 0;
     this.faceBlend = 1;
+    this.pendingShake = null;
     // 漫游：背对着镜头时先转过来（走着的时候不转）
     if (who === 'walker' && mode === 'spit' && !reduced) {
       const w = this.walk.walker;
@@ -471,7 +482,13 @@ export class Coupons {
         a.launched = true;
         this.launch();
       }
-      if (a.t >= T.done) this.cancelAct();
+      if (a.t >= T.done) {
+        const who = a.who;
+        this.cancelAct();
+        // 吐的时候又点了：还在冷却里就摇一下头
+        if (who && this.pendingShake === who && this.clock < this.cooldownUntil && this.interactive()) this.shake(who);
+        this.pendingShake = null;
+      }
     } else if (a.mode === 'shake' && a.t >= COUPONS.shakeSeconds) {
       this.cancelAct();
     }
@@ -620,6 +637,8 @@ export class Coupons {
           t: this.act.t,
           cooldown: Math.max(0, this.cooldownUntil - this.clock),
           hover: this.hoverWho !== null || this.hoverCoupon !== null,
+          squash: this.hoverSpring[0],
+          clock: this.clock,
           cursor: this.world.renderer.domElement.style.cursor,
           stand: { shown: this.stand.shown, at: standAt, scale: this.stand.scale },
           walker: { at: walkerAt },

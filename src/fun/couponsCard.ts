@@ -11,12 +11,15 @@ import { play } from './couponsAudio';
 // 减弱动效时只淡入淡出。卡片的样式先自己写（coupons.css，暖白纸面，和「Made with Tripo」徽章一套），界面统一时再并过去
 
 const TICKET_CSS_WIDTH = 360;
+const pixelRatio = () => Math.min(3, Math.max(1, devicePixelRatio || 1));
 
 export class CouponCard {
   readonly layer: HTMLDivElement;
   onClose: (() => void) | null = null;
   private readonly card: HTMLElement;
-  private readonly ticket: HTMLCanvasElement;
+  private readonly ticket: HTMLDivElement; // 放券的那一格（canvas 每种券一张，开场画好，换券时只换 canvas）
+  private readonly ticketCanvases: HTMLCanvasElement[] = [];
+  private canvasDpr = 0;
   private readonly fold: HTMLDivElement;
   private readonly title: HTMLHeadingElement;
   private readonly value: HTMLParagraphElement;
@@ -28,13 +31,11 @@ export class CouponCard {
   private current: CouponTicket | null = null;
   private state: 'closed' | 'pending' | 'open' | 'closing' = 'closed';
   private revert = 0;
-  private drawnKind = -1;
-  private drawnDpr = 0;
 
   constructor(root: HTMLElement) {
     this.backdrop = el('div', { className: 'cc-backdrop' });
     this.backdrop.addEventListener('click', () => this.hide());
-    this.ticket = el('canvas', { className: 'cc-ticket' });
+    this.ticket = el('div', { className: 'cc-ticket' });
     this.ticket.setAttribute('aria-hidden', 'true');
     this.title = el('h2', { className: 'cc-title', id: 'coupon-card-title' });
     this.value = el('p', { className: 'cc-value' });
@@ -81,8 +82,9 @@ export class CouponCard {
     return this.state === 'open' ? this.current : null;
   }
 
-  // 开场时先画一张、排一次版（第一次捡券时不在那一帧里做）
+  // 开场时把每种券都画好、排一次版（第一次捡券时不在那一帧里做）
   warm(): void {
+    this.drawTickets();
     this.fill({ kind: 0, code: 'TRIBOO-0000-0000' });
     this.layer.hidden = false;
     this.layer.classList.add('cc-measure');
@@ -164,16 +166,22 @@ export class CouponCard {
     for (const node of [this.card, this.ticket, this.fold, this.backdrop]) for (const a of node.getAnimations()) a.cancel();
   }
 
+  private drawTickets(): void {
+    const dpr = pixelRatio();
+    COUPON_KINDS.forEach((kind, i) => {
+      const canvas = (this.ticketCanvases[i] ??= document.createElement('canvas'));
+      drawCardTicket(canvas, kind, TICKET_CSS_WIDTH, dpr);
+    });
+    this.canvasDpr = dpr;
+  }
+
   private fill(ticket: CouponTicket): void {
     this.resetAnimations();
     this.current = ticket;
     const kind = COUPON_KINDS[ticket.kind] ?? COUPON_KINDS[0];
-    const dpr = Math.min(3, Math.max(1, devicePixelRatio || 1));
-    if (this.drawnKind !== ticket.kind || this.drawnDpr !== dpr) {
-      drawCardTicket(this.ticket, kind, TICKET_CSS_WIDTH, dpr);
-      this.drawnKind = ticket.kind;
-      this.drawnDpr = dpr;
-    }
+    if (this.canvasDpr !== pixelRatio()) this.drawTickets(); // 窗口拖到另一块屏幕上了
+    const canvas = this.ticketCanvases[ticket.kind] ?? this.ticketCanvases[0];
+    if (this.ticket.firstChild !== canvas) this.ticket.replaceChildren(canvas);
     this.title.textContent = kind.title;
     this.value.replaceChildren(el('b', { textContent: kind.value }), ` ${kind.unit}`);
     this.blurb.textContent = kind.blurb;
