@@ -92,7 +92,7 @@ export function installTune(world: World): void {
   // —— Planet ——
   const planetFolder = pane.addFolder({ title: 'Planet' });
   PLANET_TUNE.radius = PLANET_RADIUS;
-  planetFolder.addBinding(PLANET_TUNE, 'radius', { label: 'PLANET_RADIUS', min: PLANET_RADIUS_MIN, max: PLANET_RADIUS_MAX, step: 1 }).on('change', () => setPlanetRadius(PLANET_TUNE.radius));
+  planetFolder.addBinding(PLANET_TUNE, 'radius', { label: 'planet radius', min: PLANET_RADIUS_MIN, max: PLANET_RADIUS_MAX, step: 1 }).on('change', () => setPlanetRadius(PLANET_TUNE.radius));
   planetFolder.addBinding(DECOR, 'rocks', { label: 'rocks', min: 0, max: 4, step: 0.05 }).on('change', () => world.dressing.rebuild());
   planetFolder.addBinding(DECOR, 'rim', { label: 'rocks at rim ×', min: 1, max: 8, step: 0.1 }).on('change', () => world.dressing.rebuild());
   planetFolder.addBinding(DECOR, 'big', { label: 'big rocks', min: 0, max: 0.6, step: 0.01 }).on('change', () => world.dressing.rebuild());

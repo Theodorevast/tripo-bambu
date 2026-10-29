@@ -2,6 +2,7 @@ import { Pane } from 'tweakpane';
 import { el } from './dom';
 import { icon, iconSvg, type IconName } from './icons';
 import { animate, curve, EASE_IN, EASE_OUT, finished, reducedMotion } from './motion';
+import { friendlyLabel } from './tuneLabels';
 import './tune.css';
 
 // 调参面板的外壳：浮在右边的一本小手账。头部能拖、能收成一个小按钮；左边一列贴纸标签，每个顶层分组一页；底部复制参数。
@@ -33,6 +34,7 @@ const GROUPS: Record<string, Group> = {
   Look: { icon: 'palette', color: '#9a80dc' },
   Life: { icon: 'leaf', color: '#8cb43a' },
   Transitions: { icon: 'cloud', color: '#ef9550' },
+  Coupons: { icon: 'ticket', color: '#dc5d6c' },
   Camera: { icon: 'camera', color: '#5f80d6' },
   'Museum & viewer': { icon: 'frame', color: '#c4895a' },
   Performance: { icon: 'gauge', color: '#dda000' },
@@ -56,6 +58,22 @@ interface Saved {
 
 const STORE_KEY = 'community-planets:tune';
 const COMPACT = '(max-width: 640px)';
+
+// 每一层分组都包一层：addBinding 时把标签换成人话（没写 label 的用参数名，见 tuneLabels.ts）；addFolder 建出来的子分组同样包上。
+// 其余方法原样转给 Tweakpane（this 绑回原对象）
+function friendly(real: TuneFolder): TuneFolder {
+  return new Proxy(real, {
+    get(target, prop) {
+      if (prop === 'addFolder') return (params: { title: string; expanded?: boolean }) => friendly(target.addFolder(params));
+      if (prop === 'addBinding') {
+        return (obj: object, key: string, params?: Record<string, unknown>) =>
+          target.addBinding(obj as Record<string, unknown>, key, { ...params, label: friendlyLabel(String(params?.label ?? key)) });
+      }
+      const v: unknown = Reflect.get(target, prop, target);
+      return typeof v === 'function' ? (v as (...args: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+}
 
 function readSaved(): Saved {
   try {
@@ -87,6 +105,7 @@ export class TuneShell {
   private readonly saved: Saved;
   private current = -1;
   private collapsed: boolean;
+  private autoTucked = false; // Members / Museum 打开时自动收起的（关掉后自动展开；手动操作过就不算）
   private x: number;
   private y: number;
   private toggling: Animation[] = [];
@@ -140,6 +159,7 @@ export class TuneShell {
     });
     addEventListener('resize', () => this.clamp(false));
     matchMedia(COMPACT).addEventListener('change', () => this.movePlate(false));
+    this.watchSheets();
     // 第一次出现：面板（或小按钮）弹出来
     if (!reducedMotion()) {
       const target = this.collapsed ? this.fab : this.card;
@@ -181,7 +201,7 @@ export class TuneShell {
     page.hidden = true;
     this.rail.append(tab);
     this.body.append(page);
-    const pane = new Pane({ container: page }) as unknown as TuneFolder;
+    const pane = friendly(new Pane({ container: page }) as unknown as TuneFolder);
     this.pages.push({ title, group, tab, page, pane });
     // 第一页先选上；上次停在哪一页，那一页加进来时换过去（都不播动画）
     if (this.current < 0 || title === this.saved.tab) this.select(index, false);
@@ -261,7 +281,32 @@ export class TuneShell {
 
   // —— 收起 / 展开 ——
 
-  private setCollapsed(on: boolean): void {
+  // Members / Museum / 查看器打开时，面板自动收成小按钮，不盖住页面右边；这些都关掉后，如果是自动收起的就再展开。
+  // 页面开着时手动展开（或收起），以手动为准
+  private watchSheets(): void {
+    const app = document.querySelector('#app');
+    if (!app) return;
+    // 只在「有页面开着」这件事变了的时候动（#app 里别的元素也常切 hidden，比如悬浮标签）
+    let wasOpen = false;
+    const update = (): void => {
+      const open = !!app.querySelector(':scope > .sheet:not([hidden]), :scope > .viewer:not([hidden])');
+      if (open === wasOpen) return;
+      wasOpen = open;
+      if (open && !this.collapsed) {
+        this.autoTucked = true; // 先标上：setCollapsed 里存档时就知道这次是自动的
+        this.setCollapsed(true, false);
+      } else if (!open && this.autoTucked) {
+        this.autoTucked = false;
+        this.setCollapsed(false, false);
+      }
+    };
+    new MutationObserver(update).observe(app, { subtree: true, attributes: true, attributeFilter: ['hidden'] });
+    update();
+  }
+
+  // byUser：点了收起按钮或小按钮（焦点跟过去、记下这个选择）；自动收起 / 展开时不动焦点
+  private setCollapsed(on: boolean, byUser = true): void {
+    if (byUser) this.autoTucked = false;
     if (on === this.collapsed) return;
     this.collapsed = on;
     this.save();
@@ -288,7 +333,7 @@ export class TuneShell {
       this.movePlate(false);
       this.clamp(true); // 小按钮可能被拖到了边上：展开后整块面板尽量都在屏幕里
     }
-    (on ? this.fab : this.copyButton).focus({ preventScroll: true });
+    if (byUser) (on ? this.fab : this.copyButton).focus({ preventScroll: true });
   }
 
   // —— 拖动 ——
@@ -377,7 +422,8 @@ export class TuneShell {
   }
 
   private save(): void {
-    const data: Saved = { collapsed: this.collapsed, x: Math.round(this.x), y: Math.round(this.y), tab: this.pages[this.current]?.title };
+    // 自动收起的不算数：记的是用户自己的选择
+    const data: Saved = { collapsed: this.collapsed && !this.autoTucked, x: Math.round(this.x), y: Math.round(this.y), tab: this.pages[this.current]?.title };
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(data));
     } catch {
