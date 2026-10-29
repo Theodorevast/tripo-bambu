@@ -130,6 +130,8 @@ export class HomeTriboo {
     app.root.append(this.button);
     // 星球不接指在翠宝身上的那一下（悬停、点击）
     app.galaxyUi.blocker = (x, y) => this.hits(x, y);
+    // 券飞过来、领券窗口开着的时候名牌收起来（不盖在券上）
+    app.galaxyUi.hush = () => coupons.card.open;
     // 开场探头改到这里：App.start 在开场飞行落定后调 director.peekIntro，翠宝从右边缘探出来打招呼
     world.director.peekIntro = () => this.greet();
     world.frameHooks.add((dt) => this.frame(dt));

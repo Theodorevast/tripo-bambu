@@ -40,6 +40,8 @@ const _c = { x: 0, y: 0, r: 0 };
 export class GalaxyUi {
   // 指针在别的东西上（首页右边的翠宝）：星球不接这一下（悬停、点击都让给它）
   blocker: ((x: number, y: number) => boolean) | null = null;
+  // 名牌先收起来（首页的翠宝吐的券正飞向画面中间、领券窗口开着：名牌是 DOM，会盖在 3D 的券上）
+  hush: (() => boolean) | null = null;
   private enabled = true;
   private readonly world: World;
   private readonly onPick: (teamId: string) => void;
@@ -288,7 +290,7 @@ export class GalaxyUi {
       }
     }
     if (changed) this.sortTags();
-    const show = this.enabled && !world.focused && !world.rig.flying && !world.director.busy;
+    const show = this.enabled && !world.focused && !world.rig.flying && !world.director.busy && !this.hush?.();
     if (show !== this.shown) {
       this.shown = show;
       this.layer.classList.toggle('is-shown', show);
