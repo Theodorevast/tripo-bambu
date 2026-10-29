@@ -32,7 +32,8 @@
   --v2-hair-faint: rgba(216, 192, 142, 0.13);
   /* 面板的底：Indigo 往下略深一点，半透明（不用 backdrop-filter：后面的 3D 每帧都在画，模糊很贵） */
   --v2-panel: linear-gradient(180deg, rgba(29, 37, 76, 0.88), rgba(17, 23, 52, 0.84));
-  --v2-panel-deep: linear-gradient(180deg, rgba(22, 29, 62, 0.94), rgba(13, 18, 42, 0.92));
+  /* 大面板（Members、Museum、造星窗口、券卡、调参面板）用不透明的：后面的标题卡片、名牌不会透出来 */
+  --v2-panel-deep: linear-gradient(180deg, #171d41, #0e1333);
   --v2-glass: rgba(15, 21, 48, 0.72);
   --v2-shadow: 0 18px 44px rgba(6, 9, 26, 0.3);
   --v2-ease: cubic-bezier(0.22, 0.8, 0.24, 1);
@@ -306,7 +307,7 @@ kbd { padding: 3px 6px; border-radius: 3px; background: rgba(15, 21, 48, 0.6); b
 .walk-label .wl-by { font: italic 400 14px/1.2 var(--v2-serif); color: var(--v2-text-dim); }
 
 /* —— 提示条：底部中间一条深色的细线框，慢慢浮上来 —— */
-#app > .toast { bottom: 32px; padding: 12px 20px 13px; border-radius: 3px; background: rgba(15, 21, 48, 0.92); color: var(--v2-star); font: 400 13px/1.45 var(--v2-sans); letter-spacing: 0.01em; box-shadow: inset 0 0 0 1px var(--v2-hair), 0 14px 36px rgba(6, 9, 26, 0.36); transform: translate(-50%, 10px); transition: opacity 0.45s var(--v2-ease), transform 0.65s var(--v2-ease); }
+#app > .toast { bottom: 32px; padding: 12px 20px 13px; border-radius: 3px; background: #131939; color: var(--v2-star); font: 400 13px/1.45 var(--v2-sans); letter-spacing: 0.01em; box-shadow: inset 0 0 0 1px var(--v2-hair), 0 14px 36px rgba(6, 9, 26, 0.36); transform: translate(-50%, 10px); transition: opacity 0.45s var(--v2-ease), transform 0.65s var(--v2-ease); }
 #app > .toast.show { transform: translate(-50%, 0); }
 
 /* —— 作品卡（星球上点作品，右上角）：编号是金色的小字，作品名 Cormorant，作者斜体 —— */

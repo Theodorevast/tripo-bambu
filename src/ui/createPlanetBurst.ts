@@ -1,17 +1,17 @@
 import * as THREE from 'three/webgpu';
 import { attribute, length, mix, positionWorld, smoothstep, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { sharedAudio } from '../fun/couponsAudio';
-import { blendPalette, clonePalette, PRESETS, RAIN_MIX, RAIN_PALETTE } from '../nature/atmosphere';
 import type { World } from '../scenes/world';
 
 // 「星球从云里冲出来」的特效（P3，createPlanetLaunch.ts 的转场用）：
 // - 云团（Pool）：一个 InstancedMesh 画所有的云团（朝向镜头的软边面片），用对象池循环用。每团上亮下暗（按面片的上下渐变，
 //   底下是云海的中间调），大小不一、互相叠着；面片低于云顶的部分渐渐透明：看起来一半沉在云海里。
 //   蓄力时落点下面的云一边打旋、一边往中心收拢、中间鼓起来；冲出来时被甩开往外翻；星球拖出来的云尾巴也是它们
-// - 星星（Pool）：另一个 InstancedMesh：冲出来时的星尘、落定时飘的星星彩纸
+// - 星星（Pool）：另一个 InstancedMesh：冲出来时的星尘、落定时飘的细小星屑（第二版：香槟金、星光白、一点桃色，不再是彩虹彩纸）
 // - 云里的光（glow）：落点下面一块暖光，蓄力时慢慢亮起来，冲出来时一闪再暗下去（暖金色，不是霓虹）
-// - 冲击环（ring）：云面上一圈往外推开的环
-// - 镜头抖动（Shake）：trauma² 的做法，抖动量 = trauma²，方向用几条正弦叠的平滑噪声（不随机），trauma 每秒线性回落
+// - 冲击环（ring）：云面上一圈往外推开的细金光（第二版：细细的一圈，不再是一大圈软边的云色环）
+// - 镜头（Shake）：第二版不抖了：冲出来那一下轻轻往前推一下再退回来；蓄力时只有一点点很慢的晃（原来的三成、频率减半）
+// - 云团的颜色从云海现在的颜色读（atmosphere.cloudTone：含第二版夜里的冷灰紫），和云海是同一个颜色
 // - 声音：Web Audio 现场合成（借 coupons 的 AudioContext，用户交互过以后才有）：蓄力时低沉的隆隆、冲出来时「呼——」
 // 所有材质在造星窗口第二、三步时预编译好（prepare），Launch 以后不在主线程上同步编
 
@@ -26,10 +26,11 @@ export const BURST = {
   distance: 9.5, // 镜头离落点（× 半径）：周围看得到一部分星系
   elevation: 26, // 镜头往下看（度）
   sink: 1.5, // 星球一开始在云顶以下几个半径
-  overshoot: 0.85, // 冲过头多高（× 半径）
-  stretch: 0.3, // 冲上来时竖着拉长多少
-  squash: 0.18, // 落定时压扁多少
-  spin: 2.6, // 冲出来时转过的角度（弧度），落定时转回去
+  // 第二版（v2-ui）：不要挤压拉伸、大幅回弹——冲过头、拉长、压扁、转的幅度都收小（第一版 0.85 / 0.3 / 0.18 / 2.6），各段时长不变
+  overshoot: 0.42, // 冲过头多高（× 半径）
+  stretch: 0.1, // 冲上来时竖着拉长多少
+  squash: 0.05, // 落定时压扁多少
+  spin: 1.5, // 冲出来时转过的角度（弧度），落定时转回去
   shake: 1, // 镜头抖动强度
   glow: 1, // 云里的光
   volume: 0.9, // 声音
@@ -174,14 +175,21 @@ class Pool {
   }
 }
 
-// —— 镜头抖动：trauma² ——
+// —— 镜头：trauma² 的晃（很轻）+ 冲出来那一下往前推一下 ——
+// 第二版（v2-ui）：原来的抖动太躁（不要抖动）。晃的幅度只留三成、频率减半（像镜头被气流轻轻托了一下）；
+// 冲出来时镜头沿视线往前推进去一点（前 18% 很快推进去，然后慢慢退回原位），推多远按镜头到看着的那一点的距离算
+const SWAY = 0.3; // 晃的幅度：原来的三成
+const PUSH = 0.045; // 推进去多远（× 镜头到看着的那一点的距离）
+const PUSH_S = 0.9; // 推一下一共多久（秒）
 export class Shake {
   trauma = 0;
   private t = 0;
+  private push = -1; // 推一下放了多久（秒）；< 0：没在推
 
-  // 一下子加一点（冲出来的那一下）
+  // 一下子加一点（冲出来的那一下）：同时开始往前推
   add(x: number): void {
     this.trauma = Math.min(1, this.trauma + x);
+    this.push = 0;
   }
 
   // 至少这么多（蓄力时持续地轻轻抖）
@@ -189,17 +197,30 @@ export class Shake {
     this.trauma = Math.max(this.trauma, Math.min(1, x));
   }
 
-  // lookAt 之后调：按 trauma² 转一点点（偏航、俯仰、侧倾），方向是几条正弦叠的平滑噪声
-  apply(camera: THREE.Camera, dt: number, amount: number): void {
+  // lookAt 之后调：按 trauma² 转一点点（偏航、俯仰、侧倾；几条正弦叠的平滑噪声），再沿视线推一下。
+  // reach：镜头到看着的那一点的距离（不给就不推）
+  apply(camera: THREE.Camera, dt: number, amount: number, reach = 0): void {
     this.t += dt;
-    const s = this.trauma * this.trauma * amount;
+    const s = this.trauma * this.trauma * amount * SWAY;
+    let moved = false;
     if (s > 1e-5) {
       const n = (f: number, ph: number) => Math.sin(this.t * f + ph) * 0.62 + Math.sin(this.t * f * 1.73 + ph * 2.1) * 0.38;
-      camera.rotateY(THREE.MathUtils.degToRad(1.5) * s * n(23, 0.3));
-      camera.rotateX(THREE.MathUtils.degToRad(1.2) * s * n(19, 1.7));
-      camera.rotateZ(THREE.MathUtils.degToRad(2.2) * s * n(13, 4.1));
-      camera.updateMatrixWorld();
+      camera.rotateY(THREE.MathUtils.degToRad(1.5) * s * n(11, 0.3));
+      camera.rotateX(THREE.MathUtils.degToRad(1.2) * s * n(9, 1.7));
+      camera.rotateZ(THREE.MathUtils.degToRad(1.4) * s * n(6, 4.1));
+      moved = true;
     }
+    if (this.push >= 0) {
+      this.push += dt;
+      const k = this.push / PUSH_S;
+      if (k >= 1) this.push = -1;
+      else if (reach > 0) {
+        const e = k < 0.18 ? 1 - (1 - k / 0.18) ** 3 : 1 - smooth((k - 0.18) / 0.82);
+        camera.translateZ(-reach * PUSH * Math.min(1, amount) * e);
+        moved = true;
+      }
+    }
+    if (moved) camera.updateMatrixWorld();
     this.trauma = Math.max(0, this.trauma - dt * 1.3);
   }
 }
@@ -214,7 +235,7 @@ export class BurstFx {
   private readonly glowAmount = uniform(0);
   private readonly glowColor = uniform(new THREE.Color(1.9, 1.35, 0.62));
   private readonly ringAlpha = uniform(0);
-  private readonly ringColor = uniform(new THREE.Color(1, 0.97, 0.9));
+  private readonly ringColor = uniform(new THREE.Color(0.86, 0.62, 0.3)); // 香槟金（曝光前；太亮会被色调映射压成奶白）
   private readonly seaTop = uniform(0); // 云顶（世界 y）：云团低于它的部分渐渐透明（沉在云海里）
   private readonly sink = uniform(10); // 沉下去的那一段多软（世界单位）
   private readonly shade = uniform(new THREE.Color(0.55, 0.5, 0.72)); // 云团底下（相对受光面的倍数）：云海的中间调
@@ -253,13 +274,15 @@ export class BurstFx {
     this.glow.name = 'create-glow';
     this.glow.frustumCulled = false;
     this.glow.renderOrder = -7;
-    // 冲击环：一圈软边的环（半径 0.8–1 之间最浓），整块往外放大、淡掉
+    // 冲击环：一圈细细的金光（半径 0.93–0.98 之间最亮，里面一层很淡的余晖），整块往外放大、淡掉
     const ringGeo = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
     const rm = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
     rm.name = 'create-ring';
     const rr = length(uv().sub(0.5)).mul(2);
     rm.colorNode = this.ringColor;
-    rm.opacityNode = smoothstep(0.52, 0.84, rr).mul(smoothstep(1.0, 0.86, rr)).mul(this.ringAlpha);
+    const line = smoothstep(0.935, 0.966, rr).mul(smoothstep(0.996, 0.972, rr));
+    const haze = smoothstep(0.7, 0.96, rr).mul(smoothstep(0.996, 0.96, rr)).mul(0.12);
+    rm.opacityNode = line.add(haze).mul(this.ringAlpha);
     this.ring = new THREE.Mesh(ringGeo, rm);
     this.ring.name = 'create-ring';
     this.ring.frustumCulled = false;
@@ -281,19 +304,18 @@ export class BurstFx {
     return this.prepared;
   }
 
-  // 开始：特效挂进主场景，放在 at（云顶上、星球冒出来的那一点）；R 星球半径。颜色取当前天空预设的云色
+  // 开始：特效挂进主场景，放在 at（云顶上、星球冒出来的那一点）；R 星球半径。
+  // 颜色取云海现在的颜色（atmosphere.cloudTone：受光面、中间调；含预设过渡、雨、首页的色调和第二版夜里的冷灰紫），
+  // 和脚下的云海是同一个颜色（原来按天空预设的表现算，第二版的夜里对不上）
   begin(world: World, at: V3, R: number): void {
-    const atm = world.atmosphere;
-    const pal = clonePalette(PRESETS[atm.preset]);
-    blendPalette(pal, PRESETS[atm.preset], RAIN_PALETTE, atm.rain * RAIN_MIX);
-    this.lit.copy(pal.cloudLit).multiplyScalar(0.72);
+    const tone = world.atmosphere.cloudTone;
+    this.lit.setRGB(tone.lit.x, tone.lit.y, tone.lit.z).multiplyScalar(0.6);
     // 底下 = 中间调 / 受光面（按通道），夹一下：不至于太黑
     this.shade.value.setRGB(
-      THREE.MathUtils.clamp(pal.cloudMid.r / Math.max(1e-3, pal.cloudLit.r), 0.3, 0.9),
-      THREE.MathUtils.clamp(pal.cloudMid.g / Math.max(1e-3, pal.cloudLit.g), 0.3, 0.9),
-      THREE.MathUtils.clamp(pal.cloudMid.b / Math.max(1e-3, pal.cloudLit.b), 0.3, 0.95),
+      THREE.MathUtils.clamp(tone.mid.x / Math.max(1e-3, tone.lit.x), 0.3, 0.9),
+      THREE.MathUtils.clamp(tone.mid.y / Math.max(1e-3, tone.lit.y), 0.3, 0.9),
+      THREE.MathUtils.clamp(tone.mid.z / Math.max(1e-3, tone.lit.z), 0.3, 0.95),
     );
-    this.ringColor.value.copy(pal.cloudLit).multiplyScalar(0.85);
     this.R = R;
     this.seaTop.value = at.y;
     this.sink.value = 0.35 * R;
@@ -394,27 +416,28 @@ export class BurstFx {
     }
   }
 
-  // 落定时飘的星星彩纸：绕着星球中间一圈，往外、往上散开，慢慢转着落下来
-  confetti(center: V3, r: number, n = 30): void {
-    const palette = [0xf2b705, 0xe7799f, 0x4b9fe0, 0x62b357, 0xef9550, 0x9a80dc, 0xfff3d6];
+  // 落定时飘的细小星屑：绕着星球中间一圈，往外、往上轻轻散开，慢慢转着落下来。
+  // 第二版：香槟金、星光白、一点桃色（不再是彩虹彩纸），数量少一点、个子小一点、飘得慢一点；寿命和原来一样（收尾等它们放完，节奏不变）
+  confetti(center: V3, r: number, n = 18): void {
+    const palette = [0xd8c08e, 0xf6f1e7, 0xd8c08e, 0xf6f1e7, 0xe6c2a6, 0xe9d6a6];
     for (let i = 0; i < n; i++) {
       const p = this.stars.take();
       const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
       const out = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
       p.pos.copy(center).addScaledVector(out, r * (1.05 + 0.4 * Math.random()));
       p.pos.y += (Math.random() - 0.3) * r * 0.9;
-      p.vel.copy(out).multiplyScalar(this.R * (0.8 + 0.9 * Math.random()));
-      p.vel.y = this.R * (0.9 + 1.0 * Math.random());
-      p.drag = 1.4;
-      p.gravity = this.R * 0.7;
+      p.vel.copy(out).multiplyScalar(this.R * (0.45 + 0.5 * Math.random()));
+      p.vel.y = this.R * (0.5 + 0.55 * Math.random());
+      p.drag = 1.6;
+      p.gravity = this.R * 0.32;
       p.life = 1.5 + 0.7 * Math.random();
-      p.fadeIn = 0.04;
-      p.alpha = 1;
-      p.size0 = this.R * (0.13 + 0.1 * Math.random());
-      p.size1 = p.size0 * 0.85;
+      p.fadeIn = 0.06;
+      p.alpha = 0.95;
+      p.size0 = this.R * (0.065 + 0.05 * Math.random());
+      p.size1 = p.size0 * 0.7;
       p.rot = Math.random() * Math.PI * 2;
-      p.spin = (Math.random() - 0.5) * 6;
-      p.color.setHex(palette[i % palette.length]).convertSRGBToLinear().multiplyScalar(1.6);
+      p.spin = (Math.random() - 0.5) * 2;
+      p.color.setHex(palette[i % palette.length]).convertSRGBToLinear().multiplyScalar(1.5);
     }
   }
 
@@ -457,7 +480,7 @@ export class BurstFx {
       this.ringT += dt;
       const f = Math.min(1, this.ringT / 0.85);
       this.ring.scale.setScalar(R * (1.0 + 4.5 * (1 - (1 - f) ** 3)));
-      this.ringAlpha.value = 0.95 * (1 - smooth(f));
+      this.ringAlpha.value = 0.9 * (1 - smooth(f));
       if (f >= 1) {
         this.ringT = -1;
         this.ringAlpha.value = 0;
@@ -577,7 +600,7 @@ function puffTexture(): THREE.Texture {
   return tex;
 }
 
-// 一颗圆角的五角星（白色，按实例的颜色染），外面一圈很淡的光晕
+// 一颗细细的四角星（白色，按实例的颜色染）：四个尖、细腰，中间一个小亮点，外面一圈很淡的光晕（第二版；原来是圆角的五角星）
 function starTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -585,27 +608,26 @@ function starTexture(): THREE.Texture {
   canvas.height = size;
   const g = canvas.getContext('2d');
   if (g) {
-    const halo = g.createRadialGradient(32, 32, 4, 32, 32, 30);
-    halo.addColorStop(0, 'rgba(255,255,255,0.35)');
+    const halo = g.createRadialGradient(32, 32, 2, 32, 32, 24);
+    halo.addColorStop(0, 'rgba(255,255,255,0.4)');
     halo.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = halo;
     g.fillRect(0, 0, size, size);
     g.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const r = i % 2 === 0 ? 22 : 9.5;
-      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    for (let i = 0; i < 8; i++) {
+      const r = i % 2 === 0 ? 29 : 3.2;
+      const a = -Math.PI / 2 + (i * Math.PI) / 4;
       const x = 32 + Math.cos(a) * r;
-      const y = 33 + Math.sin(a) * r;
+      const y = 32 + Math.sin(a) * r;
       if (i === 0) g.moveTo(x, y);
       else g.lineTo(x, y);
     }
     g.closePath();
-    g.lineJoin = 'round';
-    g.lineWidth = 5;
-    g.strokeStyle = '#ffffff';
     g.fillStyle = '#ffffff';
     g.fill();
-    g.stroke();
+    g.beginPath();
+    g.arc(32, 32, 3.4, 0, Math.PI * 2);
+    g.fill();
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;

@@ -445,7 +445,7 @@ class BurstShow {
       this.aim.lerp(this.endAim, smooth(Math.min(1, Math.max(0, tb - B) / S)));
     }
     cam.lookAt(this.aim);
-    this.shake.apply(cam, dt, BURST.shake);
+    this.shake.apply(cam, dt, BURST.shake, cam.position.distanceTo(this.aim)); // 第二版：轻轻晃 + 冲出来时往前推一下（createPlanetBurst.ts 的 Shake）
     this.fx.tick(dt, cam);
     this.state.t = this.t;
   }
