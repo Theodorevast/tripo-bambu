@@ -39,6 +39,7 @@ export function addNightSkyTune(pane: Folder, world: World): void {
 
   const milky = root.addFolder({ title: 'Milky Way', expanded: false });
   bind(milky, 'milkyWay', 'strength', range(0, 3, 0.01));
+  bind(milky, 'homeMilkyWay', 'home fainter', range(0, 1, 0.01));
   bind(milky, 'milkyWidth', 'width', range(0.02, 0.6, 0.005));
   bind(milky, 'milkyPurple', 'purple');
   bind(milky, 'milkyGold', 'gold');
