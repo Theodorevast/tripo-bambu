@@ -26,6 +26,7 @@ import {
 } from 'three/tsl';
 import { gradeDisplay, gradeLinear, valueNoise } from '../style/grade';
 import type { PlanetObject } from '../planet/planetObject';
+import { filmGrain, GlowPass } from './postGlow';
 import type { World } from './world';
 
 // 主画面的后处理（绘本感的统一画面）：场景先画进一张离屏缓冲（半浮点、和画布一样的多采样、带深度），再用一个全屏三角形一次做完：
@@ -46,7 +47,7 @@ import type { World } from './world';
 // 地址带 ?look=0：整个后处理关掉，回到 renderer.render 直接画（对比、低画质档）
 
 const query = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
-export const DEBUG_VIEWS = ['off', 'contact', 'rays', 'mask', 'sky', 'world'] as const;
+export const DEBUG_VIEWS = ['off', 'contact', 'rays', 'mask', 'sky', 'world', 'glow'] as const;
 export type DebugView = (typeof DEBUG_VIEWS)[number];
 
 export const POST = {
@@ -164,6 +165,7 @@ export class MainPost {
   // 2880×1800 时颜色加深度约 40 MB（照场景缓冲的半浮点、4 倍多采样要约 290 MB）
   private readonly layerTarget: THREE.RenderTarget;
   private layer: UngradedLayer | null = null;
+  private readonly glow: GlowPass; // 第二版的泛光（v2-sky，postGlow.ts）：四分之一分辨率取亮部、横竖各模糊一遍，调色之前加回去
   private readonly layerOn = uniform(0);
   // uniform
   private readonly invSize = uniform(new THREE.Vector2(1, 1));
@@ -252,6 +254,7 @@ export class MainPost {
     this.raysTarget = new THREE.RenderTarget(1, 1, quarter);
     this.maskQuad = new THREE.QuadMesh(this.buildMask());
     this.raysQuad = new THREE.QuadMesh(this.buildRays());
+    this.glow = new GlowPass(this.target.texture);
     this.finalMaterial.name = 'MainPost';
     this.finalQuad = new THREE.QuadMesh(this.finalMaterial);
     this.finalQuad.name = 'Main post';
@@ -359,6 +362,9 @@ export class MainPost {
         r.setRenderTarget(this.raysTarget);
         this.raysQuad.render(r);
       }
+      // 泛光（v2-sky）：星星、月亮、灯、星尘的亮部
+      this.glow.apply(r.toneMappingExposure);
+      this.glow.render(r);
       // 3. 最后一步 → 画布
       this.drawFinal();
     } finally {
@@ -394,6 +400,10 @@ export class MainPost {
         r.setRenderTarget(saved);
         await done;
       }
+      await this.glow.compile(r, saved); // 泛光那三步（v2-sky）：同样的做法
+      this.glow.apply(r.toneMappingExposure);
+      this.glow.render(r); // WebGPU 在这里建管线（画布还没露出来）
+      r.setRenderTarget(saved);
       r.setRenderTarget(null);
       await this.withCanvasState(() => r.compileAsync(this.finalQuad, this.finalQuad.camera));
       this.drawFinal();
@@ -413,6 +423,7 @@ export class MainPost {
     this.layerTarget.dispose();
     this.maskTarget.dispose();
     this.raysTarget.dispose();
+    this.glow.dispose();
     for (const q of [this.maskQuad, this.raysQuad, this.finalQuad]) (q.material as THREE.Material).dispose();
   }
 
@@ -428,6 +439,7 @@ export class MainPost {
       this.maskTarget.setSize(qw, qh);
       this.raysTarget.setSize(qw, qh);
     }
+    this.glow.resize(w, h);
     this.invSize.value.set(1 / w, 1 / h);
     this.aspect.value = w / h;
   }
@@ -620,6 +632,7 @@ export class MainPost {
     const rays = texture(this.raysTarget.texture);
     const mask = texture(this.maskTarget.texture);
     const layer = texture(this.layerTarget.texture);
+    const glow = texture(this.glow.texture);
     const node = Fn(() => {
       const st = uv();
       const c = color.sample(st).rgb.toVar();
@@ -673,10 +686,15 @@ export class MainPost {
         const air = sky.select(float(1), mix(this.rayAirFloor, float(1), float(1).sub(exp(view.z.div(this.rayAir)))));
         c.addAssign(this.rayTint.mul(rays.sample(st).r.mul(this.rayStrength).mul(air)));
       });
+      // 泛光（v2-sky）：线性 HDR 里加回去，和画面一起过 AgX
+      If(this.glow.strength.greaterThan(0.001), () => {
+        c.addAssign(glow.sample(st).rgb.mul(this.glow.strength));
+      });
       let rgb: V3 = gradeLinear(c);
       for (const overlay of this.overlays) rgb = overlay(rgb, st, this.aspect, this.invSize);
       const out = renderOutput(vec4(rgb, 1), this.toneMapping, this.colorSpace);
-      const graded = vec4(gradeDisplay(out.rgb, st, screenCoordinate.xy), 1).toVar();
+      // 胶片颗粒（v2-sky）：调色之后、不调色那一层之前（券上没有颗粒）
+      const graded = vec4(filmGrain(gradeDisplay(out.rgb, st, screenCoordinate.xy), screenCoordinate.xy), 1).toVar();
       // 不调色的一层（F2）：调色之后按 alpha 叠上去（层里是显示空间、预乘过 alpha 的颜色）
       If(this.layerOn.greaterThan(0), () => {
         const l = layer.sample(st);
@@ -697,6 +715,9 @@ export class MainPost {
       });
       If(this.debugView.equal(4), () => {
         graded.assign(vec4(vec3(d.greaterThanEqual(SKY_DEPTH).select(float(1), float(0))), 1));
+      });
+      If(this.debugView.equal(6), () => {
+        graded.assign(vec4(glow.sample(st).rgb.mul(this.glow.strength), 1)); // 泛光加回去的那一层（v2-sky）
       });
       return graded;
     });

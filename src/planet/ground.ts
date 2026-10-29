@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, acos, clamp, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, max, mix, modelPosition, normalize, normalLocal, normalView, positionLocal, positionView, positionWorld, pow, renderGroup, saturate, sign, sin, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
+import { abs, acos, clamp, color, cross, dFdx, dFdy, dot, equirectUV, float, fwidth, length, max, mix, modelPosition, normalize, normalLocal, normalView, positionLocal, positionView, positionWorld, pow, renderGroup, saturate, sign, sin, smoothstep, uniform, uniformArray, vec2, vec3 } from 'three/tsl';
 import type { PresetId } from '../data/types';
 import { grassTint } from '../nature/grass';
 import { galaxyFactor, overviewFactor, planetSurfaceLook, stageFactor, sunDirNode, sunTint } from '../nature/planetLook';
@@ -30,7 +30,7 @@ export const GROUND = {
   teamCover: 0.16, // 团队色花海的覆盖（星球视图里）
   teamCoverGalaxy: 0.42, // 星系里
   teamBright: 0.95, // 花海的亮度
-  teamVivid: 0.8, // 团队色的饱和度（1 = 原色；第一版是 1.35，提过一截）
+  teamVivid: 0.65, // 团队色的饱和度（1 = 原色；第一版是 1.35，提过一截）
   fieldFlowers: 0.5, // 花田
   warmCool: 0.8, // 冷暖渐变
   galaxySat: 0.08, // 星系里饱和度再提多少（第一版 0.45：糖果色。第二版地面本身已经是灰调的大地色，星系里只提一点点，五种预设分得开）
@@ -38,6 +38,33 @@ export const GROUND = {
   galaxyGloss: 0, // 星系里清漆一样的高光（0 = 和近处一样哑光）
   stoneDetail: 1, // 第二版：石头地、土、路面的细节纹理（裂纹、地衣、碎石）的强度
 };
+
+// 第二版 [v2-world]：灯柱脚下的一小片暖光（不加光源）：地面着色器里按离灯柱多远加一点暖色的自发光，夜里画面上有几处暖点。
+// 最多 LAMP_POOLS 盏，位置是聚焦星球的本地坐标（米），w = 亮度（0 = 没有）；中古点缀（planet/props-v2.ts）摆好灯柱后写进来，离开星球时清零。
+// 只在聚焦的星球上、镜头近的时候有（乘这颗星球的淡出系数和「舞台」系数：星系里、星球视图里缩小的邻居都没有）
+export const LAMP_POOLS = 6;
+export const LAMP_POOL = { radius: 2.8, strength: 0.32, color: '#ffb45a' };
+const lampData = Array.from({ length: LAMP_POOLS }, () => new THREE.Vector4(0, 0, 0, 0));
+const lampArr = uniformArray(lampData, 'vec4');
+const poolU = {
+  radius: uniform(LAMP_POOL.radius).setGroup(renderGroup),
+  strength: uniform(LAMP_POOL.strength).setGroup(renderGroup),
+  color: uniform(new THREE.Color(LAMP_POOL.color)).setGroup(renderGroup),
+};
+
+export function setLampPools(list: ReadonlyArray<{ pos: THREE.Vector3; k: number }>): void {
+  for (let i = 0; i < LAMP_POOLS; i++) {
+    const l = list[i];
+    if (l) lampData[i].set(l.pos.x, l.pos.y, l.pos.z, l.k);
+    else lampData[i].set(0, 0, 0, 0);
+  }
+}
+
+export function applyLampPools(): void {
+  poolU.radius.value = LAMP_POOL.radius;
+  poolU.strength.value = LAMP_POOL.strength;
+  poolU.color.value.set(LAMP_POOL.color);
+}
 
 // 第二版 [v2-world]：地面上远看的花、花田的颜色（sRGB）：象牙白、淡香槟、灰紫，都退到灰调里（第一版是奶白、明黄、亮紫）
 export const FLOWER_V2 = { ivory: '#ece6d8', gold: '#d3c08f', mauve: '#a99cb8' };
@@ -352,7 +379,14 @@ export function groundMaterial(preset: PresetId, mask: THREE.TextureNode, look?:
   if (look) {
     const far = planetSurfaceLook(U.radius, look.cloudOffset, look.fade, color(new THREE.Color(PRESETS[preset].atmosphere)));
     col = col.mul(far.shade);
-    m.emissiveNode = far.haze;
+    // 灯柱脚下的暖光（见 LAMP_POOLS）：离灯柱越近越亮（平方衰减），路面、草地一样亮
+    let pool: THREE.Node<'float'> = float(0);
+    for (let i = 0; i < LAMP_POOLS; i++) {
+      const L = lampArr.element(i) as unknown as THREE.Node<'vec4'>;
+      pool = pool.add(L.w.mul(smoothstep(poolU.radius, 0, length(p.sub(L.xyz))).pow(2)));
+    }
+    const warm = (poolU.color as unknown as THREE.Node<'vec3'>).mul(pool.mul(poolU.strength).mul(look.fade).mul(stageFactor(U.radius)));
+    m.emissiveNode = far.haze.add(warm);
   }
   m.colorNode = col;
   // 星系里像上了一层清漆的弹珠：粗糙度降一点、镜面反射强一点，朝阳一侧有一块柔和的高光

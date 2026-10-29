@@ -26,7 +26,7 @@ export const CLOUD_TRIBOO = {
 interface FigStar {
   x: number;
   y: number;
-  size: number; // 像素
+  size: number; // 像素（0 = 只是线的拐点，不画星）
   gold: boolean; // 胸口 V 的星：偏暖的金
   order: number; // 亮起来的先后 0..1
 }
@@ -36,8 +36,11 @@ interface FigLine {
   b: number;
   order: number;
   gold: boolean;
+  width: number; // 线宽（像素）
 }
 
+// 翠宝的样子（main 04:00：默认视角下要一眼认出来）：一个饱满的圆身子（48 段的圆，8 颗星钉在上面）、胸口一个大一点的金色 V（粗一点的线）、
+// 身子两边两只短短的小手（一只抬起来打招呼、一只放下，手是一小圈，像戴着手套），底下两条短腿和一对椭圆的运动鞋
 function figure(): { stars: FigStar[]; lines: FigLine[] } {
   const stars: FigStar[] = [];
   const lines: FigLine[] = [];
@@ -45,48 +48,47 @@ function figure(): { stars: FigStar[]; lines: FigLine[] } {
     stars.push({ x, y, size, gold, order: 0 });
     return stars.length - 1;
   };
-  // 身子：11 颗星围成的圆（从顶上开始顺时针），半径按一个固定的表抖一点（星座不是圆规画的）
-  const N = 11;
-  const wob = [1.0, 0.97, 1.03, 0.98, 1.02, 0.99, 1.03, 0.97, 1.01, 1.03, 0.98];
-  const ring: number[] = [];
-  for (let k = 0; k < N; k++) {
-    const a = Math.PI / 2 - (k / N) * Math.PI * 2;
-    ring.push(add(Math.cos(a) * wob[k], Math.sin(a) * wob[k], k % 3 === 0 ? 4.6 : 3.6));
-  }
-  for (let k = 0; k < N; k++) lines.push({ a: ring[k], b: ring[(k + 1) % N], order: 0, gold: false });
-  // 离某个角度最近的那颗身子上的星（手、脚从那里接出去）
-  const nearest = (deg: number) => {
-    const a = THREE.MathUtils.degToRad(deg);
-    let best = ring[0];
-    let bd = Infinity;
-    for (const i of ring) {
-      const d = Math.hypot(stars[i].x - Math.cos(a), stars[i].y - Math.sin(a));
-      if (d < bd) {
-        bd = d;
-        best = i;
-      }
+  const line = (a: number, b: number, width = 1.1, gold = false) => lines.push({ a, b, order: 0, gold, width });
+  // 一圈（圆或椭圆）：n 段，starEvery 段钉一颗星（0 = 不钉）；从 start（弧度）开始顺时针
+  const loop = (cx: number, cy: number, rx: number, ry: number, n: number, starEvery: number, starSize: number, width: number, start = Math.PI / 2) => {
+    const ids: number[] = [];
+    for (let k = 0; k < n; k++) {
+      const a = start - (k / n) * Math.PI * 2;
+      ids.push(add(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, starEvery > 0 && k % starEvery === 0 ? (k % (starEvery * 2) === 0 ? starSize : starSize * 0.8) : 0));
     }
-    return best;
+    for (let k = 0; k < n; k++) line(ids[k], ids[(k + 1) % n], width);
+    return ids;
   };
-  // 两只手：从身子两边伸出去、往上举（打招呼）
-  for (const s of [1, -1]) {
-    const from = nearest(s > 0 ? 5 : 175);
-    const elbow = add(s * 1.36, 0.16, 3.4);
-    const hand = add(s * 1.56, 0.56, 4.8);
-    lines.push({ a: from, b: elbow, order: 0, gold: false }, { a: elbow, b: hand, order: 0, gold: false });
+  // 身子
+  loop(0, 0, 1, 1, 48, 6, 5.4, 1.05);
+  // 胸口的 V（翠宝标志上的 V：和 ui/badge.ts 同一套坐标，y 翻过来）：比第一版大一点、线粗一点、星亮一点
+  const v = [[-0.5, 0.3], [-0.03, -0.4], [0.44, 0.1]].map(([x, y]) => add(x * 0.74, y * 0.74 - 0.04, 5.8, true));
+  line(v[0], v[1], 1.9, true);
+  line(v[1], v[2], 1.9, true);
+  // 两只小手：从身子两边伸出一小截，手是一小圈（左手抬起来打招呼，右手放下）
+  for (const [ang, tx, ty] of [[158, -1.3, 0.36], [-16, 1.28, -0.4]] as const) {
+    const a = THREE.MathUtils.degToRad(ang);
+    const from = add(Math.cos(a), Math.sin(a), 0);
+    const dx = tx - Math.cos(a);
+    const dy = ty - Math.sin(a);
+    const len = Math.hypot(dx, dy);
+    const r = 0.13;
+    const wrist = add(tx - (dx / len) * r, ty - (dy / len) * r, 0);
+    line(from, wrist, 1.1);
+    loop(tx, ty, r, r, 10, 5, 3.2, 1.0, Math.atan2(dy, dx));
   }
-  // 一对脚：从身子底下往下，再往外一小截（鞋）
-  for (const s of [1, -1]) {
-    const from = nearest(s > 0 ? -68 : -112);
-    const ankle = add(s * 0.44, -1.22, 3.4);
-    const toe = add(s * 0.74, -1.27, 4.2);
-    lines.push({ a: from, b: ankle, order: 0, gold: false }, { a: ankle, b: toe, order: 0, gold: false });
+  // 两条短腿和一对椭圆的运动鞋（鞋头朝外）
+  for (const s of [-1, 1]) {
+    const a = THREE.MathUtils.degToRad(s > 0 ? -64 : -116);
+    const top = add(Math.cos(a), Math.sin(a), 0);
+    const cx = s * 0.52;
+    const cy = -1.2;
+    const ankle = add(s * 0.46, cy + 0.085, 0);
+    line(top, ankle, 1.1);
+    loop(cx, cy, 0.24, 0.095, 14, 7, 3.6, 1.0, s > 0 ? 0 : Math.PI);
   }
-  // 胸口的 V（翠宝标志上的 V：和 ui/badge.ts 同一套坐标，y 翻过来，缩小一点）
-  const v = [[-0.5, 0.3], [-0.03, -0.4], [0.44, 0.1]].map(([x, y]) => add(x * 0.6, y * 0.6 - 0.02, 5.2, true));
-  lines.push({ a: v[0], b: v[1], order: 0, gold: true }, { a: v[1], b: v[2], order: 0, gold: true });
-  // 先后：星按「身子顺时针 → 手 → 脚 → V」；线跟在两头的星后面
-  stars.forEach((s, i) => { s.order = i / Math.max(1, stars.length - 1); });
+  // 先后：身子一圈先连（从顶上顺时针），然后 V、手、脚；星跟着自己所在的那一笔
+  stars.forEach((st, i) => { st.order = i / Math.max(1, stars.length - 1); });
   for (const l of lines) l.order = Math.max(stars[l.a].order, stars[l.b].order);
   return { stars, lines };
 }
@@ -97,7 +99,7 @@ const STAR = new THREE.Color('#f6f1e7').multiplyScalar(1.7); // Starlight
 const STAR_V = new THREE.Color('#f2d9a2').multiplyScalar(2.1);
 
 // 图形在自己平面里的范围（身子半径 = 1）：screenRect、留空都按它
-const BOX = { left: -1.62, right: 1.62, bottom: -1.34, top: 1.08 };
+const BOX = { left: -1.48, right: 1.48, bottom: -1.33, top: 1.06 };
 
 type Phase = 'hidden' | 'gather' | 'show' | 'scatter';
 
@@ -135,13 +137,13 @@ export class CloudTriboo {
     this.world = world;
     void world.warm.then(() => { this.warmed = true; });
     const { stars, lines } = this.fig;
-    this.lines = new FineLines(lines.length, stars.length, { additive: true, twinkle: 0.45, twinkleSpeed: 1.4, name: 'home-constellation-triboo' });
+    this.lines = new FineLines(lines.length, stars.length, { blend: 'max', twinkle: 0.45, twinkleSpeed: 1.4, name: 'home-constellation-triboo' });
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
     lines.forEach((l, i) => {
       a.set(stars[l.a].x, stars[l.a].y, 0);
       b.set(stars[l.b].x, stars[l.b].y, 0);
-      this.lines.setSegment(i, { a, b, width: 1, color: l.gold ? LINE_V : LINE, alpha: 0 });
+      this.lines.setSegment(i, { a, b, width: l.width, color: l.gold ? LINE_V : LINE, alpha: 0 });
     });
     stars.forEach((s, i) => this.lines.setStar(i, { at: a.set(s.x, s.y, 0), size: s.size, color: s.gold ? STAR_V : STAR, alpha: 0, phase: i * 2.399 }));
     this.lines.commit();
@@ -171,7 +173,7 @@ export class CloudTriboo {
     const { stars, lines } = this.fig;
     stars.forEach((s, i) => {
       const k = smooth(s.order * 0.55, s.order * 0.55 + 0.18, p);
-      this.lines.setAlpha(i, k * o * (s.gold ? Math.min(1.4, 0.7 + 0.5 * CLOUD_TRIBOO.gold) : 0.95), true);
+      this.lines.setAlpha(i, s.size > 0 ? k * o * (s.gold ? Math.min(1.4, 0.7 + 0.5 * CLOUD_TRIBOO.gold) : 0.95) : 0, true);
     });
     lines.forEach((l, i) => {
       const k = smooth(0.3 + l.order * 0.55, 0.42 + l.order * 0.55, p);

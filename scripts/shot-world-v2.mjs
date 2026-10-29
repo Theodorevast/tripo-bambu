@@ -96,25 +96,29 @@ try {
     });
     await p.waitForTimeout(1800);
   });
-  // 中古点缀：镜头凑到星球上一样点缀（kind：tower / arch / lamp / menhir）旁边
-  for (const kind of ['tower', 'arch', 'lamp']) {
+  // 中古点缀：进漫游，站在一样点缀（kind：tower / arch / lamp / menhir）旁边几米、面朝它（镜头跟在翠宝背后，画面是正的）
+  for (const kind of ['tower', 'arch', 'lamp', 'menhir']) {
     await shot(`props-${kind}`, '#/t/lumen-guild', async (p) => {
       await planetReady(p, 'lumen-guild');
-      await p.waitForTimeout(1200);
+      await p.waitForFunction(() => window.__walk?.state().ready === true, null, { timeout: 30000 });
+      await p.locator('.topbar button.walk').click();
+      await p.waitForFunction(() => window.__walk.state().phase === 'walk', null, { timeout: 8000 });
       await p.evaluate((k) => {
-        const w = window.__world;
-        const e = w.focused;
-        const it = window.__v2world.props().find((x) => x.kind === k) ?? window.__v2world.props()[0];
+        const list = window.__v2world.props();
+        const it = list.find((x) => x.kind === k) ?? list[0];
         if (!it) return;
-        const V = w.rig.camera.position.constructor;
-        const d = new V(...it.dir).normalize();
-        const at = d.clone().multiplyScalar(e.planet.radius).add(e.home);
-        const side = new V(0, 1, 0).cross(d).normalize();
-        const fwd = d.clone().cross(side).normalize();
-        const pos = at.clone().addScaledVector(d, 2.4).addScaledVector(side, 5.5).addScaledVector(fwd, 3);
-        w.rig.jump({ target: at.clone().addScaledVector(d, 1.2), position: pos, minDistance: 0.5, maxDistance: 1e5, autoRotate: false });
+        const norm = (a) => { const l = Math.hypot(...a); return a.map((x) => x / l); };
+        const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        const d = norm(it.dir);
+        const R = window.__walk.state().radius;
+        const t = norm(cross(Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0], d));
+        const back = (k === 'lamp' ? 4 : k === 'menhir' ? 5.5 : 7.5) / R;
+        const pos = norm(d.map((x, i) => x * Math.cos(back) - t[i] * Math.sin(back)));
+        const toward = d.map((x, i) => x - pos[i] * dot(pos, d));
+        window.__walk.teleport(pos, norm(toward));
       }, kind);
-      await p.waitForTimeout(1800);
+      await p.waitForTimeout(2400);
     });
   }
   // 首页正面：开场放完、停住自转
@@ -163,12 +167,17 @@ try {
     await p.waitForFunction(() => window.__v2world?.constellationState?.()?.phase === 'show', null, { timeout: 30000 });
     await p.waitForTimeout(600);
   });
-  // 烫金券卡：首页右下角的翠宝吐一张券（等卡片飞出来、停住）
+  // 吐券：点首页右下角的翠宝。券飞出来的那一下（金色星屑）先拍一张 card-flight，领券窗口展开以后再拍 card（卡面归 v2-ui）
   await shot('card', '#/', async (p) => {
     await p.waitForTimeout(4500);
     await stopSpin(p);
-    await p.evaluate(() => window.__v2world?.showCard?.());
-    await p.waitForTimeout(2600);
+    await p.waitForFunction(() => !!window.__home?.state().triboo?.at && window.__home.state().triboo.shown, null, { timeout: 30000 });
+    const at = await p.evaluate(() => window.__home.state().triboo.at);
+    await p.mouse.click(at.x, at.y);
+    await p.waitForTimeout(560);
+    await p.screenshot({ path: path.join(out, `card-flight-${tag}.png`) });
+    await p.waitForFunction(() => window.__home.state().card.open === true, null, { timeout: 8000 }).catch(() => {});
+    await p.waitForTimeout(900);
   });
 } finally {
   if (problems.length) console.log(`问题：\n${problems.join('\n')}`);
