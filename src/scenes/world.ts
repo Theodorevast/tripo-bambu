@@ -12,8 +12,10 @@ import { CameraRig, type Framing } from './camera';
 import { Director, type TransitionCues } from './director';
 import { GatedStager } from './gatedStager';
 import { Dressing } from './dressing';
-import { fitHomeCamera, HOME_FIT, homeLayout, homeShape, type HomeShape, type HomeSlot } from './homeLayout';
+import { fitHomeCamera, HOME_FIT, HOME_SPIRAL, homeLayout, homeShape, type HomeCard, type HomeShape, type HomeSlot } from './homeLayout';
 import { PlanetMotion } from './homeMotion';
+import { GalaxyDecor } from './homeGalaxy';
+import { reducedMotion } from './transition';
 import { MainPost } from './post';
 import { homeFraming, INTRO, planetFraming, SHOTS } from './shots';
 import { compileShadowExact } from './shadowWarm';
@@ -101,6 +103,8 @@ export class World {
   readonly atmosphere: Atmosphere; // 天空、云海、太阳和天光（nature/atmosphere.ts）；色调映射和曝光也归它
   readonly life: Life; // 生机层：脚步扬尘、踩踏图、蝴蝶、飘落物、萤火虫、雨（nature/life.ts），只在聚焦的星球上
   readonly dressing: Dressing; // 聚焦星球上的草、花、石头
+  readonly galaxy = new GalaxyDecor(); // 首页螺旋星系的点缀：沿臂的星尘、小云絮、你的星球后面的暖光（homeGalaxy.ts）
+  private sunTurn = 0; // 首页：太阳跟着镜头左右转了多少度（星系转到背面也迎光）
   readonly post: MainPost; // 后处理：调色、接触阴影、日落光束（post.ts）
   focused: PlanetEntry | null = null;
   hovered: PlanetEntry | null = null;
@@ -130,7 +134,10 @@ export class World {
   private sinkToken = 0; // 每次聚焦 / 离开加一：被新转场顶掉的那次，全遮住时的判定不再生效
   private readonly glides = new Map<PlanetEntry, { from: THREE.Vector3; to: THREE.Vector3 }>();
   private glideT = 1;
-  private homeTopPx = 0; // 首页标题卡片的底边（CSS 像素）
+  private homeCard: HomeCard | null = null; // 首页标题卡片在画面上占的地方（NDC）：取景躲开它
+  private homeYawGoal = 0; // 首页取景时镜头往左转多少（弧度）：星系在画面里往右挪、躲开标题卡片
+  private homeYaw = 0; // 现在转了多少（离开首页时慢慢回到 0）
+  private readonly layoutMeta = { rotation: 0 }; // 版式把星系在平面里转了多少（星尘跟着转）
   private readonly canvasRect = { left: 0, top: 0, width: 1, height: 1 }; // 画布在页面上的位置（铺满窗口：resize 时更新，每帧不读布局）
   private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
@@ -164,6 +171,8 @@ export class World {
     this.life.object.visible = false;
     this.life.onRain((r) => this.atmosphere.setRain(r));
     this.dressing = new Dressing({ renderer, scene: this.scene, life: this.life, precompile: (o) => this.stage.precompile(o) });
+    this.buildGalaxy();
+    this.scene.add(this.galaxy.group); // 开场前就在场景里：warmUp 一起编译
     // 悬停：首页（H2）不再画黄色的光圈，星球自己放大、慢慢转，名牌弹出来（stepHome、ui/galaxyUi.ts）
     this.rig.jump(this.galaxyView());
     this.resize();
@@ -237,7 +246,7 @@ export class World {
   // 首页的版式：按团队、「你的星球」、宽屏 / 竖屏、星球半径算每颗星球的槽位（和 planets 同样的顺序）
   private computeSlots(): HomeSlot[] {
     const entries = [...this.planets.values()];
-    return homeLayout(entries.map((e) => ({ id: e.team.id, built: e.team.status !== 'under-construction' })), this.you, this.shape, PLANET_RADIUS);
+    return homeLayout(entries.map((e) => ({ id: e.team.id, built: e.team.status !== 'under-construction' })), this.you, this.shape, PLANET_RADIUS, HOME_SPIRAL, this.layoutMeta);
   }
 
   // 摆上去：原地改 home（引用它的地方都跟着变）；jump：大小、淡不淡直接到位（开场、换团队列表），否则 frame() 里慢慢变过去；
@@ -266,6 +275,15 @@ export class World {
     }
     if (this.glides.size) this.glideT = 0;
     this.pendingLayout = false;
+    this.buildGalaxy();
+  }
+
+  // 螺旋臂上的星尘按星系的大小撒（臂一直延伸到最外那颗星球外面）；手机竖屏沿纵深拉长
+  private buildGalaxy(): void {
+    const stretch = this.shape === 'tall' ? Math.max(1, HOME_SPIRAL.tallStretch) : 1;
+    let maxR = 0;
+    for (const s of this.slots.values()) maxR = Math.max(maxR, Math.hypot(s.pos[0], s.pos[2] / stretch));
+    this.galaxy.build(PLANET_RADIUS, { maxR, stretch, rotation: this.layoutMeta.rotation });
   }
 
   // 运行时加一颗星球（「Create a planet」建好以后）：马上登记（路由、名牌都找得到它），着色器在后台编好以后才挂进场景、从小弹出来；
@@ -533,6 +551,7 @@ export class World {
   // 作品贴地由 PlanetView 自己登记的监听处理（在这之后调用）
   private applyRadius(): void {
     this.applySlots(this.computeSlots(), false);
+    this.buildGalaxy();
     for (const e of this.planets.values()) {
       e.planet.rebuildForRadius();
       if (e === this.focused) e.planet.setDetail(focusDetail());
@@ -562,6 +581,7 @@ export class World {
       return;
     }
     this.applySlots(this.computeSlots(), false);
+    this.buildGalaxy();
     if (!this.rig.flying && !this.rig.drive) this.rig.reframe(this.galaxyView());
   }
 
@@ -773,6 +793,7 @@ export class World {
     this.limitOrbit();
     this.rig.update(dt);
     this.director.tick(dt); // 转场：按分镜表摆镜头、画云层、到点换场景
+    this.turnForCard(dt);
     this.removeHomeScale(); // 首页的大小系数：stepRings 之前除掉、之后再乘上（见 stepHome）
     this.stepRings(dt);
     this.stepHome(dt);
@@ -782,7 +803,10 @@ export class World {
     const camera = this.rig.camera;
     // 漫游时地平线的「上」是 camera.up（角色脚下的球面法线，进出漫游时和 +Y 之间插值）；轨道镜头时按镜头位置推算
     this.atmosphere.setHorizonUp(this.rig.drive ? camera.up : null);
+    this.turnSun(dt);
     this.atmosphere.update(dt, camera);
+    const you = this.you ? this.planets.get(this.you) : undefined;
+    this.galaxy.update(dt, !this.focused, you ? { pos: you.home, size: PLANET_RADIUS * you.planet.group.scale.x } : null, this.atmosphere.seaTop);
     // 星球视图落定以后（不在转场、镜头不在飞）：邻居跟着云海判定沉没（轨道镜头压得很低、漫游时「上」会转，云海圆盘跟着斜）
     if (this.sinkLive && this.focused && !this.director.busy && !this.rig.flying) this.judgeSink(this.atmosphere.up, false);
     this.placeSun();
@@ -817,29 +841,64 @@ export class World {
 
   // 首页的取景：按版式（homeLayout.ts）和当前窗口算，所有星球连同名牌都在画面的安全区里。slots：按这套槽位算（还没摆上去的新版式）
   private galaxyView(slots?: HomeSlot[]): Framing {
-    const fit = { ...HOME_FIT[this.shape] };
-    // 安全区的上沿不高过标题卡片的底边（卡片里加了联名标志以后变高了；窄一点的窗口说明会折行）
-    if (this.homeTopPx > 0) fit.top = Math.min(fit.top, 1 - (2 * (this.homeTopPx + 10)) / Math.max(1, innerHeight));
-    return homeFraming(fitHomeCamera(slots ?? [...this.slots.values()], PLANET_RADIUS, innerWidth, innerHeight, fit));
+    const stretch = this.shape === 'tall' ? Math.max(1, HOME_SPIRAL.tallStretch) : 1;
+    const cam = fitHomeCamera(slots ?? [...this.slots.values()], PLANET_RADIUS, innerWidth, innerHeight, HOME_FIT[this.shape], this.homeCard, stretch);
+    this.homeYawGoal = cam.yaw;
+    return homeFraming(cam);
   }
 
-  // 首页标题卡片的底边（CSS 像素，ui/home.ts 量了告诉这里）：取景的安全区从它下面开始。在首页时立刻重新取景
+  // 首页标题卡片的右边、下边（CSS 像素，ui/home.ts 量了告诉这里）：取景躲开它（星系太大时往右下挪）。在首页时立刻重新取景
   // （开场飞行中就换飞行的终点；转场里、星球视图里不管，回首页时按新值取景）
-  setHomeTop(px: number): void {
-    if (Math.abs(px - this.homeTopPx) < 2) return;
-    this.homeTopPx = px;
+  setHomeCard(rightPx: number, bottomPx: number): void {
+    const W = Math.max(1, innerWidth);
+    const H = Math.max(1, innerHeight);
+    const card = { right: (2 * (rightPx + 12)) / W - 1, bottom: 1 - (2 * (bottomPx + 12)) / H };
+    if (this.homeCard && Math.abs(card.right - this.homeCard.right) < 0.004 && Math.abs(card.bottom - this.homeCard.bottom) < 0.004) return;
+    this.homeCard = card;
     if (!this.focused && !this.director.busy && !this.rig.drive && this.planets.size) this.rig.reframe(this.galaxyView());
   }
 
-  // 首页：左右只让转一点点（版式是正对镜头排的）；离开首页（转场、星球视图、漫游、镜头在飞）时放开，星球视图的取景不受影响。
-  // 在 rig.update 之前设：OrbitControls 在 update 里按它夹住方位角
+  // 首页：镜头再往左转一点（取景算好的 yaw），星系在画面里往右挪、躲开标题卡片。在 rig.update、转场摆好镜头以后转；
+  // 镜头每帧都按环绕中心重新摆，不会越转越多。离开首页（聚焦星球）时慢慢回到 0
+  private turnForCard(dt: number): void {
+    const goal = this.focused ? 0 : this.homeYawGoal;
+    const d = goal - this.homeYaw;
+    this.homeYaw = Math.abs(d) < 1e-4 ? goal : this.homeYaw + d * (1 - Math.exp(-5 * dt));
+    if (this.homeYaw === 0) return;
+    this.rig.camera.rotateY(this.homeYaw);
+    this.rig.camera.updateMatrixWorld();
+  }
+
+  // 首页：左右随便转（SHOTS.galaxy.orbit ≥ 180 = 不限；带惯性：OrbitControls 的阻尼），整个星系慢慢自转（spin，每分钟几圈）：
+  // 指着星球、名牌，或者在拖的时候停；减弱动效时不转。离开首页（转场、星球视图、漫游、镜头在飞）时放开、不转。
+  // 在 rig.update 之前设：OrbitControls 在 update 里按它夹住方位角、自转
   private limitOrbit(): void {
     const home = !this.focused && !this.director.busy && !this.rig.flying && !this.rig.drive;
-    const orbit = home ? THREE.MathUtils.degToRad(SHOTS.galaxy.orbit) : Infinity;
+    const deg = SHOTS.galaxy.orbit;
+    const orbit = home && deg < 180 ? THREE.MathUtils.degToRad(deg) : Infinity;
     const c = this.rig.controls;
-    if (c.maxAzimuthAngle === orbit) return;
-    c.minAzimuthAngle = -orbit;
-    c.maxAzimuthAngle = orbit;
+    if (c.maxAzimuthAngle !== orbit) {
+      c.minAzimuthAngle = -orbit;
+      c.maxAzimuthAngle = orbit;
+    }
+    const spin = home && SHOTS.galaxy.spin > 0 && this.hovered === null && !reducedMotion();
+    c.autoRotate = spin;
+    c.autoRotateSpeed = SHOTS.galaxy.spin;
+  }
+
+  // 首页：太阳跟着镜头的方位角转（镜头在 +Z 那一侧时是 0）：转到背面看也是迎光。只改太阳的方向（uniform），不加灯、不多画阴影。
+  // 离开首页时慢慢转回 0（星球视图照原来的光）
+  private turnSun(dt: number): void {
+    const cam = this.rig.camera.position;
+    const t = this.rig.controls.target;
+    const home = !this.focused && !this.director.busy && !this.rig.drive;
+    const az = THREE.MathUtils.radToDeg(Math.atan2(cam.x - t.x, cam.z - t.z));
+    const goal = home ? az : 0;
+    let d = ((goal - this.sunTurn + 540) % 360) - 180; // 走近的那一边
+    if (home) this.sunTurn = goal;
+    else this.sunTurn += Math.abs(d) < 0.05 ? d : d * (1 - Math.exp(-4 * dt));
+    d = 0;
+    this.atmosphere.setSunTurn(this.sunTurn);
   }
 
   private resize(): void {

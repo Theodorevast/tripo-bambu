@@ -49,7 +49,9 @@ export class GalaxyUi {
   private readonly tags = new Map<string, Tag>();
   private order: Tag[] = []; // 按优先级排好（你的星球、建好的、建设中的）：Tab 的顺序、叠在一起时谁先藏
   private readonly placed: Tag[] = []; // 每帧复用
-  private readonly discs: Array<{ entry: PlanetEntry; x: number; y: number; r: number }> = []; // 每帧复用
+  private readonly discs: Array<{ entry: PlanetEntry; x: number; y: number; r: number; depth: number }> = []; // 每帧复用
+  private readonly byDepth: Tag[] = []; // 每帧复用：按离镜头远近排（近的先摆）
+  private readonly depth = new Map<Tag, number>();
   private down: { x: number; y: number; entry: PlanetEntry | null } | null = null;
   private you: string | null = null;
   private leaving = false; // 松开了、正等回弹放完去转场：这期间不再接点击
@@ -307,16 +309,24 @@ export class GalaxyUi {
     const hovered = world.hovered;
     const placed = this.placed;
     placed.length = 0;
-    // 每颗星球在画面上的圆：名牌挪位置时不压到别的星球上（不然认不出是谁的名牌）
+    // 每颗星球在画面上的圆和离镜头多远：名牌不压到比它近的星球上（不然像浮在前面那颗星球上）
     this.discs.length = 0;
+    const cam = world.rig.camera.position;
     for (const t of this.order) {
+      const d = cam.distanceTo(t.entry.home);
+      this.depth.set(t, d);
       if (!world.planetOnScreen(t.entry, _c)) continue;
-      this.discs.push({ entry: t.entry, x: _c.x, y: _c.y, r: _c.r });
+      this.discs.push({ entry: t.entry, x: _c.x, y: _c.y, r: _c.r, depth: d });
     }
-    // 悬停的那张先摆（一直显示），其余按优先级：叠在一起时排在后面的藏起来
+    // 螺旋星系转到哪个角度都不叠：悬停的那张先摆（一直显示），然后你的星球，其余按离镜头远近——近的先摆，
+    // 和已经摆好的叠在一起的（后面那张）淡掉。建设中的平时不显示名牌，悬停时才显示
     const first = hovered ? this.tags.get(hovered.team.id) : undefined;
     if (first) this.put(first, true, placed);
-    for (const t of this.order) if (t !== first) this.put(t, false, placed);
+    const list = this.byDepth;
+    list.length = 0;
+    for (const t of this.order) if (t !== first) list.push(t);
+    list.sort((a, b) => (a.rank === 0 ? -1 : b.rank === 0 ? 1 : (this.depth.get(a) ?? 0) - (this.depth.get(b) ?? 0)));
+    for (const t of list) this.put(t, false, placed);
   }
 
   // 名牌摆在哪：默认在星球正下方；和已经摆好的名牌叠在一起时，依次试「再往下一格」「星球上方」，都不行就先藏起来。
@@ -327,18 +337,11 @@ export class GalaxyUi {
     const below = _c.y + _c.r * 1.02 + 6;
     const ys = [below, below + t.h + 4, _c.y - _c.r * 1.02 - 6 - t.h];
     let slot = -1;
+    // 名牌一律放在自己星球的正下方；和更近的名牌、更近的星球叠在一起就淡掉（你的星球的名牌一直在）
     if (ok) {
-      if (hover) slot = t.slot;
-      else {
-        // 建设中的只放在正下方（放不下就藏）：挪开的小名牌在后排挤着时更容易认错
-        const order = t.entry.team.status === 'under-construction' ? [0] : t.slot > 0 ? [t.slot, 0, 1, 2] : [0, 1, 2];
-        for (const k of order) {
-          if (this.fits(t, ys[k], placed)) {
-            slot = k;
-            break;
-          }
-        }
-      }
+      if (hover || t.rank === 0) slot = 0;
+      else if (t.entry.team.status === 'under-construction') slot = -1; // 建设中的：平时不显示，悬停时才有
+      else if (this.fits(t, ys[0], placed)) slot = 0;
     }
     const free = slot >= 0;
     if (free) {
@@ -369,12 +372,13 @@ export class GalaxyUi {
     }
     const l = t.x - t.w / 2;
     const r = t.x + t.w / 2;
+    const own = this.depth.get(t) ?? 0;
     for (const d of this.discs) {
-      if (d.entry === t.entry) continue;
+      if (d.entry === t.entry || d.depth >= own) continue; // 只躲比它近的星球（名牌盖在后面的星球上没关系）
       // 矩形和圆：圆心到矩形最近点的距离
       const cx = Math.min(Math.max(d.x, l), r);
       const cy = Math.min(Math.max(d.y, y), y + t.h);
-      if (Math.hypot(d.x - cx, d.y - cy) < d.r * 0.82) return false;
+      if (Math.hypot(d.x - cx, d.y - cy) < d.r * 0.6) return false; // 擦到边上可以，压到星球身上不行
     }
     return true;
   }
