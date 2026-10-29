@@ -78,6 +78,7 @@ export class Walker {
   bumped = false; // 这一帧碰到了圆柱
   impact = 0; // 碰到时撞上之前的速度（米/秒）：跟随镜头按它抖一下
   ground: (dir: THREE.Vector3) => number = () => 1;
+  speedScale = 1; // 走路速度的倍数（涉水时 walkMode 调小）：自动走也按它
   // 点地面 / 作品后自动走过去
   readonly target = new THREE.Vector3();
   hasTarget = false;
@@ -136,7 +137,7 @@ export class Walker {
       return false;
     }
     retangent(_t, this.dir, this.facing);
-    out.copy(_t).multiplyScalar(Math.min(WALK.speed, left * WALK.arrive));
+    out.copy(_t).multiplyScalar(Math.min(WALK.speed * this.speedScale, left * WALK.arrive));
     return true;
   }
 
