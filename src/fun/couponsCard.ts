@@ -9,7 +9,7 @@ import { play } from './couponsAudio';
 // 捡到的券展开成的卡片（coupons）：共享元素过渡——3D 的券飞到镜头前，正好停在卡片上那张券的位置、一样大，
 // 这时卡片上的券（同一个函数画的 canvas）叠上来接手，3D 的那张淡掉；接着券下面的纸像折着的一样往下翻开，露出
 // 券名、面额、说明、兑换码和「Copy code」、「Use on Tripo」。关掉时纸先往上折回去，券再缩没。
-// 减弱动效时只淡入淡出。卡片的样式先自己写（coupons.css，暖白纸面，和「Made with Tripo」徽章一套），界面统一时再并过去。
+// 减弱动效时只淡入淡出。卡片的样式：coupons.css 是第一版的暖白纸面，第二版在 ui/theme-v2.css 里盖成烫金卡片（深色底、细金线）。
 // 两种用法（prepare 的 mode）：星球上捡到的券（code：兑换码、Copy code、Use on Tripo）；
 // 首页右边的翠宝吐的券（claim，H2）：领券窗口——券名、面额、一句说明、一个大的「Claim on Tripo」（新标签页打开 tripo3d.ai）
 
@@ -138,7 +138,7 @@ export class CouponCard {
     this.state = 'open';
     this.layer.classList.remove('cc-measure');
     this.layer.hidden = false;
-    const ease = 'cubic-bezier(0.22, 1, 0.36, 1)';
+    const ease = 'cubic-bezier(0.22, 0.8, 0.24, 1)'; // 第二版：柔和的缓动，不过冲
     if (reduced) {
       this.card.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
       this.backdrop.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
@@ -146,17 +146,16 @@ export class CouponCard {
       this.backdrop.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: 'ease-out' });
       this.ticket.animate([{ opacity: 0 }, { opacity: 1, offset: 0.35 }, { opacity: 1 }], { duration: 300, easing: 'linear' });
       this.ticket.animate(
-        [{ transform: 'scale(1)' }, { transform: 'scale(1.06) rotate(-1.5deg)', offset: 0.45 }, { transform: 'scale(1)' }],
-        { duration: 420, easing: ease, delay: 60 },
+        [{ transform: 'scale(1)' }, { transform: 'scale(1.02)', offset: 0.45 }, { transform: 'scale(1)' }],
+        { duration: 600, easing: ease, delay: 60 },
       );
       this.fold.animate(
         [
           { transform: 'perspective(900px) rotateX(-96deg)', opacity: 0 },
           { transform: 'perspective(900px) rotateX(-96deg)', opacity: 1, offset: 0.02 },
-          { transform: 'perspective(900px) rotateX(8deg)', opacity: 1, offset: 0.72 },
           { transform: 'perspective(900px) rotateX(0deg)', opacity: 1 },
         ],
-        { duration: 560, easing: 'cubic-bezier(0.3, 0.9, 0.35, 1)', delay: 170, fill: 'backwards' },
+        { duration: 640, easing: 'cubic-bezier(0.22, 0.8, 0.24, 1)', delay: 170, fill: 'backwards' },
       );
     }
     (this.modeNow === 'claim' ? this.claim : this.copyButton).focus({ preventScroll: true });
@@ -245,8 +244,9 @@ export class CouponCard {
       this.copyButton.textContent = 'Copied!';
       this.copyButton.classList.add('done');
       this.status.textContent = 'Code copied to clipboard';
-      this.copyButton.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)' });
-      this.code.animate([{ backgroundColor: '#fff3c4' }, { backgroundColor: '#ffffff' }], { duration: 700, easing: 'ease-out' });
+      // 第二版：只淡一下（不弹、不动背景色），只动 opacity
+      this.copyButton.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 450, easing: 'ease-out' });
+      this.code.animate([{ opacity: 0.45 }, { opacity: 1 }], { duration: 650, easing: 'ease-out' });
       play('tick');
     } else {
       this.selectCode();
