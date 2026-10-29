@@ -29,7 +29,8 @@ export const NIGHT_SKY = {
   milkyWidth: 0.16, // 宽窄（方向余弦）
   milkyTilt: 62, // 星球页：光带所在大圆的法线离竖直方向多少度
   milkyTurn: 35, // 星球页：法线的方位角（度）
-  milkyHome: [-1.05, 0.55, 1.05, -0.35] as [number, number, number, number], // 首页：光带在画面上从哪一点到哪一点（NDC，大圆在画面上是直线）
+  milkyFrom: { x: -1.05, y: 0.55 }, // 首页：光带在画面上从哪一点（NDC，大圆在画面上是直线）……
+  milkyTo: { x: 1.05, y: -0.35 }, // ……到哪一点
   milkyPurple: '#6a5a9c', // 光带的紫（显示色）
   milkyGold: '#c9a970', // 光带中间偏金的地方
   // —— 月亮 ——
@@ -38,10 +39,10 @@ export const NIGHT_SKY = {
   moonColor: '#f6f1e7', // 月面（Starlight）
   moonHaloColor: '#a9b2de', // 光晕（冷的月光）
   moonTilt: -30, // 月牙的亮边朝哪边（度：0 朝右，90 朝上）
-  moonWide: [0.8, 0.57] as [number, number], // 首页（宽屏）：月亮在画面上的位置（NDC，−1..1）
-  moonTall: [-0.7, 0.45] as [number, number], // 首页（手机竖屏）：标题卡片下面靠左，那里没有星球
-  moonAzimuth: 160, // 星球页：月亮的方位角（度，从 +Z 转向 +X；镜头从展示方向看过去时在画面右上方）
-  moonElevation: 21, // 星球页：高度角（度）
+  moonWide: { x: 0.8, y: 0.57 }, // 首页（宽屏）：月亮在画面上的位置（NDC，−1..1）
+  moonTall: { x: -0.7, y: 0.45 }, // 首页（手机竖屏）：标题卡片下面靠左，那里没有星球
+  moonAzimuth: 214, // 星球页：月亮的方位角（度，从 +Z 转向 +X；从展示方向看过去在星球左边，不被星球挡住）
+  moonElevation: 7, // 星球页：高度角（度）：低低地挂在云海上，漫游时抬头就看得到
   // —— 云海 ——
   homeLit: '#8f93b3', // 首页云（月光下）：受光面（冷灰紫，低对比：看得见层次，但不抢星系的戏）
   homeMid: '#4c5172', // 中间调（往 Indigo、Slate 靠）
@@ -62,6 +63,14 @@ export const NIGHT_SKY = {
   // —— 光 ——
   ambient: '#1e2546', // 夜里额外的冷色补光（加在环境光上：作品的暗面不发黑）
   ambientK: 1,
+  backFill: '#6a78a8', // 夜里从主光对面来的冷色补光（只加在环境光里，不加灯）：作品、星球背光那一侧的边缘泛一点冷光，暗面不糊成一团
+  backFillK: 1.4,
+  // —— 夜里的星球页（首页不变）：星球和作品是主角，光比天和云亮一截 ——
+  planetKey: 1.85, // 主光再乘
+  planetEnv: 1.3, // 天光（环境光）再乘
+  planetExposure: 1.2, // 曝光再乘
+  fogStart: 2.5, // 距离雾从多远开始（× 星球半径）：近处通透，雾只在远处
+  heightFog: 0.7, // 云海附近的高度雾留多少（星球下半截不发闷）
   fireflies: 0.8, // 夜里给生机层的「傍晚系数」（≥ 0.5 有萤火虫）
   // —— 首页空气里的星屑（nature/skyDust.ts）——
   dust: 1, // 浓淡（0 关）
@@ -72,10 +81,10 @@ export const NIGHT_SKY = {
   grain: 0.03, // 胶片颗粒（0 关）
   grainSize: 1.25, // 颗粒大小（像素）
   grainFps: 24, // 颗粒每秒换几次（像胶片；不是每帧都换，不闪）
-  bloom: 0.4, // 泛光浓淡（0 关）
-  bloomThreshold: 1.25, // 多亮才泛光（线性、曝光前）
-  bloomKnee: 0.8, // 阈值附近的软过渡
-  bloomRadius: 1, // 泛光的范围倍数
+  bloom: 1, // 泛光浓淡（0 关）：阈值高，只有真正亮的东西进来，浓一点也不会发雾
+  bloomThreshold: 1.6, // 多亮才泛光（线性、乘了曝光以后：AgX 下接近白的那一截）
+  bloomKnee: 0.6, // 阈值附近的软过渡（从 阈值 − knee 开始慢慢进来）
+  bloomRadius: 1, // 泛光的范围倍数（0.25..1）
 };
 
 export type NightSkyParams = typeof NIGHT_SKY;
@@ -178,8 +187,8 @@ export const BLUE_HOUR: Palette = {
   glowStrength: 0.55,
   streaks: 0.12,
   sunDisc: lin(0, 0, 0),
-  sunLight: lin(0.8, 0.76, 1),
-  sunIntensity: 3.9,
+  sunLight: lin(0.88, 0.89, 1),
+  sunIntensity: 4.3,
   cloudLit: sky('#8f93b3'),
   cloudMid: sky('#4c5172'),
   cloudShade: sky('#30344f'),
@@ -209,17 +218,17 @@ export const MOONLIT: Palette = {
   glowStrength: 0.35,
   streaks: 0.08,
   sunDisc: lin(0, 0, 0),
-  sunLight: lin(0.7, 0.82, 1),
-  sunIntensity: 4.3,
+  sunLight: lin(0.74, 0.84, 1),
+  sunIntensity: 4.0,
   cloudLit: sky('#929ab8', 1.55),
   cloudMid: sky('#4b5373', 1.55),
   cloudShade: sky('#2e3550', 1.55),
   cloudDeep: sky('#1b2240', 1.55),
   ground: lin(0.025, 0.035, 0.065),
-  envIntensity: 1.6,
+  envIntensity: 1.5,
   envBelow: 0.55,
   fogDensity: 0.0004,
-  exposure: 1.55,
+  exposure: 1.38,
   sunElevation: 34,
   sunAzimuth: 28,
   night: 1,
@@ -271,6 +280,10 @@ export const NIGHT_U = {
   clearCos: uniform(0.995).setGroup(renderGroup), // 变薄的外沿
   clearCosIn: uniform(0.999).setGroup(renderGroup), // 里面完全变薄
   ambient: v3(), // 加在环境光上的冷色补光（已经乘了夜的系数）
+  fogStart: uniform(0).setGroup(renderGroup), // 距离雾从多远开始（米，夜里才有）
+  heightFog: uniform(1).setGroup(renderGroup), // 高度雾的浓度倍数（夜里的星球页淡一些）
+  backFill: v3(), // 从主光对面来的冷色补光（已经乘了夜的系数）
+  backDir: v3(), // 它从哪边来（主光的反方向，抬高一点）
 };
 
 type F = THREE.Node<'float'>;
@@ -418,6 +431,11 @@ export function seaNightAlpha(k: F, dir: V3): F {
   return float(1).sub(max(max(gap, clear), NIGHT_U.thin).mul(NIGHT_U.night));
 }
 
+// 环境光里夜里多出来的那一层（atmosphere 的 envNode 加上去）：主光对面来的冷色补光。dir：漫反射时是法线，镜面时是反射方向
+export function nightEnv(dir: V3): V3 {
+  return NIGHT_U.backFill.mul(pow(saturate(dot(dir, NIGHT_U.backDir).mul(0.8).add(0.2)), 2.5));
+}
+
 // 天空在这个方向上的亮度（给 nightLayer 的 skyLum）
 export const skyLuma = (c: V3): F => dot(c, LUMA);
 
@@ -442,6 +460,7 @@ const _p2 = new THREE.Vector3();
 const homeCloud = { lit: new THREE.Vector3(), mid: new THREE.Vector3(), shade: new THREE.Vector3(), deep: new THREE.Vector3() };
 const silverBase = new THREE.Vector3();
 const ambientBase = new THREE.Vector3();
+const backBase = new THREE.Vector3();
 let colorKey = '';
 
 function setColor(u: { value: THREE.Vector3 }, hex: string, k = 1, exposure = NIGHT_EXPOSURE): void {
@@ -452,7 +471,7 @@ function setColor(u: { value: THREE.Vector3 }, hex: string, k = 1, exposure = NI
 // 表里的颜色 → uniform（换算要几十步牛顿迭代：只在表改了时做）
 function applyColors(): void {
   const s = NIGHT_SKY;
-  const key = [s.moonColor, s.moonHaloColor, s.milkyPurple, s.milkyGold, s.silver, s.ambient, s.homeLit, s.homeMid, s.homeShade, s.homeDeep].join();
+  const key = [s.moonColor, s.moonHaloColor, s.milkyPurple, s.milkyGold, s.silver, s.ambient, s.backFill, s.homeLit, s.homeMid, s.homeShade, s.homeDeep].join();
   if (key === colorKey) return;
   colorKey = key;
   // 星星的冷暖：Starlight 两边各偏一点（亮度在着色器里另乘）
@@ -464,6 +483,7 @@ function applyColors(): void {
   setColor(NIGHT_U.bandGold, s.milkyGold, 0.3);
   setColor({ value: silverBase }, s.silver, 0.32);
   setColor({ value: ambientBase }, s.ambient);
+  setColor({ value: backBase }, s.backFill, 0.5);
   for (const k of ['lit', 'mid', 'shade', 'deep'] as const) {
     const hex = { lit: s.homeLit, mid: s.homeMid, shade: s.homeShade, deep: s.homeDeep }[k];
     displayToLinear(hex, NIGHT_EXPOSURE, _c);
@@ -489,6 +509,13 @@ function screenDir(out: THREE.Vector3, camera: THREE.Camera, x: number, y: numbe
   return out.set(x, y, 0.5).unproject(camera).sub(_camPos).normalize();
 }
 
+// 夜里星球页的光：主光、天光、曝光各乘多少（首页 calm = 1 时都是 1，白天 night = 0 时也是 1）
+export function nightBoost(night: number, calm: number): { key: number; env: number; exposure: number } {
+  const k = THREE.MathUtils.clamp(night, 0, 1) * (1 - THREE.MathUtils.clamp(calm, 0, 1));
+  const s = NIGHT_SKY;
+  return { key: 1 + (s.planetKey - 1) * k, env: 1 + (s.planetEnv - 1) * k, exposure: 1 + (s.planetExposure - 1) * k };
+}
+
 export interface NightFrameInput {
   camera: THREE.Camera;
   frameQ: THREE.Quaternion; // atmosphere 的标架（「上」跟着镜头转）
@@ -496,6 +523,8 @@ export interface NightFrameInput {
   look: Palette; // 现在用的配色（含预设过渡、雨）
   calm: number; // 0 星球页 … 1 首页
   pixelAngle: number; // 一个像素的张角（弧度）
+  sun: THREE.Vector3; // 主光的方向（从场景指向光）
+  radius: number; // 星球半径（米）
 }
 
 export function updateNightSky(f: NightFrameInput): void {
@@ -528,6 +557,13 @@ export function updateNightSky(f: NightFrameInput): void {
   U.clearCosIn.value = Math.cos(U.moonRadius.value * 1.12);
   U.silver.value.copy(silverBase).multiplyScalar(Math.max(0, s.silverK));
   U.ambient.value.copy(ambientBase).multiplyScalar(Math.max(0, s.ambientK) * night);
+  const planet = night * (1 - calm);
+  U.fogStart.value = Math.max(0, s.fogStart) * f.radius * planet;
+  U.heightFog.value = 1 + (THREE.MathUtils.clamp(s.heightFog, 0, 2) - 1) * planet;
+  U.backFill.value.copy(backBase).multiplyScalar(Math.max(0, s.backFillK) * night);
+  _b.copy(f.sun).addScaledVector(f.up, -f.sun.dot(f.up)).negate();
+  if (_b.lengthSq() < 1e-6) _b.set(1, 0, 0);
+  U.backDir.value.copy(_b.normalize()).addScaledVector(f.up, 0.3).normalize();
 
   const cam = f.camera as THREE.PerspectiveCamera;
   cam.getWorldPosition(_camPos);
@@ -537,8 +573,8 @@ export function updateNightSky(f: NightFrameInput): void {
 
   // 月亮：首页钉在画面上的一点（宽屏、竖屏各一个位置），星球页是标架里的方位角、高度角；中间按 calm 过渡（转场的云层盖着）
   const tall = (cam.aspect ?? 1.6) < 0.95;
-  const [mx, my] = tall ? s.moonTall : s.moonWide;
-  screenDir(_home, cam, mx, my);
+  const at = tall ? s.moonTall : s.moonWide;
+  screenDir(_home, cam, at.x, at.y);
   direction(_planet, s.moonAzimuth, s.moonElevation).applyQuaternion(f.frameQ);
   const moon = U.moon.value.copy(_planet).lerp(_home, calm);
   if (moon.lengthSq() < 1e-6) moon.copy(_home);
@@ -558,9 +594,8 @@ export function updateNightSky(f: NightFrameInput): void {
   U.rim.value.copy(_a).addScaledVector(f.up, 0.45).normalize();
 
   // 银河：首页按画面上的两点定一个大圆（在画面上是一条直线），星球页按标架里的倾角、方位
-  const [x1, y1, x2, y2] = s.milkyHome;
-  screenDir(_p1, cam, x1, y1);
-  screenDir(_p2, cam, x2, y2);
+  screenDir(_p1, cam, s.milkyFrom.x, s.milkyFrom.y);
+  screenDir(_p2, cam, s.milkyTo.x, s.milkyTo.y);
   _n.crossVectors(_p1, _p2).normalize();
   const tiltN = THREE.MathUtils.degToRad(s.milkyTilt);
   const turnN = THREE.MathUtils.degToRad(s.milkyTurn);
