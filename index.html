@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Community Planets: teams of 3D artists build a planet together and show their work." />
+    <meta name="theme-color" content="#0f1530" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <title>Community Planets</title>
     <link rel="stylesheet" href="/src/ui/boot.css" />
@@ -11,18 +12,24 @@
   <body>
     <canvas id="stage"></canvas>
     <div id="app"></div>
-    <!-- 启动画面（src/ui/boot.ts、boot.css）。云：--x/--y/--w 位置和宽度，--d 飘一个来回的时长；l / r / d 散开时往左、往右、往下飞；far 远处的小云 -->
+    <!-- 启动画面（src/ui/boot.ts、boot.css），第二版：夜空、细金色的天体仪（三道同心环、刻度、一颗绕着走的小星），
+         正中一个很小的单色翠宝剪影；标题 Cinzel，三个阶段是三个月相（蛾眉月 → 上弦 → 满月）。都是线稿，不放动图 -->
     <div id="boot" data-state="loading">
       <div class="boot-sky"></div>
-      <i class="boot-cloud a l far" style="--x: -7vw; --y: 9vh; --w: clamp(220px, 26vw, 460px); --d: 26s"></i>
-      <i class="boot-cloud b r far" style="--x: 73vw; --y: 15vh; --w: clamp(200px, 25vw, 440px); --d: 32s"></i>
-      <i class="boot-cloud a l far" style="--x: 24vw; --y: 25vh; --w: clamp(90px, 9vw, 150px); --d: 40s"></i>
-      <i class="boot-cloud b r" style="--x: 67vw; --y: 44vh; --w: clamp(110px, 11vw, 180px); --d: 36s"></i>
-      <i class="boot-cloud a l" style="--x: -10vw; --y: 66vh; --w: clamp(320px, 40vw, 700px); --d: 30s"></i>
-      <i class="boot-cloud b r" style="--x: 58vw; --y: 72vh; --w: clamp(360px, 50vw, 860px); --d: 34s"></i>
-      <i class="boot-cloud a d" style="--x: 28vw; --y: 82vh; --w: clamp(280px, 36vw, 620px); --d: 38s"></i>
+      <div class="boot-stars" aria-hidden="true"><i class="far"></i><i class="mid"></i><i class="near"></i><i class="glint g1"></i><i class="glint g2"></i><i class="glint g3"></i></div>
       <div class="boot-center">
-        <div class="boot-art"><span class="boot-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+        <div class="boot-art" aria-hidden="true">
+          <i class="boot-ring r1"></i>
+          <i class="boot-ring r2"><b></b></i>
+          <i class="boot-ring r3"><b></b></i>
+          <i class="boot-cross"></i>
+          <svg class="boot-triboo" viewBox="-16 -16 32 32" focusable="false">
+            <circle class="bt-body" r="8.6" cy="-0.6" />
+            <path class="bt-limb" d="M-8.4 0.4 L-12.6 -3.4 M8.4 0.4 L12.6 -3.4 M-3.6 7.6 L-4.4 11.6 M3.6 7.6 L4.4 11.6" />
+            <path class="bt-v" d="M-3.6 -2.8 L-0.1 2.6 L3.4 -1.2" />
+          </svg>
+        </div>
+        <p class="boot-brand">Community Planets</p>
         <p class="boot-title">Gathering planets…</p>
         <ol class="boot-steps">
           <li><i></i><span>Building the sky</span></li>
@@ -31,6 +38,7 @@
         </ol>
         <span class="boot-now" role="status"></span>
       </div>
+      <p class="boot-made" aria-hidden="true">Made with <b>Tripo</b></p>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

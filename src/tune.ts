@@ -12,6 +12,7 @@ import { addStageTune, STAGE_TUNE } from './scenes/stageTune';
 import { addTransitionTune, TRANSITION_TUNE } from './scenes/transitionTune';
 import { addHomeTune, HOME_TUNE } from './scenes/homeTune';
 import { SKY, WEATHER, type World } from './scenes/world';
+import type { AtmospherePreset } from './nature/atmosphere';
 import { installPlanetLookTune, planetLookParams } from './nature/planetLook';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
 import { tuneWater, WATER, WATER_COLORS, WATER_ICE } from './nature/water';
@@ -38,7 +39,7 @@ import { addWorldV2Tune } from './scenes/worldV2';
 type Folder = TuneFolder;
 
 // 面板上直接拖的「星球」参数：半径滑块拖动时实时重建（拖动中每次变化都建一遍，松手不用再等）
-const PLANET_TUNE = { radius: PLANET_RADIUS, sky: 'day' as 'day' | 'sunset' };
+const PLANET_TUNE = { radius: PLANET_RADIUS, sky: 'blue' as AtmospherePreset };
 // 生机层：傍晚系数（auto = 跟着天空预设）、档位、效果开关
 const life = { eveningAuto: true, evening: 0, quality: 'high' as LifeQuality };
 const effects = Object.fromEntries(LIFE_EFFECTS.map((k) => [k, true])) as Record<LifeEffect, boolean>;
@@ -149,7 +150,7 @@ export function installTune(world: World): TuneShell {
   const sky = pane.addFolder({ title: 'Sky & light' });
   PLANET_TUNE.sky = world.skyPreset;
   const ap = world.atmosphere.params;
-  sky.addBinding(PLANET_TUNE, 'sky', { label: 'preset', options: { Day: 'day', Sunset: 'sunset' } }).on('change', () => world.setSkyPreset(PLANET_TUNE.sky));
+  sky.addBinding(PLANET_TUNE, 'sky', { label: 'preset', options: { 'Blue hour': 'blue', Moonlit: 'moon', Day: 'day', Sunset: 'sunset' } }).on('change', () => world.setSkyPreset(PLANET_TUNE.sky));
   sky.addBinding(ap, 'exposure', { min: 0.2, max: 3, step: 0.01 });
   sky.addBinding(ap, 'sunElevation', { label: 'sun elevation°', min: -5, max: 70, step: 0.5 });
   sky.addBinding(ap, 'sunAzimuth', { label: 'sun azimuth°', min: -180, max: 180, step: 1 });

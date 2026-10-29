@@ -245,7 +245,8 @@ try {
     await page.locator('#app > a.made-with').click();
     const popup = await popupP;
     if (popup) await popup.waitForLoadState().catch(() => {});
-    check('角落徽章：Made with Tripo，圆体字，点了在新标签页打开 tripo3d.ai', !!badge && /Made with Tripo/.test(badge.text) && badge.href.startsWith('https://www.tripo3d.ai') && badge.target === '_blank' && /noopener/.test(badge.rel) && /Nunito/.test(badge.font) && !!popup && popup.url().startsWith('https://www.tripo3d.ai'),
+    // 第二版（v2-ui）换了字体：原来查圆体字 Nunito，现在徽章是 Inter 小号大写
+    check('角落徽章：Made with Tripo，Inter 小字，点了在新标签页打开 tripo3d.ai', !!badge && /Made with Tripo/.test(badge.text) && badge.href.startsWith('https://www.tripo3d.ai') && badge.target === '_blank' && /noopener/.test(badge.rel) && /Inter/.test(badge.font) && !!popup && popup.url().startsWith('https://www.tripo3d.ai'),
       badge ? `${Math.round(badge.width)}×${Math.round(badge.height)} px，左下角 (${Math.round(badge.left)}, ${Math.round(badge.bottom)})，新标签页 ${popup?.url() ?? '没打开'}` : '没找到');
     await popup?.close();
     // 编辑时让位
