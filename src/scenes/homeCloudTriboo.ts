@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { texture, uniform, uv, vec4 } from 'three/tsl';
 import { FineLines } from './fineLines';
 import type { PlanetEntry, World } from './world';
 
@@ -12,7 +13,7 @@ import type { PlanetEntry, World } from './world';
 
 export const CLOUD_TRIBOO = {
   on: 1, // 0 = 不要
-  size: 1.25, // 大小（× 默认：身子半径约占画面高度的 7%）
+  size: 0.78, // 大小（× 默认：身子半径约占画面高度的 7%）。第二版 main 05:45：缩到原来的六成多（1.25 → 0.78），不和内圈星系一样大
   cycle: 40, // 多少秒淡掉、换个地方再出现（秒）
   gather: 3.2, // 亮起来要多久（一颗颗星 + 一笔笔线）
   scatter: 2.6, // 淡掉要多久
@@ -27,6 +28,7 @@ interface FigStar {
   x: number;
   y: number;
   size: number; // 像素（0 = 只是线的拐点，不画星）
+  bright: number; // 亮度（星图上的星有亮有暗）
   gold: boolean; // 胸口 V 的星：偏暖的金
   order: number; // 亮起来的先后 0..1
 }
@@ -37,60 +39,120 @@ interface FigLine {
   order: number;
   gold: boolean;
   width: number; // 线宽（像素）
+  alpha: number; // 这一笔多淡
 }
 
-// 翠宝的样子（main 04:00：默认视角下要一眼认出来）：一个饱满的圆身子（48 段的圆，8 颗星钉在上面）、胸口一个大一点的金色 V（粗一点的线）、
-// 身子两边两只短短的小手（一只抬起来打招呼、一只放下，手是一小圈，像戴着手套），底下两条短腿和一对椭圆的运动鞋
+// 星图上的星座画法（main 05:45）：轮廓是 9 颗大小、亮度各不相同的星，节点之间连几段细而淡的弧（不画完整的圆，留两个口子）；
+// 胸口三颗亮一点的金星连成 V；两只手是两小段弧（手套，左手抬起来打招呼），两只脚是两小段往下弯的弧（球鞋鞋底）；
+// 下面写星座名 TRIBOO（label：Cinzel 小号大写、字距拉开）
 function figure(): { stars: FigStar[]; lines: FigLine[] } {
   const stars: FigStar[] = [];
   const lines: FigLine[] = [];
-  const add = (x: number, y: number, size: number, gold = false) => {
-    stars.push({ x, y, size, gold, order: 0 });
+  const add = (x: number, y: number, size: number, bright = 1, gold = false) => {
+    stars.push({ x, y, size, bright, gold, order: 0 });
     return stars.length - 1;
   };
-  const line = (a: number, b: number, width = 1.1, gold = false) => lines.push({ a, b, order: 0, gold, width });
-  // 一圈（圆或椭圆）：n 段，starEvery 段钉一颗星（0 = 不钉）；从 start（弧度）开始顺时针
-  const loop = (cx: number, cy: number, rx: number, ry: number, n: number, starEvery: number, starSize: number, width: number, start = Math.PI / 2) => {
-    const ids: number[] = [];
-    for (let k = 0; k < n; k++) {
-      const a = start - (k / n) * Math.PI * 2;
-      ids.push(add(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, starEvery > 0 && k % starEvery === 0 ? (k % (starEvery * 2) === 0 ? starSize : starSize * 0.8) : 0));
+  const line = (a: number, b: number, width = 0.9, alpha = 0.42, gold = false) => lines.push({ a, b, order: 0, gold, width, alpha });
+  // 一段弧：从 a0 到 a1（弧度），半径 r0 → r1 线性变化，n 段；两头接已有的点（from、to），中间的拐点不画星
+  const arc = (cx: number, cy: number, a0: number, a1: number, r0: number, r1: number, n: number, from: number | null, to: number | null, width = 0.9, alpha = 0.42) => {
+    let prev = from ?? add(cx + Math.cos(a0) * r0, cy + Math.sin(a0) * r0, 0);
+    for (let k = 1; k <= n; k++) {
+      const t = k / n;
+      const a = a0 + (a1 - a0) * t;
+      const r = r0 + (r1 - r0) * t;
+      const id = k === n && to !== null ? to : add(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 0);
+      line(prev, id, width, alpha);
+      prev = id;
     }
-    for (let k = 0; k < n; k++) line(ids[k], ids[(k + 1) % n], width);
-    return ids;
+    return prev;
   };
-  // 身子
-  loop(0, 0, 1, 1, 48, 6, 5.4, 1.05);
-  // 胸口的 V（翠宝标志上的 V：和 ui/badge.ts 同一套坐标，y 翻过来）：比第一版大一点、线粗一点、星亮一点
-  const v = [[-0.5, 0.3], [-0.03, -0.4], [0.44, 0.1]].map(([x, y]) => add(x * 0.74, y * 0.74 - 0.04, 5.8, true));
-  line(v[0], v[1], 1.9, true);
-  line(v[1], v[2], 1.9, true);
-  // 两只小手：从身子两边伸出一小截，手是一小圈（左手抬起来打招呼，右手放下）
-  for (const [ang, tx, ty] of [[158, -1.3, 0.36], [-16, 1.28, -0.4]] as const) {
-    const a = THREE.MathUtils.degToRad(ang);
-    const from = add(Math.cos(a), Math.sin(a), 0);
-    const dx = tx - Math.cos(a);
-    const dy = ty - Math.sin(a);
-    const len = Math.hypot(dx, dy);
-    const r = 0.13;
-    const wrist = add(tx - (dx / len) * r, ty - (dy / len) * r, 0);
-    line(from, wrist, 1.1);
-    loop(tx, ty, r, r, 10, 5, 3.2, 1.0, Math.atan2(dy, dx));
+  // 身子：9 颗星（角度、半径、大小、亮度都不一样）
+  const body: Array<[number, number, number, number]> = [
+    [96, 1.0, 5.2, 1.0],
+    [54, 0.98, 3.0, 0.62],
+    [14, 1.02, 4.3, 0.85],
+    [-28, 0.97, 2.7, 0.55],
+    [-66, 1.01, 4.6, 0.9],
+    [-112, 0.99, 3.5, 0.72],
+    [-150, 1.03, 2.6, 0.52],
+    [170, 0.98, 4.4, 0.86],
+    [132, 1.01, 3.1, 0.66],
+  ];
+  const ids = body.map(([deg, r, size, b]) => add(Math.cos(THREE.MathUtils.degToRad(deg)) * r, Math.sin(THREE.MathUtils.degToRad(deg)) * r, size, b));
+  // 相邻两颗之间沿着圆连一段弧；在右上（54° → 14°）和左下（-112° → -150°）各留一个口子：读起来是圆的，但不是一个画满的圈
+  for (let k = 0; k < body.length; k++) {
+    const j = (k + 1) % body.length;
+    if (k === 1 || k === 5) continue;
+    const a0 = THREE.MathUtils.degToRad(body[k][0]);
+    let a1 = THREE.MathUtils.degToRad(body[j][0]);
+    if (a1 > a0) a1 -= Math.PI * 2; // 顺时针
+    arc(0, 0, a0, a1, body[k][1], body[j][1], 4, ids[k], ids[j]);
   }
-  // 两条短腿和一对椭圆的运动鞋（鞋头朝外）
-  for (const s of [-1, 1]) {
-    const a = THREE.MathUtils.degToRad(s > 0 ? -64 : -116);
-    const top = add(Math.cos(a), Math.sin(a), 0);
-    const cx = s * 0.52;
-    const cy = -1.2;
-    const ankle = add(s * 0.46, cy + 0.085, 0);
-    line(top, ankle, 1.1);
-    loop(cx, cy, 0.24, 0.095, 14, 7, 3.6, 1.0, s > 0 ? 0 : Math.PI);
-  }
-  // 先后：身子一圈先连（从顶上顺时针），然后 V、手、脚；星跟着自己所在的那一笔
+  // 胸口的 V（翠宝标志上的 V：和 ui/badge.ts 同一套坐标，y 翻过来）：三颗亮的金星，线粗一点、亮一点
+  const v = [[-0.5, 0.3], [-0.03, -0.4], [0.44, 0.1]].map(([x, y], i) => add(x * 0.72, y * 0.72 - 0.04, i === 1 ? 6.2 : 5.4, 1, true));
+  line(v[0], v[1], 1.4, 0.78, true);
+  line(v[1], v[2], 1.4, 0.78, true);
+  // 两只手：从肩上的星伸出一小截，手是一小段弧（手套：开口朝着手腕），手尖一颗小星。左手抬起来打招呼，右手放下
+  const mitten = (shoulder: number, wx: number, wy: number, cx: number, cy: number, r: number) => {
+    const wrist = add(wx, wy, 0);
+    line(shoulder, wrist, 0.9, 0.45);
+    const toward = Math.atan2(wy - cy, wx - cx);
+    const tip = add(cx - Math.cos(toward) * r, cy - Math.sin(toward) * r, 3.2, 0.8);
+    arc(cx, cy, toward + 0.9, toward + Math.PI, r, r, 3, null, tip, 0.9, 0.5);
+    arc(cx, cy, toward + Math.PI, toward + Math.PI * 2 - 0.9, r, r, 3, tip, null, 0.9, 0.5);
+  };
+  mitten(ids[7], -1.17, 0.3, -1.31, 0.42, 0.15);
+  mitten(ids[3], 1.08, -0.62, 1.19, -0.72, 0.13);
+  // 两只脚：从髋上的星往下一小截，鞋底是一段往下弯的弧（鞋头朝外，鞋头一颗星）
+  const sole = (hip: number, s: number) => {
+    const ankle = add(s * 0.44, -1.12, 0);
+    line(hip, ankle, 0.9, 0.45);
+    const toe = add(s * 0.76, -1.18, 3.8, 0.82);
+    const heel = add(s * 0.2, -1.2, 0);
+    // 鞋底：从鞋跟到鞋头，往下弯（二次曲线取 5 段）
+    let prev = heel;
+    for (let k = 1; k <= 5; k++) {
+      const t = k / 5;
+      const x = (1 - t) * (1 - t) * (s * 0.2) + 2 * t * (1 - t) * (s * 0.46) + t * t * (s * 0.76);
+      const y = (1 - t) * (1 - t) * -1.2 + 2 * t * (1 - t) * -1.33 + t * t * -1.18;
+      const id = k === 5 ? toe : add(x, y, 0);
+      line(prev, id, 0.9, 0.5);
+      prev = id;
+    }
+  };
+  sole(ids[5], -1);
+  sole(ids[4], 1);
+  // 先后：身子一圈先亮（从顶上顺时针），然后 V、手、脚；线跟在两头的星后面
   stars.forEach((st, i) => { st.order = i / Math.max(1, stars.length - 1); });
   for (const l of lines) l.order = Math.max(stars[l.a].order, stars[l.b].order);
   return { stars, lines };
+}
+
+// 星座名：下面一行 Cinzel 小号大写的「TRIBOO」，字距拉开，香槟金（画在画布上，一个面片，一次绘制）。字体加载好以后重画一次
+const LABEL_W = 512;
+const LABEL_H = 96;
+function labelCanvas(): { canvas: HTMLCanvasElement | null; draw: () => void } {
+  const canvas = typeof document === 'undefined' ? null : document.createElement('canvas');
+  const ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+  if (canvas) {
+    canvas.width = LABEL_W;
+    canvas.height = LABEL_H;
+  }
+  const draw = () => {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, LABEL_W, LABEL_H);
+    ctx.font = "600 54px Cinzel, 'Cormorant Garamond', Georgia, serif";
+    (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '20px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#e2cd9a';
+    ctx.fillText('TRIBOO', LABEL_W / 2 + 10, LABEL_H / 2 + 3); // 字距加在每个字后面：往右挪半个字距才居中
+    // 两边各一道很短的细线（星图上标注的样子）
+    ctx.fillRect(LABEL_W / 2 - 244, LABEL_H / 2, 30, 2);
+    ctx.fillRect(LABEL_W / 2 + 214, LABEL_H / 2, 30, 2);
+  };
+  draw();
+  return { canvas, draw };
 }
 
 const LINE = new THREE.Color('#d8c08e').multiplyScalar(1.2); // Champagne gold
@@ -99,7 +161,7 @@ const STAR = new THREE.Color('#f6f1e7').multiplyScalar(1.7); // Starlight
 const STAR_V = new THREE.Color('#f2d9a2').multiplyScalar(2.1);
 
 // 图形在自己平面里的范围（身子半径 = 1）：screenRect、留空都按它
-const BOX = { left: -1.48, right: 1.48, bottom: -1.33, top: 1.06 };
+const BOX = { left: -1.56, right: 1.56, bottom: -1.86, top: 1.08 }; // 连星座名一起
 
 type Phase = 'hidden' | 'gather' | 'show' | 'scatter';
 
@@ -115,6 +177,8 @@ export class CloudTriboo {
   readonly group = new THREE.Group(); // 第一版叫 sprite：现在是挂着星座的组
   private readonly world: World;
   private readonly lines: FineLines;
+  private readonly labelTex: THREE.Texture;
+  private readonly uLabel = uniform(0); // 星座名的透明度（亮起来最后才出现）
   private readonly fig = figure();
   private readonly center = new THREE.Vector3();
   private readonly right = new THREE.Vector3(1, 0, 0);
@@ -151,6 +215,41 @@ export class CloudTriboo {
     this.lines.mesh.renderOrder = -4; // 云海（-10）、星尘（-6）之后
     this.group.name = 'home-constellation-triboo';
     this.group.add(this.lines.mesh);
+    // 星座名：一个面片（多 1 次绘制），在脚下面
+    // 贴图用 DataTexture（画布画好后 getImageData 拷进去，走 writeTexture）：CanvasTexture 第一次更新走 copyExternalImageToTexture，
+    // WebGPU 上那一帧会卡几十毫秒（decorKit.ts 的路牌图集踩过）；不生成 mipmap（不用多编一份生成 mipmap 的管线）
+    const label = labelCanvas();
+    const data = new Uint8Array(LABEL_W * LABEL_H * 4);
+    const copy = () => {
+      const ctx = label.canvas && typeof label.canvas.getContext === 'function' ? label.canvas.getContext('2d') : null;
+      if (!ctx) return;
+      const img = ctx.getImageData(0, 0, LABEL_W, LABEL_H).data;
+      // DataTexture 不翻转：第一行是 v = 0（下边），画布的第一行在上面，倒着拷
+      for (let y = 0; y < LABEL_H; y++) data.set(img.subarray(y * LABEL_W * 4, (y + 1) * LABEL_W * 4), (LABEL_H - 1 - y) * LABEL_W * 4);
+    };
+    copy();
+    const tex = new THREE.DataTexture(data, LABEL_W, LABEL_H, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    this.labelTex = tex;
+    const lm = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
+    lm.name = 'home-constellation-label';
+    const tx = texture(this.labelTex, uv());
+    lm.colorNode = vec4(tx.rgb.mul(1.25), tx.a.mul(this.uLabel));
+    const labelMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.1, (2.1 * LABEL_H) / LABEL_W), lm);
+    labelMesh.name = 'home-constellation-label';
+    labelMesh.position.set(0, -1.66, 0);
+    labelMesh.renderOrder = -4;
+    labelMesh.frustumCulled = false;
+    this.group.add(labelMesh);
+    void (typeof document !== 'undefined' ? document.fonts?.load('600 40px Cinzel') : undefined)?.then(() => {
+      label.draw();
+      copy();
+      this.labelTex.needsUpdate = true;
+    }, () => {});
   }
 
   // ?tune → Cloud Triboo → Replay：马上淡掉，换个地方再出现
@@ -173,12 +272,14 @@ export class CloudTriboo {
     const { stars, lines } = this.fig;
     stars.forEach((s, i) => {
       const k = smooth(s.order * 0.55, s.order * 0.55 + 0.18, p);
-      this.lines.setAlpha(i, s.size > 0 ? k * o * (s.gold ? Math.min(1.4, 0.7 + 0.5 * CLOUD_TRIBOO.gold) : 0.95) : 0, true);
+      this.lines.setAlpha(i, s.size > 0 ? k * o * s.bright * (s.gold ? Math.min(1.4, 0.7 + 0.5 * CLOUD_TRIBOO.gold) : 1) : 0, true);
     });
     lines.forEach((l, i) => {
       const k = smooth(0.3 + l.order * 0.55, 0.42 + l.order * 0.55, p);
-      this.lines.setAlpha(i, k * o * (l.gold ? Math.min(1.2, 0.55 + 0.45 * CLOUD_TRIBOO.gold) : 0.55));
+      this.lines.setAlpha(i, k * o * l.alpha * (l.gold ? Math.min(1.5, 0.6 + 0.4 * CLOUD_TRIBOO.gold) : 1));
     });
+    // 星座名最后出来、最先淡掉；本身就淡（像星图上的标注）
+    this.uLabel.value = smooth(0.82, 1, p) * o * 0.62;
     this.lines.commit(false);
   }
 

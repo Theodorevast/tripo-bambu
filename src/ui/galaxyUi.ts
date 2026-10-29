@@ -1,5 +1,6 @@
 import type { PlanetEntry, World } from '../scenes/world';
 import { HOME_MOTION } from '../scenes/homeMotion';
+import { armillaryReach } from '../scenes/homeArmillary';
 import { el } from './dom';
 import { iconSvg } from './icons';
 
@@ -355,8 +356,11 @@ export class GalaxyUi {
   private put(t: Tag, hover: boolean, placed: Tag[]): void {
     const ok = this.world.planetOnScreen(t.entry, _c);
     t.x = _c.x;
-    const below = _c.y + _c.r * 1.02 + 6;
-    const ys = [below, below + t.h + 4, _c.y - _c.r * 1.02 - 6 - t.h];
+    // 第二版 [v2-world]：你的星球外面一圈天体仪环（scenes/homeArmillary.ts），名牌按环最外那圈的半径往下挪，落在环的外面（只改位置，不改样式）
+    // 环朝着镜头的那一半离镜头更近、在画面上更大：多留 8% 和几个像素
+    const reach = t.rank === 0 ? Math.max(1.02, armillaryReach() * 1.08) : 1.02;
+    const below = _c.y + _c.r * reach + (t.rank === 0 ? 10 : 6);
+    const ys = [below, below + t.h + 4, _c.y - _c.r * reach - 6 - t.h];
     let slot = -1;
     // 名牌一律放在自己星球的正下方；和更近的名牌、更近的星球叠在一起就淡掉（你的星球的名牌一直在）
     if (ok) {
