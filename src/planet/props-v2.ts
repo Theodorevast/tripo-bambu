@@ -1,4 +1,6 @@
 import * as THREE from 'three/webgpu';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { attribute, color, float, instancedBufferAttribute, mix, positionGeometry, positionLocal, renderGroup, select, sin, smoothstep, time, uniform, vec3 } from 'three/tsl';
 import { mulberry32, type Rng } from './rng';
@@ -17,37 +19,44 @@ export const PROPS = {
   density: 1, // 数量倍数
   lamps: 1, // 灯柱的数量倍数（沿土路）
   glow: 2.4, // 灯头自发光的强度（HDR：后期的泛光会让它带一点光晕）
-  scale: 1.1, // 整体大小（作品是主角，这些是点缀：比真实尺寸大一点点，星球视图里看得出来）
+  scale: 0.95, // 整体大小（作品是主角，这些是点缀：克制一点）
+  arch: 1, // 石拱门（0 = 不要）
+  tower: 1, // 带圆顶的矮石塔（0 = 不要）
+  stones: 1, // 立石（0 = 不要）
 };
 
 export type PropKind = 'lamp' | 'menhir' | 'arch' | 'tower';
 export const PROP_KINDS: readonly PropKind[] = ['lamp', 'menhir', 'arch', 'tower'];
 export const PROPS_CAPACITY = 64;
 
-// 颜色（sRGB）：石头是 Stone（按星球的石头色再染一点，实例颜色），铁件是深的石板灰，灯是暖的烛光色，圆顶是 Slate，边上一圈古金
-const STONE = new THREE.Color('#8f8b84');
+// 颜色（sRGB）：石头是 Stone 一带（SHADES：一块块深浅不一，再按星球的石头色染一点，实例颜色），铁件是深的石板灰，灯是暖的烛光色，圆顶是 Slate，边上一圈古金
 const STONE_DARK = new THREE.Color('#6f6c67');
 const STONE_LIGHT = new THREE.Color('#a19c93');
-const IRON = new THREE.Color('#2c2e35');
+const IRON = new THREE.Color('#3b404d'); // 铸铁：深的石板蓝灰（太黑了月光下看不出形状）
 const LAMP = new THREE.Color('#ffb45a'); // 暖的烛光（自发光太亮会被色调映射压成白色：颜色饱和一点、强度收着）
 const DOME = new THREE.Color('#5d667c');
 const GILT = new THREE.Color('#a8894f');
 const DOOR = new THREE.Color('#2a2622');
+const MOSS = new THREE.Color('#56614c'); // 根部一圈苔藓（Moss 往暗里一点）
+const LICHEN = new THREE.Color('#a7ab8a'); // 朝上的面上零星的地衣
 
-// 一块子几何：去掉 uv，按最终位置上色；mat = (自发光, 金属度)
-function part(geo: THREE.BufferGeometry, m: THREE.Matrix4 | null, col: THREE.Color | ((p: THREE.Vector3) => THREE.Color), glow = 0, metal = 0): THREE.BufferGeometry {
+// 一块子几何：去掉 uv，按最终位置上色；mat = (自发光, 金属度)。法线：几何自带的（圆角、圆柱的平滑法线）照旧用，没有才按面算
+function part(geo: THREE.BufferGeometry, m: THREE.Matrix4 | null, col: THREE.Color | ((p: THREE.Vector3, n: THREE.Vector3) => THREE.Color), glow = 0, metal = 0): THREE.BufferGeometry {
   let g = geo.index ? geo.toNonIndexed() : geo;
   if (g !== geo) geo.dispose();
-  g.deleteAttribute('uv');
+  if (g.getAttribute('uv')) g.deleteAttribute('uv');
   if (m) g.applyMatrix4(m);
-  g.computeVertexNormals();
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
   const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const nrm = g.getAttribute('normal') as THREE.BufferAttribute;
   const c = new Float32Array(pos.count * 3);
   const mat = new Float32Array(pos.count * 2);
   const v = new THREE.Vector3();
+  const n = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
-    const k = typeof col === 'function' ? col(v) : col;
+    n.fromBufferAttribute(nrm, i);
+    const k = typeof col === 'function' ? col(v, n) : col;
     c.set([k.r, k.g, k.b], i * 3);
     mat.set([glow, metal], i * 2);
   }
@@ -59,92 +68,140 @@ function part(geo: THREE.BufferGeometry, m: THREE.Matrix4 | null, col: THREE.Col
 const M = (x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) =>
   new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(sx, sy, sz));
 
-// 石头从下往上：根部压暗（像接触阴影、沾了土），顶上亮一点
-const stoneShade = (y0: number, y1: number, base = STONE) => (p: THREE.Vector3) => base.clone().lerp(STONE_DARK, 1 - THREE.MathUtils.smoothstep(p.y, y0, y1)).lerp(STONE_LIGHT, THREE.MathUtils.smoothstep(p.y, y1 * 0.7, y1) * 0.35);
+// 顶点色的斑驳：一个固定种子的单纯形噪声（石块的深浅、苔藓的边缘不规则）
+const NOISE = new SimplexNoise({ random: mulberry32(4242) });
+const nz = (p: THREE.Vector3, f: number, o = 0) => NOISE.noise3d(p.x * f + o, p.y * f + o * 0.7, p.z * f - o * 0.3);
 
-// 每个顶点按位置抖一点（石头不是规整的方块）：确定的哈希，同一个位置抖得一样（共用的顶点不裂开）
-function jitter(g: THREE.BufferGeometry, amount: number, seed: number): THREE.BufferGeometry {
-  const pos = g.getAttribute('position') as THREE.BufferAttribute;
-  const v = new THREE.Vector3();
-  const h = (x: number, y: number, z: number, k: number) => {
-    const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 13.3 + k * 51.9) * 43758.5453;
-    return s - Math.floor(s) - 0.5;
+// 石头的上色：base 是这一块石头的底色（一块一块深浅不一），按噪声斑驳；根部压暗、长一圈苔藓（不规则的边），朝上的面亮一点、带一点地衣
+function stone(base: THREE.Color, mossTo = 0.32) {
+  return (p: THREE.Vector3, n: THREE.Vector3) => {
+    const c = base.clone().multiplyScalar(1 + nz(p, 3.1) * 0.1 + nz(p, 9.7, 3) * 0.06);
+    const ground = THREE.MathUtils.smoothstep(p.y, -0.05, 0.35);
+    c.lerp(STONE_DARK, (1 - ground) * 0.35);
+    // 苔藓：根部一圈，边缘按噪声起伏
+    const edge = mossTo + nz(p, 4.3, 7) * 0.12;
+    const moss = 1 - THREE.MathUtils.smoothstep(p.y, edge - 0.12, edge + 0.04);
+    c.lerp(MOSS, moss * 0.85);
+    // 朝上的面：天光照着，亮一点、零星的浅色地衣
+    if (n.y > 0.6) c.lerp(LICHEN, THREE.MathUtils.smoothstep(nz(p, 6.1, 11), 0.35, 0.8) * 0.45);
+    return c;
   };
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i);
-    const q = [Math.round(v.x * 1000), Math.round(v.y * 1000), Math.round(v.z * 1000)];
-    pos.setXYZ(i, v.x + h(q[0], q[1], q[2], 1) * amount, v.y + h(q[0], q[1], q[2], 2) * amount * 0.6, v.z + h(q[0], q[1], q[2], 3) * amount);
-  }
-  return g;
 }
 
-// 灯柱：八角的石头小底座、细铁杆、挂着一盏六角的灯笼（暖光），尖顶。高约 2.1 米
+// 一块圆角的石块（倒角、带一点歪）：w、h、d 是大小，r 是倒角半径
+function block(w: number, h: number, d: number, r: number, m: THREE.Matrix4, base: THREE.Color, mossTo?: number): THREE.BufferGeometry {
+  return part(new RoundedBoxGeometry(w, h, d, 1, r), m, stone(base, mossTo));
+}
+
+// 每一块石头的底色：在 Stone 附近按一个固定的表变一点（像一块块不同的石料）
+const SHADES = ['#8f8b84', '#999389', '#857f78', '#a09a90', '#8a857f', '#948e86'].map((h) => new THREE.Color(h));
+const shade = (i: number) => SHADES[((i % SHADES.length) + SHADES.length) % SHADES.length];
+
+// 灯柱（铸铁）：两层八角的铁底座、往上收细的灯杆（中间一道箍）、柱头，挂一盏四面玻璃的方灯笼（暖光），
+// 上面一个四棱的灯罩和一颗古金的顶珠。高约 2.2 米
 function lampGeometry(): THREE.BufferGeometry {
+  const iron = (p: THREE.Vector3) => IRON.clone().multiplyScalar(1 + nz(p, 7.3) * 0.08);
   return mergeGeometries([
-    part(new THREE.CylinderGeometry(0.15, 0.19, 0.22, 8), M(0, 0.06), stoneShade(-0.05, 0.17)),
-    part(new THREE.CylinderGeometry(0.032, 0.042, 1.72, 6), M(0, 1.03), IRON, 0, 0.5),
-    part(new THREE.CylinderGeometry(0.06, 0.05, 0.05, 6), M(0, 1.88), IRON, 0, 0.5),
-    // 灯笼：上下两片铁框夹着发光的玻璃
-    part(new THREE.CylinderGeometry(0.11, 0.085, 0.26, 6), M(0, 2.02), LAMP, 1, 0),
-    part(new THREE.ConeGeometry(0.16, 0.15, 6), M(0, 2.225), IRON, 0, 0.5),
-    part(new THREE.SphereGeometry(0.03, 6, 4), M(0, 2.32), GILT, 0, 0.7),
+    part(new THREE.CylinderGeometry(0.17, 0.2, 0.09, 8), M(0, 0.03), iron, 0, 0.55),
+    part(new THREE.CylinderGeometry(0.11, 0.15, 0.16, 8), M(0, 0.15), iron, 0, 0.55),
+    part(new THREE.CylinderGeometry(0.075, 0.11, 0.06, 8), M(0, 0.26), iron, 0, 0.55),
+    part(new THREE.CylinderGeometry(0.034, 0.052, 1.5, 8), M(0, 1.04), iron, 0, 0.55),
+    part(new THREE.TorusGeometry(0.052, 0.016, 5, 10), M(0, 0.7, 0, Math.PI / 2), iron, 0, 0.55),
+    part(new THREE.CylinderGeometry(0.075, 0.04, 0.09, 8), M(0, 1.82), iron, 0, 0.55),
+    // 灯笼：底下一圈铁框，四面发光的玻璃（方的，转 45°），上面一圈铁框
+    part(new THREE.CylinderGeometry(0.11, 0.11, 0.025, 4), M(0, 1.88, 0, 0, Math.PI / 4), iron, 0, 0.55),
+    part(new THREE.CylinderGeometry(0.115, 0.085, 0.27, 4), M(0, 2.02, 0, 0, Math.PI / 4), LAMP, 1, 0),
+    part(new THREE.CylinderGeometry(0.135, 0.135, 0.03, 4), M(0, 2.165, 0, 0, Math.PI / 4), iron, 0, 0.55),
+    part(new THREE.ConeGeometry(0.17, 0.15, 4), M(0, 2.255, 0, 0, Math.PI / 4), iron, 0, 0.55),
+    part(new THREE.SphereGeometry(0.03, 8, 6), M(0, 2.35), GILT, 0, 0.75),
   ])!;
 }
 
-// 立石：上窄下宽、微微歪着的一块长石头，高约 1.8 米（实例再按大小缩放）
+// 立石：一块又高又扁的整石（细分的球按噪声起伏、上窄下宽、顶上斜着磨圆），平滑法线；根部长苔藓。高约 1.8 米（实例再缩放）
 function menhirGeometry(): THREE.BufferGeometry {
-  const box = new THREE.BoxGeometry(0.6, 1.85, 0.38, 2, 4, 2);
-  const pos = box.getAttribute('position') as THREE.BufferAttribute;
+  const ico = new THREE.IcosahedronGeometry(1, 3);
+  ico.deleteAttribute('normal');
+  ico.deleteAttribute('uv');
+  const geo = mergeVertices(ico, 1e-6);
+  ico.dispose();
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const v = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
-    const t = (v.y + 0.925) / 1.85; // 0 底 .. 1 顶
-    const taper = 1 - 0.38 * t;
-    pos.setXYZ(i, v.x * taper + 0.06 * t * t, v.y + 0.925 - 0.12, v.z * (1 - 0.2 * t));
+    const t = (v.y + 1) / 2; // 0 底 .. 1 顶
+    const bump = 1 + nz(v, 1.6, 2) * 0.1 + nz(v, 4.1, 5) * 0.035;
+    const taper = 1 - 0.32 * t * t;
+    v.set(v.x * 0.34 * taper * bump, v.y * 0.92 * bump, v.z * 0.2 * taper * bump);
+    v.x += 0.05 * t * t; // 顶上往一边歪一点
+    if (v.y < -0.75) v.y = -0.75 + (v.y + 0.75) * 0.25; // 底面压平，坐在地里
+    pos.setXYZ(i, v.x, v.y + 0.82, v.z);
   }
-  const g = jitter(mergeVertices(box.deleteAttribute('uv').deleteAttribute('normal'), 1e-4), 0.05, 7);
-  return part(g, null, stoneShade(-0.1, 1.7));
+  geo.computeVertexNormals();
+  return part(geo, null, stone(shade(1), 0.38));
 }
 
-// 小石拱门：两根方石柱，上面一道半圆的拱（九块楔形的拱石，中间的拱心石大一点）。宽约 1.9 米、高约 2.4 米
+// 小石拱门：两根干砌的石柱（一层层圆角的石块，大小、深浅不一，柱脚一块宽一点的基石），上面一道半圆的拱（七块楔形的拱石，
+// 中间的拱心石大一点、往外凸一点），石块之间留一道细缝。宽约 1.9 米、高约 2.4 米
 function archGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const span = 0.72; // 拱的半径（柱子内侧到中心）
-  const pillarH = 1.45;
+  const span = 0.68; // 拱的内半径
+  const thick = 0.3; // 拱石的厚度（径向）
+  const depth = 0.34;
+  const pillarH = 1.36;
+  let id = 0;
   for (const s of [-1, 1]) {
-    parts.push(part(jitter(new THREE.BoxGeometry(0.34, pillarH, 0.36, 1, 3, 1), 0.02, s + 3), M(s * (span + 0.17), pillarH / 2 - 0.1), stoneShade(-0.1, 2.3)));
-    // 柱脚、柱头：宽一点的一层
-    parts.push(part(new THREE.BoxGeometry(0.42, 0.12, 0.44), M(s * (span + 0.17), -0.04), stoneShade(-0.1, 2.3)));
-    parts.push(part(new THREE.BoxGeometry(0.42, 0.1, 0.44), M(s * (span + 0.17), pillarH - 0.1), stoneShade(-0.1, 2.3)));
+    const x = s * (span + thick / 2);
+    parts.push(block(0.46, 0.16, 0.46, 0.04, M(x, 0.02), shade(id++), 0.5));
+    // 三层石块：高矮不一、左右错一点
+    const rows = [0.42, 0.36, 0.38];
+    let y = 0.1;
+    rows.forEach((h, k) => {
+      const w = 0.34 + ((k + (s > 0 ? 1 : 0)) % 2) * 0.03;
+      parts.push(block(w, h - 0.02, depth, 0.035, M(x + ((k % 2) - 0.5) * 0.02, y + h / 2), shade(id++), 0.5));
+      y += h;
+    });
   }
-  const n = 9;
+  const n = 7;
   for (let i = 0; i < n; i++) {
     const a0 = (i / n) * Math.PI;
     const a1 = ((i + 1) / n) * Math.PI;
     const am = (a0 + a1) / 2;
     const key = i === (n - 1) / 2;
-    const len = (span + 0.17) * (a1 - a0) * 0.96;
-    const block = new THREE.BoxGeometry(len, key ? 0.42 : 0.34, key ? 0.4 : 0.36);
-    const r = span + 0.17;
-    parts.push(part(jitter(block, 0.012, i), M(Math.cos(am) * r, pillarH - 0.05 + Math.sin(am) * r, 0, 0, 0, am - Math.PI / 2), stoneShade(-0.1, 2.3)));
+    const r = span + thick / 2;
+    const len = r * (a1 - a0) - 0.025; // 留一道缝
+    const t = key ? thick + 0.06 : thick;
+    parts.push(block(len, t, key ? depth + 0.04 : depth, 0.03, M(Math.cos(am) * (r + (key ? 0.03 : 0)), pillarH + 0.08 + Math.sin(am) * (r + (key ? 0.03 : 0)), 0, 0, 0, am - Math.PI / 2), shade(id++)));
   }
   return mergeGeometries(parts)!;
 }
 
-// 矮石塔（小天文台）：圆的石塔身，顶上一圈出挑的石檐，一个石板蓝的圆顶（底边一圈古金），圆顶上一道开缝；
-// 塔身一扇窄窗透着暖光、一扇深色的木门。高约 3 米、半径约 0.75 米
+// 矮石塔（小天文台）：圆的石塔身（一层层的石砌：顶点色按高度分层、每层深浅不一），根部一圈苔藓；
+// 顶上一圈出挑的石檐、一道古金的细边，石板蓝的圆顶上四道古金的肋、一道深色的观测缝；
+// 塔身一扇小拱窗透着暖光，底下一扇深色的木门。高约 2.9 米、半径约 0.62 米
 function towerGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const shade = stoneShade(-0.1, 2.4);
-  parts.push(part(jitter(new THREE.CylinderGeometry(0.72, 0.8, 2.2, 12, 3), 0.02, 11), M(0, 1.0), shade));
-  parts.push(part(new THREE.CylinderGeometry(0.86, 0.86, 0.14, 12), M(0, 2.16), STONE_LIGHT));
-  parts.push(part(new THREE.CylinderGeometry(0.8, 0.8, 0.05, 12), M(0, 2.255), GILT, 0, 0.7));
-  parts.push(part(new THREE.SphereGeometry(0.76, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), M(0, 2.27), DOME));
-  // 圆顶上的观测缝：一条深色的窄带
-  parts.push(part(new THREE.BoxGeometry(0.12, 0.05, 0.78), M(0, 2.27 + 0.4, 0.33, -0.62), DOOR));
-  // 窄窗（暖光）、门
-  parts.push(part(new THREE.BoxGeometry(0.16, 0.34, 0.06), M(0, 1.45, 0.76), LAMP, 0.85, 0));
-  parts.push(part(new THREE.BoxGeometry(0.34, 0.62, 0.06), M(0, 0.25, 0.79), DOOR));
+  const courses = (p: THREE.Vector3, nn: THREE.Vector3) => {
+    const row = Math.floor((p.y + 0.1) / 0.24);
+    const col = Math.floor((Math.atan2(p.z, p.x) / (Math.PI * 2) + 1) * (8 + (row % 2) * 0.5) + row * 0.5);
+    const base = shade(row * 3 + col);
+    return stone(base, 0.36)(p, nn);
+  };
+  parts.push(part(new THREE.CylinderGeometry(0.6, 0.66, 2.0, 16, 8), M(0, 0.95), courses));
+  parts.push(part(new THREE.CylinderGeometry(0.74, 0.74, 0.12, 16), M(0, 2.0), stone(STONE_LIGHT, -1)));
+  parts.push(part(new THREE.CylinderGeometry(0.69, 0.69, 0.04, 16), M(0, 2.08), GILT, 0, 0.75));
+  parts.push(part(new THREE.SphereGeometry(0.64, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), M(0, 2.09), (p) => DOME.clone().multiplyScalar(0.92 + 0.12 * THREE.MathUtils.smoothstep(p.y, 2.1, 2.7))));
+  for (let k = 0; k < 4; k++) {
+    // 圆顶上的古金肋：沿经线的细弧（用很窄的圆环的一段）
+    parts.push(part(new THREE.TorusGeometry(0.645, 0.012, 4, 16, Math.PI / 2), M(0, 2.09, 0, 0, (k * Math.PI) / 2 + Math.PI / 4, Math.PI / 2), GILT, 0, 0.75));
+  }
+  parts.push(part(new THREE.BoxGeometry(0.11, 0.04, 0.66), M(0, 2.09 + 0.33, 0.28, -0.72), DOOR));
+  // 小拱窗（暖光）：一块竖的发光板加一个半圆顶，外面一圈石框
+  parts.push(part(new THREE.BoxGeometry(0.2, 0.3, 0.08), M(0, 1.36, 0.6), STONE_LIGHT));
+  parts.push(part(new THREE.BoxGeometry(0.13, 0.22, 0.06), M(0, 1.34, 0.635), LAMP, 0.9, 0));
+  parts.push(part(new THREE.CylinderGeometry(0.065, 0.065, 0.06, 10, 1, false, 0, Math.PI), M(0, 1.45, 0.635, Math.PI / 2, 0, Math.PI / 2), LAMP, 0.9, 0));
+  // 门：深色的木门，上面一道拱
+  parts.push(part(new THREE.BoxGeometry(0.34, 0.56, 0.06), M(0, 0.22, 0.66), DOOR));
+  parts.push(part(new THREE.CylinderGeometry(0.17, 0.17, 0.06, 12, 1, false, 0, Math.PI), M(0, 0.5, 0.66, Math.PI / 2, 0, Math.PI / 2), DOOR));
   return mergeGeometries(parts)!;
 }
 
@@ -264,7 +321,7 @@ export function propItems(planet: PropsPlanet): PropItem[] {
   let next = 4 + rng() * 6;
   let walked = 0;
   let side = rng() < 0.5 ? -1 : 1;
-  const maxLamps = Math.round(6 * PROPS.lamps * PROPS.density);
+  const maxLamps = Math.round(5 * PROPS.lamps * PROPS.density);
   for (let k = 1; k < path.length && items.length < maxLamps; k++) {
     const a = path[k - 1];
     const b = path[k];
@@ -286,7 +343,7 @@ export function propItems(planet: PropsPlanet): PropItem[] {
     walked += len;
   }
   // —— 拱门、石塔、立石：多放在星球视图朝着镜头的那一面（看得见），找不到合适的地方就这次不放 ——
-  const want: Array<[PropKind, number]> = [['tower', 1], ['arch', 1], ['menhir', Math.max(0, Math.round(2 * PROPS.density))]];
+  const want: Array<[PropKind, number]> = [['tower', PROPS.tower > 0 ? 1 : 0], ['arch', PROPS.arch > 0 ? 1 : 0], ['menhir', PROPS.stones > 0 ? Math.max(0, Math.round(2 * PROPS.density)) : 0]];
   for (const [kind, count] of want) {
     for (let n = 0; n < count; n++) {
       for (let tries = 0; tries < 60; tries++) {

@@ -1,5 +1,6 @@
 import type * as THREE from 'three/webgpu';
 import { GARDEN_V2 } from '../nature/decorGarden';
+import { applyLampPools, LAMP_POOL } from '../planet/ground';
 import { applyProps, PROPS, type PropsField } from '../planet/props-v2';
 import type { TuneFolder } from '../ui/tuneShell';
 import { installPropsV2, refillPropsV2 } from './propsV2Install';
@@ -106,7 +107,13 @@ export function addWorldV2Tune(pane: TuneFolder): void {
   props.addBinding(PROPS, 'density', { label: 'density ×', min: 0, max: 2, step: 0.05 });
   props.addBinding(PROPS, 'lamps', { label: 'lamp posts ×', min: 0, max: 2, step: 0.05 });
   props.addBinding(PROPS, 'scale', { label: 'size ×', min: 0.6, max: 2, step: 0.01 });
+  props.addBinding(PROPS, 'arch', { label: 'stone arch', min: 0, max: 1, step: 1 });
+  props.addBinding(PROPS, 'tower', { label: 'domed tower', min: 0, max: 1, step: 1 });
+  props.addBinding(PROPS, 'stones', { label: 'standing stones', min: 0, max: 1, step: 1 });
   props.addBinding(PROPS, 'glow', { label: 'lamp glow', min: 0, max: 8, step: 0.05 }).on('change', () => applyProps());
+  props.addBinding(LAMP_POOL, 'radius', { label: 'lamp light pool (m)', min: 0.5, max: 6, step: 0.1 }).on('change', () => applyLampPools());
+  props.addBinding(LAMP_POOL, 'strength', { label: 'lamp light pool', min: 0, max: 2, step: 0.01 }).on('change', () => applyLampPools());
+  props.addBinding(LAMP_POOL, 'color', { label: 'lamp light colour' }).on('change', () => applyLampPools());
   props.on('change', () => refillPropsV2());
   const garden = root.addFolder({ title: 'Gardens', expanded: false });
   garden.addBinding(GARDEN_V2, 'flags', { label: 'team pennants' });

@@ -35,7 +35,7 @@ export const PALETTE = {
   flowers: ['#ece6d8', '#d3c08f', '#c4a5a4', '#b39882', '#a99cb8', '#9fb0c2'],
   fences: ['#8a7360', '#7d6e60', '#8d9c86', '#9a8a78'],
   benches: ['#83695a', '#cbc2b1', '#7f8f78'],
-  sign: '#7d6a5a',
+  sign: '#4a4e5c', // 路牌的杆子：深的石板灰（和灯柱的铁件一个调子）
   stone: '#8f8b84',
 };
 
@@ -429,8 +429,8 @@ export class SignAtlas {
     t.name = 'garden-signs';
     t.needsUpdate = true;
     this.texture = t;
-    // 字体（Nunito，顶栏用的那套）加载好再画；没加载好之前先画一遍（系统圆体顶上）
-    void (doc?.fonts?.load('800 60px Nunito').then(() => {
+    // 字体加载好再画；没加载好之前先画一遍（衬线字顶上）。第二版 [v2-world]：Cinzel 600（ui/fonts-v2.css 的 @font-face，界面上的标题字），不再用 Nunito
+    void (doc?.fonts?.load('600 40px Cinzel').then(() => {
       this.fontReady = true;
       this.redrawAll();
     }, () => {}) ?? Promise.resolve());
@@ -484,49 +484,42 @@ export class SignAtlas {
     if (!ctx || text === null) return;
     const x0 = (k % 2) * SLOT_W;
     const y0 = Math.floor(k / 2) * SLOT_H;
-    const rng = mulberry32(k * 977 + text.length * 31 + 7);
     ctx.save();
     ctx.translate(x0, y0);
     ctx.clearRect(0, 0, SLOT_W, SLOT_H);
-    // 木牌：暖色木头，几道深一点的木纹，四边压暗一圈（像刷漆时边上积了色）
+    // 第二版 [v2-world]：深色的石板小牌（Indigo 往 Midnight 渐变），里面一圈细细的香槟金线框，四角各一颗小星；
+    // 字是香槟金的 Cinzel，端端正正（不歪、不斜：不要「歪斜的标签」），字距放宽一点
     const g = ctx.createLinearGradient(0, 0, 0, SLOT_H);
-    g.addColorStop(0, '#dcb07a');
-    g.addColorStop(1, '#c69561');
+    g.addColorStop(0, '#2a3152');
+    g.addColorStop(1, '#1b2142');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, SLOT_W, SLOT_H);
-    ctx.globalAlpha = 0.18;
-    ctx.strokeStyle = '#8a5a30';
-    for (let i = 0; i < 6; i++) {
-      ctx.lineWidth = 1.5 + rng() * 2.5;
-      const y = 12 + rng() * (SLOT_H - 24);
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.bezierCurveTo(SLOT_W * 0.3, y + (rng() - 0.5) * 14, SLOT_W * 0.7, y + (rng() - 0.5) * 14, SLOT_W, y + (rng() - 0.5) * 8);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 0.35;
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = '#9b6a3c';
-    ctx.strokeRect(0, 0, SLOT_W, SLOT_H);
+    ctx.strokeStyle = '#d8c08e';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(14, 14, SLOT_W - 28, SLOT_H - 28);
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(22, 22, SLOT_W - 44, SLOT_H - 44);
     ctx.globalAlpha = 1;
-    // 字：深棕色，每个字母随手歪一点、上下错一点，像用刷子写的
-    const size = Math.min(64, Math.floor(((SLOT_W - 70) / Math.max(4, text.length)) * 1.7));
-    ctx.font = `800 ${size}px ${this.fontReady ? 'Nunito' : 'ui-rounded, system-ui'}, sans-serif`;
+    const star = (cx: number, cy: number, r: number) => {
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+        const rr = i % 2 === 0 ? r : r * 0.32;
+        ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      }
+      ctx.closePath();
+      ctx.fill();
+    };
+    ctx.fillStyle = '#d8c08e';
+    for (const [cx, cy] of [[14, 14], [SLOT_W - 14, 14], [14, SLOT_H - 14], [SLOT_W - 14, SLOT_H - 14]]) star(cx, cy, 9);
+    const size = Math.min(54, Math.floor(((SLOT_W - 110) / Math.max(4, text.length)) * 1.45));
+    ctx.font = `600 ${size}px ${this.fontReady ? 'Cinzel' : "'Cormorant Garamond'"}, Georgia, serif`;
+    (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${Math.round(size * 0.08)}px`;
     ctx.textBaseline = 'middle';
-    // 整串一次写（逐字变换在 CPU 画布上慢）：整体随手歪一点、微微斜着，像用刷子写的
-    const total = ctx.measureText(text).width;
-    ctx.fillStyle = '#4a2e18';
-    ctx.save();
-    ctx.translate(SLOT_W / 2, SLOT_H / 2 + 4);
-    ctx.rotate((rng() - 0.5) * 0.05);
-    ctx.transform(1, 0, -0.06, 1, 0, 0);
-    ctx.fillText(text, -total / 2, 0);
-    ctx.restore();
-    // 翠宝黄的小圆点：名字左边一颗
-    ctx.fillStyle = '#F2B705';
-    ctx.beginPath();
-    ctx.arc((SLOT_W - total) / 2 - 22, SLOT_H / 2 + 3, 8, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#e8d6a8';
+    ctx.fillText(text, SLOT_W / 2, SLOT_H / 2 + 3);
     ctx.restore();
     // 拷进贴图的数据（只拷这一格）
     const img = ctx.getImageData(x0, y0, SLOT_W, SLOT_H).data;
