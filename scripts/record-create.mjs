@@ -15,6 +15,9 @@ const TMP = '.tmp/create-record';
 const [W, H] = (process.env.SIZE ?? '1440x900').split('x').map(Number);
 const tag = `${W}x${H}${process.env.WEBGL2 === '1' ? '-webgl2' : ''}`;
 const phone = W < 700;
+// BURST_ONLY=1：只录 Launch 以后（窗口里的几步按真实时间走、不截图），快很多
+let skipping = process.env.BURST_ONLY === '1';
+const NAME_OUT = process.env.BURST_ONLY === '1' ? 'create-burst' : 'create';
 mkdirSync(OUT, { recursive: true });
 rmSync(TMP, { recursive: true, force: true });
 mkdirSync(TMP, { recursive: true });
@@ -55,6 +58,10 @@ const marks = {}; // 关键帧：名字 → 第几帧
 const phases = []; // 每帧的阶段（挑 Launch 以后的关键帧）
 async function shoot(n = 1) {
   for (let i = 0; i < n; i++) {
+    if (skipping) {
+      await page.waitForTimeout(16);
+      continue;
+    }
     await step();
     await page.screenshot({ path: path.join(dir, `f-${String(frame).padStart(4, '0')}.png`) });
     const s = await page.evaluate(() => ({ launch: window.__create?.state().launch.phase ?? '', trans: window.__trans.state().transition?.kind ?? '', ready: document.querySelector('#app')?.dataset.planetReady ?? '', flying: window.__world.rig.flying }));
@@ -96,7 +103,7 @@ async function typeSlowly(text, every = 3) {
   }
 }
 
-await page.evaluate(() => window.__trans.timeScale(0));
+if (!skipping) await page.evaluate(() => window.__trans.timeScale(0));
 await page.mouse.move(mouse.x, mouse.y);
 mark('home');
 await shoot(30);
@@ -140,6 +147,10 @@ mark('crew');
 await clickOn('.cp-next', 20, 36);
 await waitFor(() => window.__create.state().step === 'launch');
 await shootUntil(() => window.__create.state().twinReady);
+if (skipping) {
+  await page.evaluate(() => window.__trans.timeScale(0));
+  skipping = false;
+}
 mark('launch-step');
 await shoot(20);
 await clickOn('.cp-next', 20, 0);
@@ -181,11 +192,11 @@ const keys = {
   'back-home': firstOf((p) => p.launch === 'home', 40),
   landed: frame - 20,
 };
-const out = path.join(OUT, `create-${tag}.mp4`);
+const out = path.join(OUT, `${NAME_OUT}-${tag}.mp4`);
 execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', '60', '-i', path.join(dir, 'f-%04d.png'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', out]);
 for (const [label, f] of Object.entries(keys)) {
-  if (f === null || f === undefined) continue;
-  copyFileSync(path.join(dir, `f-${String(f).padStart(4, '0')}.png`), path.join(OUT, `create-${tag}-${String(Object.keys(keys).indexOf(label) + 1).padStart(2, '0')}-${label}.png`));
+  if (f === null || f === undefined || !Number.isFinite(f) || f < 0 || f >= frame) continue;
+  copyFileSync(path.join(dir, `f-${String(f).padStart(4, '0')}.png`), path.join(OUT, `${NAME_OUT}-${tag}-${String(Object.keys(keys).indexOf(label) + 1).padStart(2, '0')}-${label}.png`));
 }
 rmSync(dir, { recursive: true, force: true });
 console.log(`${out}（${frame} 帧，${(frame / 60).toFixed(1)} 秒）${phone ? '，手机竖屏' : ''}`);
