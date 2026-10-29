@@ -1255,13 +1255,10 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     get horizon() {
       return look.horizon;
     },
-<<<<<<< HEAD
     cloudTone: { lit: uCloudLit.value, mid: uCloudMid.value, shade: uCloudShade.value },
-=======
     get night() {
       return THREE.MathUtils.clamp(look.night, 0, 1);
     },
->>>>>>> 13449d1
     setSunTurn(deg: number) {
       sunTurn = deg;
     },
