@@ -841,10 +841,12 @@ function makeFluff(U: Uniforms, rng: Rng) {
 }
 
 // ---------- 萤火虫（傍晚）/ 花粉光点（白天）：无状态，叠加混合 ----------
-// 同一批实例：傍晚是会呼吸明灭的暖黄绿色光点（HDR，有 bloom 时会晕开）；白天其中七成是很淡的金色花粉，逆光时才看得清
+// 同一批实例：傍晚是会呼吸明灭的暖黄绿色光点（HDR，有 bloom 时会晕开）；白天其中七成是很淡的金色花粉，逆光时才看得清。
+// 第二版（v2-sky，main 看了漫游的近景以后要的）：夜里的萤火虫小到原来的三分之一、少一半、暗一些，明灭更慢更柔（不再快闪），
+// 多数贴着草飞、少数飘高一点，颜色是暖白、浅金（不是饱和的黄）
 
 const FIRE_BOX = 24;
-const FIRE_MAX: Record<LifeQuality, number> = { high: 120, low: 56 };
+const FIRE_MAX: Record<LifeQuality, number> = { high: 60, low: 28 }; // v2-sky：原来 120 / 56
 
 function makeFireflies(U: Uniforms, rng: Rng) {
   const n = FIRE_MAX.high;
@@ -855,25 +857,26 @@ function makeFireflies(U: Uniforms, rng: Rng) {
   const Q = attribute<'vec4'>('aRand2', 'vec4');
   const { dir, edge } = surfaceField(U, R.xyz, FIRE_BOX);
   const t = U.time;
-  const alt = R.w.mul(1.5).add(0.3).add(sin(t.mul(Q.x.mul(0.5).add(0.4)).add(Q.y.mul(20))).mul(0.25));
+  // 离地多高：多数贴着草（0.12–0.5 米），少数飘到 1.5 米左右（v2-sky：原来均匀地在 0.3–1.8 米）
+  const alt = R.w.mul(R.w).mul(R.w).mul(1.4).add(0.12).add(sin(t.mul(Q.x.mul(0.35).add(0.25)).add(Q.y.mul(20))).mul(0.12));
   const wob = vec3(sin(t.mul(Q.z.mul(0.4).add(0.25)).add(R.x.mul(50))), sin(t.mul(Q.w.mul(0.4).add(0.2)).add(R.y.mul(50))), sin(t.mul(0.33).add(R.z.mul(50)))).mul(0.7);
   let centerPos = U.center.add(dir.mul(U.groundR.add(alt))).add(wob);
   centerPos = centerPos.add(pushAway(U, centerPos, 0.8));
   const dist = length(centerPos.sub(U.cam));
-  // 呼吸式的明灭：慢的正弦起伏，亮的时候再带一点快闪
-  const breathe = smoothstep(0.25, 1, sin(t.mul(Q.x.mul(1.2).add(0.8)).add(Q.w.mul(30))).mul(0.5).add(0.5));
-  const flicker = sin(t.mul(17).add(Q.z.mul(40))).mul(0.12).add(0.88);
-  const level = breathe.mul(flicker).mul(0.92).add(0.08);
+  // 呼吸式的明灭：慢的正弦起伏
+  // v2-sky：明灭更慢（原来 0.8–2 弧度每秒）、更柔，去掉快闪
+  const breathe = smoothstep(0.1, 1, sin(t.mul(Q.x.mul(0.5).add(0.35)).add(Q.w.mul(30))).mul(0.5).add(0.5));
+  const level = breathe.mul(0.85).add(0.15);
   // 贴着镜头的也淡掉（集成时加的）：叠加混合的光点离镜头不到 1 米时会糊成一大团光斑
   const near = edge.mul(float(1).sub(smoothstep(14, 20, dist))).mul(smoothstep(0.8, 2.2, dist));
   const pollen = select(Q.w.lessThan(0.7), float(1), float(0)).mul(U.pollenAmt);
   const fire = U.fireAmt;
-  const size = mix(float(0.07), float(0.2).mul(Q.y.mul(0.4).add(0.8)), fire).mul(select(fire.add(pollen).greaterThan(0.001), float(1), float(0)));
+  const size = mix(float(0.07), float(0.07).mul(Q.y.mul(0.4).add(0.8)), fire).mul(select(fire.add(pollen).greaterThan(0.001), float(1), float(0))); // v2-sky：萤火虫原来 0.2 米
   const m = transparentMaterial(THREE.AdditiveBlending);
   m.positionNode = centerPos.add(U.camRight.mul(positionGeometry.x.mul(size))).add(U.camUp.mul(positionGeometry.y.mul(size)));
   const r2 = dot(positionGeometry.xy, positionGeometry.xy);
   const glow = exp(r2.mul(-26)).add(exp(r2.mul(-5)).mul(0.22));
-  const fireCol = vec3(1, 0.9, 0.42).mul(3.2).mul(level).mul(fire);
+  const fireCol = vec3(1, 0.93, 0.76).mul(1.9).mul(level).mul(fire); // v2-sky：暖白、浅金，暗一些（原来 (1, 0.9, 0.42) × 3.2）
   const pollenCol = U.sunCol.mul(backlight(U, positionWorld).mul(2.2).add(0.25)).mul(vec3(1, 0.9, 0.7)).mul(pollen).mul(float(1).sub(fire));
   m.colorNode = fireCol.add(pollenCol);
   m.opacityNode = glow.mul(varying(near));

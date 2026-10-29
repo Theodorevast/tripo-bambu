@@ -1,6 +1,7 @@
 // 天空、光照、后期（v2-sky）的样张：1440×900（像素比 1）和 390×844（像素比 2）各一组：
 //   home-front / home-side（首页正面、侧面转 90°）、home-low（首页压到最低仰角，看得到地平线和夜空）、
-//   enter-mid（星系进星球的穿云转场正中间那一帧）、planet-<预设>（星球视图，每个天空预设一张）、hop-mid（跳星球时扫过的那道光）。
+//   enter-mid（星系进星球的穿云转场正中间那一帧）、enter-glint（金线扫过云层）、planet-<预设>（星球视图，每个天空预设一张）、
+//   planet-<预设>-low（星球视图压到最低仰角：看得到天）、hop-mid（跳星球时扫过的那道光）。
 // node scripts/shot-sky.mjs [输出目录] [--sky blue,moon] [--only 1440,390]。WEBGL2=1：走 WebGL2；HEADED=1：有界面的 Chrome
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -57,7 +58,7 @@ try {
     const page = await ctx.newPage();
     errors.push(watchErrors(page));
     if (tag === 'webgl2') await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
-    await page.goto(`${base}/?nolocal`);
+    await page.goto(`${base}/?nolocal${process.env.QUERY ?? ""}`); // QUERY=&lookdebug=glow 之类：看后期的中间结果
     await page.waitForFunction(() => window.__ready === true && window.__app.routeIdle() && !document.querySelector('#boot'), null, { timeout: 90000 });
     await page.waitForFunction(() => !(window.__home?.state().intro ?? false), null, { timeout: 15000 }).catch(() => {});
     await page.evaluate(async () => {
@@ -81,8 +82,8 @@ try {
     await page.waitForFunction(() => !!window.__trans.state().transition, null, { timeout: 5000 });
     await stepFor(page, 1.55 * 0.47);
     await page.screenshot({ path: join(out, `enter-mid-${w}-${tag}.png`) });
-    await stepFor(page, 1.55 * 0.08);
-    await page.screenshot({ path: join(out, `enter-full-${w}-${tag}.png`) });
+    await stepFor(page, 1.55 * 0.1);
+    await page.screenshot({ path: join(out, `enter-glint-${w}-${tag}.png`) }); // 金线扫过云层的那一刻（光在 0.53，130 ms）
     await page.evaluate(() => window.__trans.timeScale(1));
     await planetReady(page, you.id);
     await page.waitForTimeout(2500);
@@ -91,13 +92,22 @@ try {
       await page.waitForTimeout(2600);
       await page.screenshot({ path: join(out, `planet-${sky}-${w}-${tag}.png`) });
     }
+    // 星球页把镜头压到最低（抬头看得到天：星星、月亮、地平线的余晖），每个预设一张
+    const planetMin = await page.evaluate(async () => (await import('/src/scenes/shots.ts')).SHOTS.planet.minElevation);
+    const az = await page.evaluate(() => { const w = window.__world; const o = w.rig.camera.position.clone().sub(w.rig.controls.target); return (Math.atan2(o.x, o.z) * 180) / Math.PI; });
+    await view(page, az, planetMin);
+    for (const sky of skies) {
+      await page.evaluate((s) => window.__world.setSkyPreset(s), sky);
+      await page.waitForTimeout(2600);
+      await page.screenshot({ path: join(out, `planet-${sky}-low-${w}-${tag}.png`) });
+    }
     await page.evaluate((s) => window.__world.setSkyPreset(s), skies[0]);
     await page.waitForTimeout(2300);
     // 跳星球：走到那道光扫过的时候（跳星球 1.4 秒，光在 0.4）
     await page.evaluate(() => window.__trans.timeScale(0));
     await page.evaluate((id) => { location.hash = `#/t/${id}`; }, other.id);
     await page.waitForFunction(() => !!window.__trans.state().transition, null, { timeout: 5000 });
-    await stepFor(page, 1.4 * 0.42);
+    await stepFor(page, 1.4 * 0.443);
     await page.screenshot({ path: join(out, `hop-mid-${w}-${tag}.png`) });
     await page.evaluate(() => window.__trans.timeScale(1));
     await planetReady(page, other.id);

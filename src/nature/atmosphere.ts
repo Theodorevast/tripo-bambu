@@ -35,7 +35,7 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
-import { BLUE_HOUR, homeNightCloud, MOONLIT, nightLayer, NIGHT_SKY, NIGHT_U, seaMoonlight, seaNightAlpha, skyLuma, underSky, updateNightSky } from './nightSky';
+import { BLUE_HOUR, homeNightCloud, MOONLIT, nightBoost, nightEnv, nightLayer, NIGHT_SKY, NIGHT_U, seaMoonlight, seaNightAlpha, skyLuma, underSky, updateNightSky } from './nightSky';
 import { createSkyDust } from './skyDust';
 
 // 天空、云海和光照（独立模块）。参考《小王子：星辰之旅》：淡蓝到奶白的天空、星球下方和四周厚厚的云海、低角度的暖色太阳。
@@ -958,9 +958,10 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const rel = positionWorld.sub(cameraPosition);
     const d = length(rel);
     const dir = rel.div(max(d, 1e-4));
-    const distK = float(1).sub(exp(d.mul(uFogDensity).negate()));
+    // 夜里近处通透（v2-sky）：距离雾从 NIGHT_U.fogStart 米以外才开始
+    const distK = float(1).sub(exp(max(d.sub(NIGHT_U.fogStart), 0).mul(uFogDensity).negate()));
     const above = dot(positionWorld.sub(uCenter), uUp).sub(uSeaTopNow);
-    const heightK = smoothstep(uRadius.mul(0.35), uRadius.mul(-0.05), above).mul(0.7).mul(uSeaAmount);
+    const heightK = smoothstep(uRadius.mul(0.35), uRadius.mul(-0.05), above).mul(0.7).mul(uSeaAmount).mul(NIGHT_U.heightFog);
     // 高度雾的颜色按云的配色走：用星球表面的球面法线和太阳算受光量，雾里的星球底部和旁边的云一样有亮面和背光面。
     // 受光量的下限抬高（集成时调的）：原来背光那一侧是偏灰的阴影色，星球底部像罩了一层灰玻璃，和旁边亮白的云海接不上
     const nrm = normalize(positionWorld.sub(uCenter));
@@ -995,7 +996,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const dir = ctx.getUV ? normalize(ctx.getUV()) : vec3(0, 1, 0);
     const rough = ctx.getTextureLevel ? ctx.getTextureLevel() : float(1);
     // 夜里加一层冷色补光（v2-sky）：天色很暗时作品的暗面也看得清
-    return mix(skyColor(dir, true), envSoft(dir), smoothstep(0.08, 0.7, rough)).add(NIGHT_U.ambient).mul(uEnvIntensity);
+    return mix(skyColor(dir, true), envSoft(dir), smoothstep(0.08, 0.7, rough)).add(NIGHT_U.ambient).add(nightEnv(dir)).mul(uEnvIntensity);
   })();
   const sceneWithEnv = scene as THREE.Scene & { environmentNode?: unknown };
   const prevEnvNode = sceneWithEnv.environmentNode ?? null;
@@ -1170,7 +1171,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     const pixelAngle = (2 * Math.tan(THREE.MathUtils.degToRad(fov) / 2)) / Math.max(1, size.y);
     uLodK.value = pixelAngle / (1 / uScale1.value / NOISE_SIZE) * 1.6 * (1 + CALM.blur * calm);
     // 夜空（v2-sky）：月亮、银河的方向，星星的大小按像素张角
-    updateNightSky({ camera, frameQ: frame.q, up: frame.up, look, calm, pixelAngle });
+    updateNightSky({ camera, frameQ: frame.q, up: frame.up, look, calm, pixelAngle, sun: sunDir, radius: R });
     dust.update({ dt, center, radius: R, seaTop: top, e1: uE1.value, up: frame.up, e2: uE2.value, home: calm, pixelAngle, shown });
 
     // 远处积云
@@ -1181,7 +1182,11 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     if (sortPos.distanceToSquared(camPos) > (R * 0.5) ** 2 || sortUp.dot(frame.up) < 0.9995) sortPuffs();
 
     // 曝光（色调映射在创建时设成 AgX；曝光随预设过渡，下雨时低一点）
-    renderer.toneMappingExposure = look.exposure * params.exposure;
+    // 夜里的星球页（v2-sky）：主光、天光、曝光再提一些（星球和作品是主角，云和天照旧暗）；首页不变
+    const boost = nightBoost(look.night, calm);
+    sun.intensity = look.sunIntensity * boost.key;
+    uEnvIntensity.value = look.envIntensity * boost.env;
+    renderer.toneMappingExposure = look.exposure * params.exposure * boost.exposure;
   };
 
   const api: Atmosphere = {

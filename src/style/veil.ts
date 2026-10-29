@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { atan, cos, dot, exp, float, floor, Fn, fract, If, length, max, min, mix, normalize, positionGeometry, screenSize, screenUV, select, sin, smoothstep, sqrt, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { veilGlint, veilRim, veilSilver } from './veilNight';
 
 // 转场的云层：画面最上面盖一层全屏的云，从画面边缘涌进来、把画面全遮住、再散开。
 // 画法跟着新画风走（和云海同一套颜色，绘本式的大块积云，不描线）：
@@ -43,6 +44,9 @@ const BACK_PUFFS = 12;
 // 光从右上方、朝着镜头这边照过来（单位向量，在 JS 里先算好：写成 normalize() 的话，它第一次出现在 iris / band 某个分支里时
 // 只在那个分支里赋值，另一个分支读到的是 0，整层云都变成暗面色）
 const LIGHT = vec3(0.5014, 0.6217, 0.6017);
+const LIGHT_XY = vec2(0.6277, 0.7784); // 光在画面里的方向（LIGHT 的 xy 归一化）：月光银边朝这边
+// 月光银边只给近的那层的主云团算（建着色器时的开关：远的那层、小云团不算，转场的云层本来就重，省一点）
+const RIM = { on: false };
 const FLASH_NORMAL = vec2(0.866, -0.5); // 光带斜着（和 logo 里 T 的竖笔差不多的斜度），沿这个方向扫过去
 const NONE = -1000; // 「这个云团不在这里」的高度
 // 主云团朝外鼓出的小云团（菜花边）：相对朝外方向的转角、圆心离主云团圆心多远、半径、往镜头抬多少（都按主云团半径）
@@ -81,21 +85,24 @@ interface Acc {
   m: F;
   s: F;
   sw: F;
+  sr: F; // 同样权重下的月光银边之和（v2-sky）
   d: F;
 }
 
 function acc(): Acc {
-  return { m: float(NONE).toVar(), s: float(0).toVar(), sw: float(0).toVar(), d: float(1000).toVar() };
+  return { m: float(NONE).toVar(), s: float(0).toVar(), sw: float(0).toVar(), sr: float(0).toVar(), d: float(1000).toVar() };
 }
 
 // 加一个面：高度 h（NONE 表示不在这里）、受光量 w。k 是混合的软硬（高度差几个 k 以外就只看高的那个）；
 // weight：这个面自己的分量（云团边上那一圈小，往中间变大：一个云团压到另一个上面时，交界是渐变的，不是一圈圆的接缝）
-function blend(a: Acc, h: F, w: F, k: F, weight: F): void {
+function blend(a: Acc, h: F, w: F, k: F, weight: F, rim: F | null = null): void {
   const m2 = max(a.m, h).toVar();
   const keep = exp(a.m.sub(m2).div(k));
   const e = select(h.greaterThan(NONE * 0.5), exp(h.sub(m2).div(k)).mul(weight), float(0)).toVar();
   a.s.assign(a.s.mul(keep).add(e));
   a.sw.assign(a.sw.mul(keep).add(e.mul(w)));
+  if (rim) a.sr.assign(a.sr.mul(keep).add(e.mul(rim)));
+  else a.sr.assign(a.sr.mul(keep));
   a.m.assign(m2);
 }
 
@@ -115,8 +122,10 @@ function puff(a: Acc, p: V2, c: V2, r: F, z: F, feather: F, k: F, tilt: V2, rot:
   const nl = qn.add(tilt);
   const nxy = rot ? vec2(nl.x.mul(rot.x).sub(nl.y.mul(rot.y)), nl.x.mul(rot.y).add(nl.y.mul(rot.x))) : nl;
   const h = select(dist.lessThan(feather), z.add(r.mul(nz)), float(NONE));
+  // 夜里（v2-sky）朝光那一侧的边缘多一圈月光的银色（单独累计，cloudLayer 里染成银色）
+  const rim = RIM.on ? veilRim(nxy, nz, LIGHT_XY) : null;
   // 分量：往边上变小，到柔边的外沿正好是 0（不然这个云团在柔边外沿一下子消失，颜色跳一下，看起来是一圈亮边）
-  blend(a, h, lightOf(vec3(nxy, nz)), k, smoothstep(0, 0.45, nz).mul(0.92).add(0.08).mul(smoothstep(feather, feather.negate(), dist)));
+  blend(a, h, lightOf(vec3(nxy, nz)), k, smoothstep(0, 0.45, nz).mul(0.92).add(0.08).mul(smoothstep(feather, feather.negate(), dist)), rim);
 }
 
 // 云墙（云团后面成片的云）：高度 0、法线朝镜头（带笔触起伏）。edge：到墙边的有向距离（< 0 在墙里）；
@@ -153,12 +162,15 @@ function irisLayer(a: Acc, p: V2, prm: V4, seed: number, count: number, feather:
           const z = spacing.mul(hash(idx, s + 17).mul(0.2).add(0.25)).toVar();
           puff(a, p, c, rad, z, feather, k, tilt, null);
           // 朝洞里（画面上看得见的那一侧）鼓出的小包
+          const rimSaved = RIM.on;
+          RIM.on = false; // 小云团不算银边
           for (const bud of BUDS) {
             const t = bud.turn + (ring === 0 ? 0 : 0);
             const ab = ac.add(Math.PI + t);
             const cb = c.add(vec2(cos(ab), sin(ab)).mul(rad.mul(bud.at)));
             puff(a, p, cb, rad.mul(bud.r), z.add(rad.mul(bud.z)), feather, k, tilt, null);
           }
+          RIM.on = rimSaved;
         } else {
           const rad = spacing.mul(hash(idx, s + 7).mul(0.45).add(0.85));
           const c = out.mul(hole.add(spacing.mul(hash(idx, s + 13).mul(0.4).add(1))));
@@ -194,10 +206,13 @@ function bandLayer(a: Acc, p: V2, prm: V4, seed: number, feather: F, tilt: V2, b
       puff(a, q, lead, rLead, zLead, feather, k, tilt, dir);
       puff(a, q, trail, rTrail, size.mul(hash(kk, seed + 15).mul(0.2).add(0.2)), feather, k, tilt, dir);
       // 前沿朝外（+x）鼓出的小包（两侧的两个）
+      const rimSaved = RIM.on;
+      RIM.on = false; // 小云团不算银边
       for (const bud of [BUDS[0], BUDS[2]]) {
         const cb = lead.add(vec2(Math.cos(bud.turn), Math.sin(bud.turn)).mul(rLead.mul(bud.at)));
         puff(a, q, cb, rLead.mul(bud.r), zLead.add(rLead.mul(bud.z)), feather, k, tilt, dir);
       }
+      RIM.on = rimSaved;
     }
   });
 }
@@ -247,6 +262,7 @@ function cloudLayer(p: V2, prmIn: V4, seed: number, count: number, px: F, tint: 
   // 大块的斑驳明暗（很淡）
   const mottle = grain.mottle;
   const w = a.sw.div(max(a.s, 1e-6)).add(mottle).clamp(0, 1).toVar();
+  const silver = a.sr.div(max(a.s, 1e-6)); // 夜里的月光银边（veilNight.ts）
   const deep = mix(VEIL_U.deep, VEIL_U.sky, tint * 0.9);
   const shade = mix(VEIL_U.shade, VEIL_U.sky, tint * 0.75);
   const mid = mix(VEIL_U.mid, VEIL_U.sky, tint * 0.55);
@@ -254,7 +270,7 @@ function cloudLayer(p: V2, prmIn: V4, seed: number, count: number, px: F, tint: 
   const c0 = mix(deep, shade, smoothstep(0.04, 0.36, w));
   const c1 = mix(c0, mid, smoothstep(0.3, 0.58, w));
   const c2 = mix(c1, lit, smoothstep(0.52, 0.86, w));
-  const rgb = c2;
+  const rgb = veilSilver(c2, silver);
   const alpha = smoothstep(feather, feather.negate(), a.d.add(wobble));
   return { rgb, alpha, w };
 }
@@ -278,10 +294,11 @@ const veilColor = Fn(() => {
     const maybe = VEIL_U.band.greaterThan(0.5).or(r.greaterThan(min(reach(VEIL_U.front, FRONT_PUFFS), reach(VEIL_U.back, BACK_PUFFS))));
     If(maybe, () => {
       const grain = grainAt(q);
+      RIM.on = true;
       const f = cloudLayer(q, VEIL_U.front, 1.7, FRONT_PUFFS, px, 0, 5.3, grain);
+      RIM.on = false;
       const fAlpha = f.alpha.toVar();
       const fRgb = f.rgb.toVar();
-      const fW = f.w.toVar();
       // 远的那层：近的那层已经完全盖住的地方（全遮住时画面四周那一圈）不用算
       const b = { rgb: vec3(0).toVar(), alpha: float(0).toVar(), w: float(0).toVar() };
       If(fAlpha.lessThan(0.999), () => {
@@ -293,13 +310,12 @@ const veilColor = Fn(() => {
       // 近的压在远的上面（over）
       alpha.assign(fAlpha.add(b.alpha.mul(float(1).sub(fAlpha))));
       rgb.assign(fRgb.mul(fAlpha).add(b.rgb.mul(b.alpha).mul(float(1).sub(fAlpha))).div(max(alpha, 1e-4)));
-      const lit = mix(b.w, fW, fAlpha);
-      // 翠宝黄的光：一宽一窄两道，斜着扫过云层，边是软的；照亮云团鼓起来的受光面（暗面只亮一点），像一道阳光掠过云顶
-      const s = dot(p, FLASH_NORMAL).sub(VEIL_U.flash.x);
-      const wide = float(1).sub(smoothstep(0.02, 0.075, s.abs()));
-      const thin = float(1).sub(smoothstep(0.004, 0.02, s.add(0.1).abs())).mul(0.75);
-      const glow = max(wide, thin).mul(VEIL_U.flash.y).mul(alpha).mul(lit.mul(0.75).add(0.25)).toVar();
-      rgb.assign(mix(rgb, VEIL_U.gold, glow.mul(0.6)).add(VEIL_U.gold.mul(glow.mul(0.15))));
+      // 扫过的光（v2-sky）：第一版的一宽一窄两道翠宝黄光带改成一条细的香槟金线 + 跟在后面的一串星尘（veilNight.ts）。
+      // 时刻、时长、扫的方向照旧（VEIL_U.flash）
+      const along = dot(p, vec2(0.5, 0.866));
+      If(VEIL_U.flash.y.greaterThan(0.001), () => {
+        rgb.assign(veilGlint(rgb, dot(p, FLASH_NORMAL), VEIL_U.flash.x, along, VEIL_U.flash.y, alpha, px));
+      });
     });
     // 减弱动效：整屏淡到云的亮面和中间调之间的颜色
     rgb.assign(mix(rgb, mix(VEIL_U.mid, VEIL_U.lit, 0.7), VEIL_U.fade));
