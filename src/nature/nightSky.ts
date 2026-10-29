@@ -26,6 +26,7 @@ export const NIGHT_SKY = {
   homeStars: 2.8, // 首页的星星再亮多少倍（云缝里透出来，隔着一层薄云）
   // —— 银河 ——
   milkyWay: 0.5, // 浓淡（0 没有）
+  homeMilkyWay: 0.65, // 首页再淡多少（0..1：隔着云缝看银河只剩一块块，淡一点）
   milkyWidth: 0.16, // 宽窄（方向余弦）
   milkyTilt: 62, // 星球页：光带所在大圆的法线离竖直方向多少度
   milkyTurn: 35, // 星球页：法线的方位角（度）
@@ -353,7 +354,9 @@ function starLayer(d: V3, L: StarLayer, boost: F, camRight: V3, camUp: V3): V3 {
 // 银河：大圆 bandN 附近的一条光带。宽窄、明暗按噪声起伏，中间一道暗的尘带；返回颜色和浓度（浓的地方细星多一些）
 function milkyWay(d: V3, noise: Noise): { color: V3; mask: F } {
   const y = dot(d, NIGHT_U.bandN);
-  const uv: V2 = vec2(dot(d, NIGHT_U.bandU), dot(d, NIGHT_U.bandV));
+  // 噪声坐标：沿着带子的两个分量再加上横穿带子的那个分量（错切进去）。原来只用沿带子的两个分量，横穿带子时噪声不变，
+  // 明暗被拉成一条条垂直于带子的长条：首页云缝里看起来像几道暖色的竖光带（像第一版日落的光束，main 实测）
+  const uv: V2 = vec2(dot(d, NIGHT_U.bandU).add(y.mul(0.9)), dot(d, NIGHT_U.bandV).sub(y.mul(0.7)));
   const n1 = noise.sample(uv.mul(0.9).add(vec2(0.13, 0.71))).b;
   const n2 = noise.sample(uv.mul(2.7).add(vec2(0.57, 0.29))).a;
   const w = NIGHT_U.bandWidth.mul(n1.mul(0.8).add(0.55));
@@ -362,7 +365,7 @@ function milkyWay(d: V3, noise: Noise): { color: V3; mask: F } {
   const inner = exp(q.mul(q).mul(5).negate());
   const lanes = float(1).sub(smoothstep(0.48, 0.76, n2).mul(inner).mul(0.65));
   const mask = core.mul(n1.mul(0.7).add(0.3)).mul(lanes);
-  const color = mix(NIGHT_U.bandPurple, NIGHT_U.bandGold, smoothstep(0.35, 0.85, n2).mul(inner.mul(0.75).add(0.25)));
+  const color = mix(NIGHT_U.bandPurple, NIGHT_U.bandGold, smoothstep(0.4, 0.9, n2).mul(inner.mul(0.5).add(0.1)));
   return { color: color.mul(mask).mul(NIGHT_U.bandK), mask };
 }
 
@@ -542,7 +545,7 @@ export function updateNightSky(f: NightFrameInput): void {
   U.spikes.value = Math.max(0, s.spikes);
   U.pixel.value = f.pixelAngle;
   U.bandWidth.value = Math.max(0.01, s.milkyWidth);
-  U.bandK.value = Math.max(0, s.milkyWay);
+  U.bandK.value = Math.max(0, s.milkyWay) * (1 - THREE.MathUtils.clamp(s.homeMilkyWay, 0, 1) * calm); // 首页隔着薄云只剩斑驳的一块块，压淡
   U.moonRadius.value = 0.019 * Math.max(0.1, s.moonSize);
   U.moonK.value = Math.max(0, f.look.moon);
   U.moonGlowK.value = Math.max(0, s.moonGlow);
