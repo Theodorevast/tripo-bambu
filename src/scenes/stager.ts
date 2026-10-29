@@ -1,5 +1,4 @@
 import * as THREE from 'three/webgpu';
-import { vec4 } from 'three/tsl';
 import { modelTextures } from '../assets/models';
 import { compileShadowExact, compileSides } from './shadowWarm';
 
@@ -80,44 +79,7 @@ export async function compileUnculled(renderer: THREE.WebGPURenderer, object: TH
   }
 }
 
-// 太阳阴影那一遍用的材质：和 three 自己的阴影材质（ShadowBaseNode 里的 _getShadowMaterial）一模一样，
-// 着色器代码和渲染状态相同，编出来的管线就是阴影那一遍要用的那条
-const shadowPassMaterial = (() => {
-  const m = new THREE.NodeMaterial();
-  m.colorNode = vec4(0, 0, 0, 1);
-  (m as THREE.NodeMaterial & { isShadowPassMaterial: boolean }).isShadowPassMaterial = true;
-  m.name = 'ShadowMaterial';
-  m.blending = THREE.NoBlending;
-  m.fog = false;
-  return m;
-})();
-
-// 在后台编译 object 投影那一遍的管线（compileAsync 只编主画面那一遍；阴影贴图第一次画到它时才同步建管线，GPU 进程会停 0.1–0.6 秒）。
-// 做法：临时把渲染目标换成阴影贴图、场景的替换材质换成阴影材质，用阴影相机调 compileAsync。
-// compileAsync 在第一个 await 之前就同步读完渲染目标、建好渲染对象，所以调用之后马上换回来就行，不影响这期间画的帧。
-// light.shadow.map 要在阴影画过一次之后才有（World.warmUp 先画一帧）；还没有就跳过
-export function compileShadow(renderer: THREE.WebGPURenderer, object: THREE.Object3D, light: THREE.DirectionalLight | null, scene: THREE.Scene): Promise<void> {
-  const map = light?.castShadow ? (light.shadow.map as THREE.RenderTarget | null) : null;
-  if (!light || !map) return Promise.resolve();
-  let casts = false;
-  object.traverse((o) => { if (o.castShadow) casts = true; });
-  if (!casts) return Promise.resolve();
-  const target = renderer.getRenderTarget();
-  const mrt = renderer.getMRT();
-  const override = scene.overrideMaterial;
-  renderer.setRenderTarget(map);
-  renderer.setMRT(null);
-  scene.overrideMaterial = shadowPassMaterial;
-  let done: Promise<void>;
-  try {
-    done = compileUnculled(renderer, object, light.shadow.camera, scene);
-  } finally {
-    scene.overrideMaterial = override;
-    renderer.setMRT(mrt);
-    renderer.setRenderTarget(target);
-  }
-  return done;
-}
+// 投影那一遍的预编译在 shadowWarm.ts（compileShadowExact）：按 three r186 真正画阴影时的状态编
 
 function wear(swaps: Swap[]): void {
   for (const s of swaps) s.mesh.material = Array.isArray(s.original) ? s.fades : s.fades[0];
@@ -207,7 +169,7 @@ export class Stager implements Stage {
     }
     // 主画面那一遍：模型自己「半透明 + 双面」的材质（头发片那种）按背面、正面各编一遍（shadowWarm.ts 的 compileSides）；淡入用的克隆一遍画完，不拆
     await compileSides(this.renderer, object, this.camera, this.scene);
-    // 投影那一遍按 three r186 真正画的时候的状态预编译（shadowWarm.ts）；compileShadow 建出来的是排队时的状态，管线对不上，第一次画还要现建
+    // 投影那一遍按 three r186 真正画的时候的状态预编译（shadowWarm.ts）；按排队时的状态编（原来的 compileShadow，已删）管线对不上，第一次画还要现建
     await compileShadowExact(this.renderer, object, this.shadowLight?.() ?? null, this.scene);
     return alive();
   }
