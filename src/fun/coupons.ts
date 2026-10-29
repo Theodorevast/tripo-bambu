@@ -14,7 +14,7 @@ import { drawAtlas, fontsReady } from './couponsArt';
 import { armOnFirstGesture, audioReady, play, prepareAudio } from './couponsAudio';
 import { CouponCard } from './couponsCard';
 import { CouponField, type CouponAnchor, type CouponGround, type PickupTarget } from './couponsField';
-import { updateCouponLight } from './couponsFx';
+import { TICKET_LAYER, updateCouponLight } from './couponsFx';
 import { COUPONS, couponCount, landingSpot, restPose, shakePose, spitPose, spitTimes, stepHover, type TribooPose } from './couponsMath';
 import { chooseSpot, loadStandModel, logoGlow, TribooStand } from './couponsStand';
 
@@ -118,6 +118,8 @@ export class Coupons {
   private readonly pickTarget: PickupTarget = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), size: 0.5 };
   private readonly ground: CouponGround;
   private entry: PlanetEntry | null = null;
+  // 券画在不调色的那一层（F2，scenes/post.ts）：调色会把翠宝黄压成淡奶油色。后处理关着（?look=0）时券回到主场景、照常过调色
+  private readonly layer = new THREE.Scene();
 
   constructor(app: App, screen: PlanetScreen, walk: WalkMode, editor: Editor) {
     this.app = app;
@@ -127,8 +129,10 @@ export class Coupons {
     this.editor = editor;
     this.atlasCanvas = document.createElement('canvas');
     drawAtlas(this.atlasCanvas);
-    this.field = new CouponField(this.atlasCanvas, this.rand);
+    this.field = new CouponField(this.atlasCanvas, this.rand, this.world.post.sceneDepth);
     this.field.onArrive = () => this.arrive();
+    this.layer.name = 'coupons-ungraded';
+    this.world.post.setUngraded({ scene: this.layer, active: () => this.field.tickets.mesh.visible && this.field.tickets.mesh.parent === this.layer });
     this.card = new CouponCard(app.root);
     this.card.onClose = () => { this.picking = null; };
     const self = this;
@@ -170,11 +174,16 @@ export class Coupons {
     this.world.renderer.initTexture(this.field.tickets.atlas);
     this.field.showForCompile(true);
     try {
+      // 主场景里的（券脚下的暖光、彩屑；券本身在后处理关着时也在这里）
       await this.world.stage.precompile(this.field.group);
+      // 不调色那一层里的券（F2）：按那一层的缓冲再编一遍
+      this.layer.add(this.field.tickets.mesh);
+      await this.world.post.compileUngraded(this.field.tickets.mesh, this.layer);
     } finally {
       this.field.showForCompile(false);
     }
     this.world.scene.add(this.field.group);
+    this.placeTickets();
     this.fxReady = true;
     // 站桩翠宝：和漫游的角色同一个模型（克隆），投影、编译好了才上场
     const model = await loadStandModel(this.screen.view.library);
@@ -182,6 +191,15 @@ export class Coupons {
     this.stand.setModel(model);
     this.standModelReady = true;
     this.ready = true;
+  }
+
+  // 券画在哪：后处理开着时在不调色的那一层（颜色原样），关着（?look=0）时在主场景里照常过调色
+  private placeTickets(): void {
+    const ungraded = this.world.post.enabled;
+    const want = ungraded ? this.layer : this.field.group;
+    const mesh = this.field.tickets.mesh;
+    if (mesh.parent !== want) want.add(mesh);
+    TICKET_LAYER.on.value = ungraded ? 1 : 0;
   }
 
   private measure(): void {
@@ -568,7 +586,10 @@ export class Coupons {
     }
     // 券
     updateCouponLight(world.light.sunDir, world.light.evening, WEATHER.rain, this.clock);
-    if (this.fxReady) this.field.update(dt, camera, entry ? this.ground : null, this.hero(), this.target, this.pickTarget);
+    if (this.fxReady) {
+      this.placeTickets(); // ?tune 开关后处理时跟着换
+      this.field.update(dt, camera, entry ? this.ground : null, this.hero(), this.target, this.pickTarget);
+    }
   }
 
   private readonly restTmp: TribooPose = restPose();

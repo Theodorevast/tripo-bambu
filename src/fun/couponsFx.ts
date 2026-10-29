@@ -1,7 +1,12 @@
 import * as THREE from 'three/webgpu';
 import {
+  Discard,
+  Fn,
   abs,
   attribute,
+  cameraFar,
+  cameraNear,
+  cameraViewMatrix,
   cos,
   cross,
   dot,
@@ -10,10 +15,14 @@ import {
   float,
   frontFacing,
   max,
+  mix,
   normalize,
+  perspectiveDepthToViewZ,
   positionGeometry,
   pow,
   renderGroup,
+  sRGBTransferOETF,
+  screenUV,
   select,
   sin,
   smoothstep,
@@ -24,6 +33,7 @@ import {
   varying,
   vec2,
   vec3,
+  vec4,
 } from 'three/tsl';
 import { mulberry32 } from '../planet/rng';
 import { ATLAS_ROWS, BACK_ROW } from './couponsArt';
@@ -61,6 +71,10 @@ export const COUPON_LIGHT = {
   time: uniform(0).setGroup(renderGroup),
 };
 
+// 券画在不调色的那一层（F2，scenes/post.ts 的 UngradedLayer）：1 = 在那一层（颜色是券面原样的显示颜色，自己按场景深度裁掉被挡住的部分），
+// 0 = 在主场景里照常过调色（?look=0 关掉后处理时）。coupons.ts 每帧按后处理开没开设
+export const TICKET_LAYER = { on: uniform(0).setGroup(renderGroup) };
+
 const SUN_DAY = new THREE.Color(1, 0.94, 0.84);
 const SUN_DUSK = new THREE.Color(1, 0.58, 0.32);
 const AMB_DAY = new THREE.Color(0.55, 0.62, 0.72);
@@ -86,7 +100,8 @@ export class TicketMesh {
   private readonly info = dynamic(CAPACITY); // 图集的行、悬停高亮、弯曲、发光闪烁的相位
   private dirty = false;
 
-  constructor(atlasCanvas: HTMLCanvasElement) {
+  // sceneDepth：场景缓冲的深度（画在不调色那一层时按它裁掉被挡住的部分）；没有时不裁
+  constructor(atlasCanvas: HTMLCanvasElement, sceneDepth: THREE.DepthTexture | null = null) {
     const plane = new THREE.PlaneGeometry(1, 0.5, 16, 1);
     const g = new THREE.InstancedBufferGeometry();
     g.setIndex(plane.getIndex());
@@ -113,7 +128,11 @@ export class TicketMesh {
     const local = vec3(x, positionGeometry.y, bend);
     const m = new THREE.MeshBasicNodeMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: true });
     m.name = 'coupon-ticket';
-    m.positionNode = P.xyz.add(rotate(Q, local).mul(P.w));
+    // 一张纸、一遍画完：不让 three 把「半透明 + 双面」拆成背面、正面两遍（两遍各要一条管线，一张纸也没有前后遮挡要分）
+    m.forceSinglePass = true;
+    const world = P.xyz.add(rotate(Q, local).mul(P.w));
+    m.positionNode = world;
+    const viewZ = varying(cameraViewMatrix.mul(vec4(world, 1)).z, 'vCouponViewZ');
     const normal = varying(rotate(Q, vec3(0, 0, 1)), 'vCouponNormal');
     // 正面按种类取一行；背面取背面那一行，横向镜像（从背后看，字是正的）
     const front = frontFacing;
@@ -127,7 +146,18 @@ export class TicketMesh {
     // 发光：落地后微微发光（慢慢一明一暗），悬停时更亮
     const pulse = sin(COUPON_LIGHT.time.mul(2.6).add(INFO.w)).mul(0.3).add(0.7);
     const glow = FX.y.mul(pulse).mul(0.32).add(INFO.y.mul(0.3));
-    m.colorNode = tex.rgb.mul(lit.add(glow));
+    // 不调色的那一层（F2）：券面原样的显示颜色（翠宝黄就是 #F2B705），背光的一面略暗、发光时略亮；被场景挡住的部分裁掉
+    const display = sRGBTransferOETF(tex.rgb) as unknown as THREE.Node<'vec3'>; // 类型声明里是 Node：按 vec3 用
+    const ungraded = display.mul(mix(float(0.86), float(1), ndl).add(glow.mul(0.15))).clamp(0, 1);
+    const depthCut = sceneDepth ? texture(sceneDepth, screenUV).r : null;
+    m.colorNode = Fn(() => {
+      if (depthCut) {
+        // 场景在这个像素上的面比券离镜头近（留 5 厘米 + 千分之一的距离余量）就裁掉
+        const sceneZ = perspectiveDepthToViewZ(depthCut, cameraNear, cameraFar);
+        Discard(TICKET_LAYER.on.greaterThan(0.5).and(sceneZ.greaterThan(viewZ.add(viewZ.negate().mul(0.001).add(0.05)))));
+      }
+      return select(TICKET_LAYER.on.greaterThan(0.5), ungraded, tex.rgb.mul(lit.add(glow)));
+    })();
     m.opacityNode = tex.a.mul(FX.x);
     // 锯齿边、缺口按图集的透明度裁掉（和淡出分开：阈值跟着不透明度走，淡出时边缘不会先被吃掉）
     m.alphaTestNode = FX.x.mul(0.5);
