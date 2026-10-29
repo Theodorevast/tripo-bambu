@@ -327,7 +327,7 @@ try {
 } finally {
   // 中途抛错也走到这里：把已有的结果和收集到的页面错误都打出来，再关掉浏览器和服务器
   const errors = errorLists.flatMap(([name, list]) => list.map((e) => `[${name}] ${e}`));
-  console.log(`base: ${base} · backend: ${backend} · 翠宝动图: ${art === 'gif' ? '有（本机品牌素材）' : art === 'dots' ? '没有，用圆点' : art}`);
+  console.log(`base: ${base} · backend: ${backend} · 翠宝动图: ${art === 'gif' ? '有（public/brand/ 的品牌素材）' : art === 'dots' ? '没有，用圆点' : art}`);
   if (numbers) console.log(numbers);
   console.log(results.join('\n'));
   if (fatal) console.log(`✗ 脚本中断：${fatal?.stack ?? fatal}`);

@@ -1,11 +1,11 @@
 import * as THREE from 'three/webgpu';
 import { clamp, dot, float, Fn, fwidth, length, max, min, mix, positionLocal, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
+import { tribooUrl } from '../assets/brand';
 import { ModelLibrary } from '../assets/models';
-import { localTribooUrl } from '../play/localAsset';
 
 // 开场探头用的翠宝（Tripo 的吉祥物）。两个来源：
-// - 品牌的 GLB：只在本机开发时从 .tmp/triboo/triboo.glb 读（play/localAsset.ts，和漫游的角色同一个文件），仓库和线上包里没有；
-// - 代码拼的替身：没有 GLB、或者加载失败时用。新画风的玩具 / 手办质感：亮面黑色圆球身体（清漆），胸前白色的 V 和翠宝黄的 T，
+// - 品牌的 GLB：public/brand/triboo.glb（assets/brand.ts，和漫游的角色、星球上站桩的同一个文件），开发和构建版都从这里读；
+// - 代码拼的替身：GLB 加载失败时用。新画风的玩具 / 手办质感：亮面黑色圆球身体（清漆），胸前白色的 V 和翠宝黄的 T，
 //   磨砂半透明的手臂，黄白球鞋，都是圆角。不用卡通版的平涂材质和色板
 
 export interface Mascot {
@@ -95,14 +95,11 @@ export function createStandIn(): Mascot {
   return { object: root, height: 0.42 + BODY_R * 2 };
 }
 
-// 有本机的 GLB 就用它（和作品同一套加载：meshopt 解码、各向异性；缩放、居中由 ModelLibrary 做），没有或加载失败就用替身，不报错
+// 用品牌的 GLB（和作品同一套加载：meshopt 解码、各向异性；缩放、居中由 ModelLibrary 做），加载失败就用替身，不报错
 export async function loadMascot(): Promise<Mascot> {
   try {
-    const url = await localTribooUrl();
-    if (url) {
-      const model = await new ModelLibrary().load({ id: 'peek-triboo', file: new URL(url, location.href).href });
-      if (!model.failed) return { object: model.object, height: model.height };
-    }
+    const model = await new ModelLibrary().load({ id: 'peek-triboo', file: tribooUrl() });
+    if (!model.failed) return { object: model.object, height: model.height };
   } catch (err) {
     console.warn('Triboo for the intro failed, using the stand-in', err);
   }

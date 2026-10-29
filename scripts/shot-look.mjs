@@ -1,5 +1,5 @@
 // look 角色的样张（调色、接触阴影、日落光束、镜头）：node scripts/shot-look.mjs [输出目录] [--prefix after-] [--query look=0] [--only a,b] [--webgl2]
-// 1440×900，WebGPU（--webgl2 走 WebGL2）。用本机的私有真实模型（.tmp/local-models）和翠宝（.tmp/triboo），没有就是占位。
+// 1440×900，WebGPU（--webgl2 走 WebGL2）。用本机的私有真实模型（.tmp/local-models，没有就是占位）和翠宝（public/brand/triboo.glb）。
 // 出：walk（漫游，白天，朝着城堡）、walk-backlit（漫游，逆光）、sunset（日落漫游，朝着太阳）、planet（星球视图）、
 //     galaxy（星系全景）、close（贴近作品，像素比 2：看贴图清不清楚）。
 // --query 加在地址上（例如 look=0 关掉后处理拍对照组）；--prefix 加在文件名前面

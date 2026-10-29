@@ -1,11 +1,10 @@
 import './cobrand.css';
+import { brandUrl } from '../assets/brand';
 import { el } from './dom';
 
 // 联名（tripo × MakerWorld，GBN 活动）：首页标题卡片上的联名标志和活动名、领券窗口顶上的小标志。
-// 品牌素材和翠宝一样只在本机用，不提交、不打包：
-// - 开发：从仓库根目录的 tripo/cobrand/ 读（.gitignore 里的 Tripo/）。import.meta.glob 按磁盘匹配，文件不在时结果是空的，不发请求
-// - 上线（品牌方同意以后）：把 tripo-logo.png、makerworld-logo.png 放进 public/brand/，构建时设 VITE_COBRAND=1（不设就不请求，没有 404）
-// - 都没有：显示文字「tripo × MakerWorld」（Nunito）
+// 标志图是品牌素材，放在 public/brand/（tripo-logo.png、makerworld-logo.png），开发和构建版都从这里读（assets/brand.ts）
+// 图到之前、或者下不来时：显示文字「tripo × MakerWorld」（Nunito）
 // tripo 用黑底方块的那张（tripo-logo.png）：去掉黑底的那张 V 是白色的，放在暖白纸面上看不见
 
 // 活动名：活动页 campaign.makerworld.com/gbn/ 的标题是「GBN | Great Benchy Nations」
@@ -13,32 +12,17 @@ export const EVENT_SHORT = 'GBN';
 export const EVENT_NAME = 'Great Benchy Nations';
 
 export interface BrandArt {
-  tripo: string | null; // tripo 的标志（黑底方块）
-  makerworld: string | null; // MakerWorld 的标志（黑字透明底）
+  tripo: string; // tripo 的标志（黑底方块）
+  makerworld: string; // MakerWorld 的标志（黑字透明底）
 }
 
-let art: Promise<BrandArt> | null = null;
-
-export function brandArt(): Promise<BrandArt> {
-  return (art ??= loadArt().catch(() => ({ tripo: null, makerworld: null })));
+export function brandArt(): BrandArt {
+  return { tripo: brandUrl('tripo-logo.png'), makerworld: brandUrl('makerworld-logo.png') };
 }
 
-async function loadArt(): Promise<BrandArt> {
-  if (import.meta.env.DEV) {
-    const files = import.meta.glob<string>('/tripo/cobrand/*.png', { query: '?url', import: 'default' });
-    const pick = (name: string) => {
-      const key = Object.keys(files).find((k) => k.toLowerCase().endsWith(`/${name}`));
-      return key ? files[key]() : Promise.resolve(null);
-    };
-    const [tripo, makerworld] = await Promise.all([pick('tripo-logo.png'), pick('makerworld-logo.png')]);
-    return { tripo, makerworld };
-  }
-  if (import.meta.env.VITE_COBRAND === '1') return { tripo: 'brand/tripo-logo.png', makerworld: 'brand/makerworld-logo.png' };
-  return { tripo: null, makerworld: null };
-}
-
-// 一张图先下好、解码好再换上（换的那一下不闪）；下不来返回 null
+// 一张图先下好、解码好再换上（换的那一下不闪）；下不来返回 null。node 里跑测试时没有 Image，也当作下不来
 function decoded(src: string): Promise<HTMLImageElement | null> {
+  if (typeof Image === 'undefined') return Promise.resolve(null);
   const img = new Image();
   img.decoding = 'async';
   img.alt = '';
@@ -55,9 +39,8 @@ export function cobrandLockup(size: 'lg' | 'sm'): HTMLDivElement {
   const text = el('span', { className: 'cb-text' }, el('b', { textContent: 'tripo' }), el('i', { textContent: '×' }), 'MakerWorld');
   text.setAttribute('aria-hidden', 'true');
   root.append(text);
-  void brandArt().then(async (a) => {
-    if (!a.tripo || !a.makerworld) return;
-    const [tripo, mw] = await Promise.all([decoded(a.tripo), decoded(a.makerworld)]);
+  const a = brandArt();
+  void Promise.all([decoded(a.tripo), decoded(a.makerworld)]).then(([tripo, mw]) => {
     if (!tripo || !mw) return;
     tripo.className = 'cb-tripo-mark';
     mw.className = 'cb-mw';

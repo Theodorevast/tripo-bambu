@@ -1,5 +1,5 @@
 // stage 角色的样张：node scripts/shot-stage.mjs [输出目录] [--only a,b] [--webgl2]
-// 1440×900，WebGPU（--webgl2 走 WebGL2）。用本机的私有真实模型（.tmp/local-models）和翠宝（.tmp/triboo），没有就是占位。
+// 1440×900，WebGPU（--webgl2 走 WebGL2）。用本机的私有真实模型（.tmp/local-models，没有就是占位）和翠宝（public/brand/triboo.glb）。
 // 出：stage-overview（星球视图，作品当地标）、stage-close（贴近一件作品：展台、花园、路牌，像素比 2）、
 //     stage-garden（斜后方看一件作品的小花园）、stage-walk（漫游时路过作品）、
 //     stage-drop-1..4（编辑器里摆一件作品：落下、扬尘、花草长出来，按时间顺序）

@@ -1,5 +1,5 @@
 // I1 样张（草、天空、生机接进来以后）：node scripts/shot-i1.mjs [输出目录] [--only a,b] [--webgl2]
-// 1440×900，WebGPU（--webgl2 走 WebGL2）。用本机的私有真实模型（.tmp/local-models）和翠宝（.tmp/assets），没有就是占位。
+// 1440×900，WebGPU（--webgl2 走 WebGL2）。用本机的私有真实模型（.tmp/local-models，没有就是占位）和翠宝（public/brand/triboo.glb）。
 // 出：i1-walk（漫游，白天，朝着作品）、i1-walk-backlit（漫游，逆光）、i1-planet（星球视图）、i1-close（贴近作品，像素比 2）、
 //     i1-sunset（日落漫游，朝着太阳）、i1-rain（下雨漫游）、i1-galaxy（星系全景，云海压在星球下面）、
 //     i1-vs-ref（和参考图 F4、F2、F9 并排：参考图只在本机，REFS 或 .tmp/refs/F）

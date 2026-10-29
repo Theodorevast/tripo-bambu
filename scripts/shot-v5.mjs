@@ -1,5 +1,5 @@
 // V5 样张：node scripts/shot-v5.mjs [输出目录]（默认 .superpowers/sdd/2026-10-27-community-planets）
-// 1440×900，WebGPU（v5-webgl2 用 WebGL2）。用本机的私有真实模型（.tmp/local-models，没有就是占位作品）和翠宝（.tmp/triboo）。
+// 1440×900，WebGPU（v5-webgl2 用 WebGL2）。用本机的私有真实模型（.tmp/local-models，没有就是占位作品）和翠宝（public/brand/triboo.glb）。
 // 草、天空和云海换成正式实现（src/nature/）以后重跑一遍就是新的样张。
 // 出：v5-walk、v5-planet、v5-close（像素比 2，证明作品不糊）、v5-sunset、v5-radius-15/30/60（同一取景、不同半径）、v5-webgl2、
 //     v5-vs-ref（和参考图 F4、F2 并排：参考图只在本机，有 .tmp/refs/F/ 才拼）

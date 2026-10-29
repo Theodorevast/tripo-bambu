@@ -89,7 +89,7 @@
   animation: boot-fade-in 0.2s ease-out both;
 }
 #boot[data-art='gif'] .boot-dots { display: none; }
-/* 没有动图（线上、没放品牌素材时）：三个翠宝黄的圆点在小云上方轮流跳，占翠宝的位置（图区高度不变，开发时动图换上来也不挪版）。
+/* 没有动图（动图还没到、或者 public/brand/ 的动图下不来时）：三个翠宝黄的圆点在小云上方轮流跳，占翠宝的位置（图区高度不变，动图到了换上来也不挪版）。
    圆点是软的：深一点的黄做边、底下一小团暖色的影子，不用描线 */
 .boot-dots { position: absolute; left: 50%; bottom: 118px; display: flex; gap: 14px; translate: -50% 0; }
 .boot-dots i {
