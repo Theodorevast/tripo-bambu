@@ -68,6 +68,7 @@ try {
         await page.mouse.move(720, 120);
       }
       // 翠宝探头：指针靠近右边缘
+      await page.waitForFunction(() => !!window.__home.state().triboo?.at, null, { timeout: 15000 }).catch(() => {});
       const t = await page.evaluate(() => window.__home.state().triboo?.at ?? null);
       if (t) {
         await page.mouse.move(t.x - 60, t.y);

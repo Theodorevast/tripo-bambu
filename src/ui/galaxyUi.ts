@@ -6,7 +6,7 @@ import { iconSvg } from './icons';
 // 首页（星系视图，H2）：每颗星球下面一张圆角小名牌（团队名、团队色的小星球、作品数；「你的星球」带一个 You，建设中的写 building），
 // 悬停星球或名牌时星球轻轻放大、慢慢转（World），名牌弹出来；按下去压扁、松开回弹，然后进现有的穿云转场。
 // 名牌是按钮：Tab 能一颗颗选到，回车进去。镜头在飞、转场时名牌收起来，落定以后依次弹出来。
-// 名牌叠在一起（窄屏、后排）时，排在后面的先藏：你的星球 > 建好的 > 建设中的；悬停的那张一直显示
+// 名牌叠在一起（窄屏、后排）时先往下挪一格、再试星球上方，都放不下的先藏：你的星球 > 建好的 > 建设中的；悬停的那张一直显示
 
 const HAMMER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13.5 6.5l4 4"/><path d="M11 9L4.2 15.8a1.9 1.9 0 0 0 2.7 2.7L13.7 11.7"/><path d="M10.5 5.2l3-2.2 6.2 6.2-2.2 3z" fill="currentColor" fill-opacity=".25"/></svg>';
 
@@ -18,6 +18,7 @@ interface Tag {
   h: number;
   x: number; // 这一帧的位置（名牌顶边的中点）
   y: number;
+  slot: number; // 摆在哪：0 星球正下方，1 再往下一格，2 星球上方
   tx: number; // 上一次写进 transform 的位置（没动就不再写，静止时不触发样式重算）
   ty: number;
   shown: boolean;
@@ -46,6 +47,7 @@ export class GalaxyUi {
   private readonly tags = new Map<string, Tag>();
   private order: Tag[] = []; // 按优先级排好（你的星球、建好的、建设中的）：Tab 的顺序、叠在一起时谁先藏
   private readonly placed: Tag[] = []; // 每帧复用
+  private readonly discs: Array<{ entry: PlanetEntry; x: number; y: number; r: number }> = []; // 每帧复用
   private down: { x: number; y: number; entry: PlanetEntry | null } | null = null;
   private you: string | null = null;
   private leaving = false; // 松开了、正等回弹放完去转场：这期间不再接点击
@@ -193,7 +195,7 @@ export class GalaxyUi {
 
   private build(entry: PlanetEntry): Tag {
     const button = el('button', { className: 'planet-tag', type: 'button' });
-    const tag: Tag = { entry, el: button, team: entry.team, w: 0, h: 0, x: 0, y: 0, tx: NaN, ty: NaN, shown: true, rank: 0 };
+    const tag: Tag = { entry, el: button, team: entry.team, w: 0, h: 0, x: 0, y: 0, slot: 0, tx: NaN, ty: NaN, shown: true, rank: 0 };
     button.addEventListener('pointerenter', () => {
       this.tagHover = tag.entry;
       this.syncHover();
@@ -303,31 +305,51 @@ export class GalaxyUi {
     const hovered = world.hovered;
     const placed = this.placed;
     placed.length = 0;
+    // 每颗星球在画面上的圆：名牌挪位置时不压到别的星球上（不然认不出是谁的名牌）
+    this.discs.length = 0;
+    for (const t of this.order) {
+      if (!world.planetOnScreen(t.entry, _c)) continue;
+      this.discs.push({ entry: t.entry, x: _c.x, y: _c.y, r: _c.r });
+    }
     // 悬停的那张先摆（一直显示），其余按优先级：叠在一起时排在后面的藏起来
     const first = hovered ? this.tags.get(hovered.team.id) : undefined;
     if (first) this.put(first, true, placed);
     for (const t of this.order) if (t !== first) this.put(t, false, placed);
   }
 
+  // 名牌摆在哪：默认在星球正下方；和已经摆好的名牌叠在一起时，依次试「再往下一格」「星球上方」，都不行就先藏起来。
+  // 上一帧选的位置还空着就不换（悬停放大、镜头轻轻动时名牌不来回跳）
   private put(t: Tag, hover: boolean, placed: Tag[]): void {
     const ok = this.world.planetOnScreen(t.entry, _c);
     t.x = _c.x;
-    t.y = _c.y + _c.r * 1.02 + 6;
-    let free = ok;
-    if (free && !hover) {
-      for (const o of placed) {
-        if (Math.abs(o.x - t.x) < (o.w + t.w) / 2 + 4 && Math.abs(o.y - t.y) < (o.h + t.h) / 2 + 2) {
-          free = false;
-          break;
+    const below = _c.y + _c.r * 1.02 + 6;
+    const ys = [below, below + t.h + 4, _c.y - _c.r * 1.02 - 6 - t.h];
+    let slot = -1;
+    if (ok) {
+      if (hover) slot = t.slot;
+      else {
+        // 建设中的只放在正下方（放不下就藏）：挪开的小名牌在后排挤着时更容易认错
+        const order = t.entry.team.status === 'under-construction' ? [0] : t.slot > 0 ? [t.slot, 0, 1, 2] : [0, 1, 2];
+        for (const k of order) {
+          if (this.fits(t, ys[k], placed)) {
+            slot = k;
+            break;
+          }
         }
       }
     }
-    if (free) placed.push(t);
+    const free = slot >= 0;
+    if (free) {
+      t.slot = slot;
+      t.y = ys[slot];
+      placed.push(t);
+    }
     if (t.shown !== free) {
       t.shown = free;
       t.el.classList.toggle('is-off', !free);
     }
     if (t.el.classList.contains('is-hover') !== hover) t.el.classList.toggle('is-hover', hover);
+    if (!free) return;
     const x = Math.round((t.x - t.w / 2) * 10) / 10;
     const y = Math.round(t.y * 10) / 10;
     if (x !== t.tx || y !== t.ty) {
@@ -335,5 +357,23 @@ export class GalaxyUi {
       t.ty = y;
       t.el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     }
+  }
+
+  // 名牌顶边放在 y 时：在画面里，不和已经摆好的名牌叠在一起，也不压在别的星球上（边上压一点点可以）
+  private fits(t: Tag, y: number, placed: Tag[]): boolean {
+    if (y < 0 || y + t.h > innerHeight || t.x - t.w / 2 < 0 || t.x + t.w / 2 > innerWidth) return false;
+    for (const o of placed) {
+      if (Math.abs(o.x - t.x) < (o.w + t.w) / 2 + 4 && Math.abs(o.y - y) < (o.h + t.h) / 2 + 2) return false;
+    }
+    const l = t.x - t.w / 2;
+    const r = t.x + t.w / 2;
+    for (const d of this.discs) {
+      if (d.entry === t.entry) continue;
+      // 矩形和圆：圆心到矩形最近点的距离
+      const cx = Math.min(Math.max(d.x, l), r);
+      const cy = Math.min(Math.max(d.y, y), y + t.h);
+      if (Math.hypot(d.x - cx, d.y - cy) < d.r * 0.82) return false;
+    }
+    return true;
   }
 }

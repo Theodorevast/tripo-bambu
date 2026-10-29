@@ -35,7 +35,7 @@ export const HOME_LAYOUT: { backScale: number; backDim: number; wide: HomeRows; 
   backScale: 0.6, // 建设中的星球缩到多大
   backDim: 0.24, // 建设中的星球往天色里淡多少（0..1）
   // 宽屏：你的星球站在正中最前面，别的建好的在它后面排成一道平缓的弧（左右对称），建设中的在更后、更高的地方
-  wide: { youAlone: true, youForward: 2.6, youDown: 0.95, youScale: 1.12, peek: 1.5, frontMax: 6, gap: 1.3, rowBack: 3.0, rowUp: 2.2, backMax: 6, backGap: 3.3, backDepth: 5.2, backUp: 3.1, backRowBack: 2.6, backRowUp: 1.25, arc: 1.4, arcY: 0, wobble: 0.2 },
+  wide: { youAlone: true, youForward: 2.6, youDown: 0.95, youScale: 1.12, peek: 1.5, frontMax: 6, gap: 1.3, rowBack: 3.0, rowUp: 2.2, backMax: 6, backGap: 3.3, backDepth: 5.2, backUp: 3.1, backRowBack: 2.6, backRowUp: 1.9, arc: 1.4, arcY: 0, wobble: 0.16 },
   // 竖屏：一排排主要往上叠（rowUp 大、rowBack 小），镜头差不多平着看：每排都离镜头差不多远，星球在小屏幕上也够大；你的星球在最下面
   tall: { youAlone: true, youForward: 0.9, youDown: 3.1, youScale: 1.15, peek: 0, frontMax: 3, gap: 1.0, rowBack: 0.9, rowUp: 2.75, backMax: 4, backGap: 1.1, backDepth: 1.6, backUp: 2.9, backRowBack: 0.8, backRowUp: 2.15, arc: 0.4, arcY: 0.95, wobble: 0.1 },
 };
