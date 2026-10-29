@@ -30,7 +30,7 @@ export interface PlanetShot {
 }
 
 export const SHOTS: { galaxy: GalaxyShot; planet: PlanetShot } = {
-  galaxy: { zoomIn: 0.84, zoomOut: 1.14, orbit: 14, tilt: 6 },
+  galaxy: { zoomIn: 0.84, zoomOut: 1.14, orbit: 45, tilt: 10 },
   // 星球视图：沿展示方向的方位角、从斜上方 30° 看，离星球中心 2.8 个半径；画面中心比星球中心高 0.2 个半径（look 调的）：
   // 整颗星球坐在云海上，左右和下面都留出一圈云，作品那一带在画面中上部
   planet: { distance: 2.8, elevation: 30, lift: 0.2, fov: 45, minDistance: 1.35, maxDistance: 4, minElevation: 8, maxElevation: 80 },
