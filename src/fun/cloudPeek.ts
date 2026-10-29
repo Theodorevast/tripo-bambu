@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { dot, instancedBufferAttribute, length, max, mix, normalize, smoothstep, sqrt, uniform, uv, vec3, vec4 } from 'three/tsl';
 import type { App } from '../app';
-import { easeInBack, easeOutBack, easeOutCubic, smooth, span } from '../scenes/ease';
+import { easeOutCubic, smooth, span } from '../scenes/ease';
 import type { HomeTuneFolder } from '../scenes/homeTune';
 import { reducedMotion } from '../scenes/transition';
 import { cloudTriboo } from '../scenes/homeCloudTriboo';
@@ -40,15 +40,16 @@ export const CLOUD_PEEK = {
   firstSpread: 6, // 再随机多等 0..这么久
   min: 20, // 之后每隔 min..max 秒冒一次（随机）
   max: 40,
-  bulge: 0.45, // 云面先鼓起来（秒）
-  rise: 0.55, // 探出上半身
-  stay: 2.6, // 停多久：左右看、挥一下手
-  sink: 0.5, // 沉回云里
-  close: 0.75, // 小云合上、沉下去，一圈小云絮散开
+  // 第二版 [v2-world]：动作放慢、显得从容（不回弹）：每一段长四到七成
+  bulge: 0.7, // 云面先鼓起来（秒）
+  rise: 0.95, // 探出上半身
+  stay: 3.4, // 停多久：左右看、挥一下手
+  sink: 0.8, // 沉回云里
+  close: 1.05, // 小云合上、沉下去，一圈小云絮散开
   size: 0.13, // 身高占画面高度多少（手机上按 1.4 × 画面宽封顶；挑位置那一刻按离镜头多远换算成世界尺寸）
   out: 0.68, // 露出来多少（× 身高，从头顶往下）：身子整个出来，脚在云里
-  look: 30, // 左右看多少度
-  turn: 70, // 出来时从侧着转向镜头（度）
+  look: 22, // 左右看多少度（第二版收一点：30 → 22）
+  turn: 55, // 出来时从侧着转向镜头（度）（70 → 55）
   lean: 0.6, // 往后仰着看镜头：镜头俯视角的多少（最多 38°）
   puff: 1, // 小云的亮度
 };
@@ -678,29 +679,29 @@ export class CloudPeek {
     switch (this.phase) {
       case 'rise': {
         const u = Math.min(1, t / p.rise);
-        c = hidden + (shown - hidden) * easeOutBack(u, 1.7);
+        c = hidden + (shown - hidden) * easeOutCubic(u); // 第二版：慢慢升上来、不冲过头（原来 easeOutBack 会弹一下）
         turn = 1 - easeOutCubic(Math.min(1, u / 0.9));
         if (guiding) raise = smooth(span(u, 0.55, 1)); // 快出来时就举手指着星球
         break;
       }
       case 'stay': {
-        c = shown + Math.sin(this.time * 2.3) * 0.012;
+        c = shown + Math.sin(this.time * 1.3) * 0.008; // 浮着轻轻起伏（第二版：慢一点、小一点）
         if (guiding) {
           // 一直指着星球，点一下头
           raise = 1;
-          nod = Math.sin(Math.PI * span(t, 0.15, 0.7));
+          nod = Math.sin(Math.PI * span(t, 0.25, 1.1)); // 第二版：点头慢一点
         } else if (!this.act) {
-          // 左右看一看（先往一边、再往另一边），然后挥一下手
-          const env = smooth(span(t, 0, 0.2)) * (1 - smooth(span(t, 1.25, 1.5)));
-          look = THREE.MathUtils.degToRad(p.look) * Math.sin((t / 1.5) * Math.PI * 2) * env * this.turnFrom;
-          raise = smooth(span(t, 1.35, 1.55)) * (1 - smooth(span(t, Math.max(1.7, p.stay - 0.4), Math.max(1.8, p.stay - 0.15))));
-          wave = Math.sin((t - 1.35) * Math.PI * 2 * 1.7);
+          // 左右看一看（先往一边、再往另一边），然后挥一下手。第二版：看得慢一点（一来一回 2.2 秒），手慢慢举起来、慢慢挥（1 次 / 秒）
+          const env = smooth(span(t, 0, 0.3)) * (1 - smooth(span(t, 1.85, 2.2)));
+          look = THREE.MathUtils.degToRad(p.look) * Math.sin((t / 2.2) * Math.PI * 2) * env * this.turnFrom;
+          raise = smooth(span(t, 2.0, 2.45)) * (1 - smooth(span(t, Math.max(2.6, p.stay - 0.55), Math.max(2.8, p.stay - 0.15))));
+          wave = Math.sin((t - 2.0) * Math.PI * 2 * 1.0);
         }
         break;
       }
       case 'sink': {
         const u = Math.min(1, t / p.sink);
-        c = shown + (hidden - shown) * easeInBack(u, 1.5);
+        c = shown + (hidden - shown) * smooth(u); // 第二版：慢慢沉下去（原来 easeInBack 会先往上提一下）
         if (guiding) raise = 1 - smooth(span(u, 0, 0.6));
         break;
       }
@@ -727,7 +728,7 @@ export class CloudPeek {
     const face = Math.atan2(dx, dz);
     const elev = Math.atan2(cam.y - this.planeY, Math.hypot(dx, dz));
     const lean = Math.min(THREE.MathUtils.degToRad(38), Math.max(0, elev - THREE.MathUtils.degToRad(10)) * p.lean);
-    this.raise += (raise - this.raise) * (1 - Math.exp(-10 * dt));
+    this.raise += (raise - this.raise) * (1 - Math.exp(-6 * dt)); // 第二版：手举得慢一点（10 → 6）
     // 带路：身子往星球那边转一点（跟着手举起来）
     const toward = guiding ? this.pointTurn * this.raise : 0;
     const yaw = face + turn * this.turnFrom * THREE.MathUtils.degToRad(p.turn) + look + toward;
@@ -736,7 +737,7 @@ export class CloudPeek {
     _e.set(pose.pitch + nod * THREE.MathUtils.degToRad(GUIDE.nod), pose.yaw, pose.roll + look * 0.12, 'YZX');
     root.quaternion.copy(_q).multiply(_q2.setFromEuler(_e));
     const k = H / this.modelHeight;
-    const b = Math.sin((this.time / 3.2) * Math.PI * 2) * 0.02; // 呼吸
+    const b = Math.sin((this.time / 4.2) * Math.PI * 2) * 0.015; // 呼吸（第二版：慢一点、浅一点）
     root.scale.set(k * pose.sxz * (1 - b * 0.5), k * pose.sy * (1 + b), k * pose.sxz * (1 - b * 0.5));
     // 球心定在冒出来的地方正上方（仰、晃都绕着球心转，身子不往后倒出那个洞）
     this.ball.set(this.spot.x, this.planeY + (c + pose.lift) * H, this.spot.z);
@@ -748,7 +749,7 @@ export class CloudPeek {
     for (const arm of this.arms) {
       let up = 0;
       if (guiding) up = arm.side === this.pointSide ? this.raise * this.pointUp : 0;
-      else if (arm.side === -1) up = this.raise * (2.8 + THREE.MathUtils.degToRad(22) * wave); // 往后仰着：举高一点才看得出在挥
+      else if (arm.side === -1) up = this.raise * (2.8 + THREE.MathUtils.degToRad(15) * wave); // 往后仰着：举高一点才看得出在挥（第二版挥得小一点：22° → 15°）
       arm.pivot.rotation.z = arm.rest + arm.side * up;
     }
     this.placeFluff();

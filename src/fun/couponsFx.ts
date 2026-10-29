@@ -247,8 +247,9 @@ export class GlowDiscs {
 }
 
 // 彩屑的颜色（线性空间）：翠宝黄、奶油、珊瑚粉、薄荷、天蓝
-const CONFETTI = ['#f2b705', '#fbf3df', '#ff8f7d', '#86dcc6', '#9ccbff', '#f2b705'].map((h) => new THREE.Color(h));
-const STAR = new THREE.Color('#fff4c9');
+// 第二版 [v2-world]：没有彩色纸屑了，只有少量金色星屑（香槟金、星光白、古金）
+const CONFETTI = ['#d8c08e', '#f6f1e7', '#e9d4a1', '#a8894f'].map((h) => new THREE.Color(h).multiplyScalar(1.6));
+const STAR = new THREE.Color('#f6ecd2').multiplyScalar(1.7);
 
 export class Sparks {
   readonly mesh: THREE.Mesh;
@@ -328,20 +329,21 @@ export class Sparks {
     this.mesh = mesh;
   }
 
-  // 一团彩屑和星星：从 at 往 forward 那一侧喷出去（锥形，往上偏），scale 是放大倍数（星球视图里大一些）
+  // 一小撮金色星屑：从 at 往 forward 那一侧轻轻飘出去（锥形，往上偏），scale 是放大倍数（星球视图里大一些）。
+  // 第二版：都是对着镜头的小四角星（不再有翻滚的彩色纸片），速度小、阻力大、几乎不往下掉：像一口气吹出来的一点金粉，慢慢散开、淡掉
   burst(at: THREE.Vector3, up: THREE.Vector3, forward: THREE.Vector3, right: THREE.Vector3, count: number, scale: number): void {
     const rng = this.rng;
     for (let i = 0; i < count; i++) {
-      const star = i % 4 === 0;
-      const fwd = (0.8 + rng() * 1.5) * scale;
-      const lift = (1.4 + rng() * 1.8) * scale;
-      const side = (rng() - 0.5) * 2.6 * scale;
+      const star = i % 3 === 0; // 大一点、亮一点的那几颗
+      const fwd = (0.35 + rng() * 0.6) * scale;
+      const lift = (0.45 + rng() * 0.7) * scale;
+      const side = (rng() - 0.5) * 1.1 * scale;
       const vx = forward.x * fwd + up.x * lift + right.x * side;
       const vy = forward.y * fwd + up.y * lift + right.y * side;
       const vz = forward.z * fwd + up.z * lift + right.z * side;
       const col = star ? STAR : CONFETTI[Math.floor(rng() * CONFETTI.length) % CONFETTI.length];
-      const size = (star ? 0.06 + rng() * 0.04 : 0.035 + rng() * 0.02) * scale;
-      this.emit(at.x, at.y, at.z, vx, vy, vz, up, 0.9 + rng() * 0.6, col, star ? 1 : 0, size, star ? 2.6 : 1.6, star ? 0.12 : 0.35, 8 + rng() * 10);
+      const size = (star ? 0.05 + rng() * 0.025 : 0.028 + rng() * 0.018) * scale;
+      this.emit(at.x, at.y, at.z, vx, vy, vz, up, 1.1 + rng() * 0.7, col, 1, size, 2.2, 0.03, 1.5 + rng() * 2);
     }
   }
 

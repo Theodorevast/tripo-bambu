@@ -62,11 +62,11 @@ describe('优惠券的假数据（待接真实后端）', () => {
 });
 
 describe('翠宝吐券的节奏：蓄力 → 吐出 → 回弹', () => {
-  it('时间点按顺序：（转身）→ 蓄力约 0.25 秒 → 弹起时吐 → 最高 → 做完 → （转回去）', () => {
+  it('时间点按顺序：（转身）→ 蓄力（COUPONS.charge：第二版放慢到 0.34 秒）→ 弹起时吐 → 最高 → 做完 → （转回去）', () => {
     for (const turning of [false, true]) {
       const t = spitTimes(turning);
       expect(t.turn).toBeCloseTo(turning ? COUPONS.turn : 0);
-      expect(t.charge - t.turn).toBeCloseTo(0.25);
+      expect(t.charge - t.turn).toBeCloseTo(COUPONS.charge);
       expect(t.launch).toBeGreaterThan(t.charge);
       expect(t.launch).toBeLessThanOrEqual(t.peak);
       expect(t.end).toBeGreaterThan(t.peak);

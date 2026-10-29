@@ -111,16 +111,23 @@ const stoneTone = (() => {
   return vec3(mix(tone, float(1), goldK)).mul(mix(float(1), float(0.5), buried));
 })();
 
+// 金线的金属度、粗糙度、微光：和 stoneTone 一样建一次、所有展台共用。每个展台的材质是各自一份（透明度、高亮各管各的），
+// 节点要是每份都新建，three 按节点算的缓存键就对不上，进星球时每个展台（半透明、不透明、投影）都要在那几帧里重新生成一遍着色器
+// （实测 4 件作品多出 50–60 毫秒的主线程时间）；节点共用就直接用现成的
+const goldMetal = mix(float(0), float(0.6), goldK);
+const goldRough = mix(float(0.9), float(0.42), goldK);
+const goldGlow = materialEmissive.add(vec3(GOLD.r, GOLD.g, GOLD.b).mul(goldK.mul(0.28)));
+
 // 展台材质：模型挂上之前半透明（spec 2.2），挂上后不透明。emissiveIntensity 从 0 开始（自发光颜色是黑的，看不出区别）：
 // three 把数值属性按「是不是 0」算进着色器的缓存键，从 0 开始，换成不透明时才对得上预热过的那份（见 PlanetView 构造函数）。
-// 石头很哑（粗糙度 0.9），金线是金属（粗糙度 0.35），再带一点点自己的微光（夜里也看得出那一圈）；选中时的高亮照旧走 emissive
+// 石头很哑（粗糙度 0.9），金线是金属（粗糙度 0.42），再带一点点自己的微光（夜里也看得出那一圈）；选中时的高亮照旧走 emissive
 export function plinthMaterial(loading: boolean, glow = 0): THREE.MeshStandardNodeMaterial {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.9, metalness: 0, transparent: loading, opacity: loading ? 0.4 : 1, emissiveIntensity: glow });
   m.vertexColors = true;
   m.colorNode = stoneTone;
-  m.metalnessNode = mix(float(0), float(0.6), goldK);
-  m.roughnessNode = mix(float(0.9), float(0.42), goldK);
-  m.emissiveNode = materialEmissive.add(vec3(GOLD.r, GOLD.g, GOLD.b).mul(goldK.mul(0.28)));
+  m.metalnessNode = goldMetal;
+  m.roughnessNode = goldRough;
+  m.emissiveNode = goldGlow;
   m.name = 'plinth-stone';
   return m;
 }

@@ -7,17 +7,18 @@ import type { World } from './world';
 // 用 homeTune.ts 的 addHomeTuneExtra 加进去（面板打开时才建）；main.ts 装一次
 export function installHomeTribooTune(world: World): void {
   addHomeTuneExtra((home) => {
-    const cloud = home.addFolder({ title: 'Cloud Triboo', expanded: false });
+    // 第二版：云朵翠宝换成了星座翠宝（homeCloudTriboo.ts），参数表还叫 CLOUD_TRIBOO
+    const cloud = home.addFolder({ title: 'Constellation Triboo', expanded: false });
     cloud.addBinding(CLOUD_TRIBOO, 'on', { label: 'show', min: 0, max: 1, step: 1 });
     cloud.addBinding(CLOUD_TRIBOO, 'size', { label: 'size ×', min: 0.4, max: 2.5, step: 0.05 });
-    cloud.addBinding(CLOUD_TRIBOO, 'cycle', { label: 'regather every (s)', min: 10, max: 120, step: 1 });
-    cloud.addBinding(CLOUD_TRIBOO, 'gather', { label: 'gather (s)', min: 0.5, max: 6, step: 0.1 });
-    cloud.addBinding(CLOUD_TRIBOO, 'scatter', { label: 'scatter (s)', min: 0.5, max: 6, step: 0.1 });
+    cloud.addBinding(CLOUD_TRIBOO, 'cycle', { label: 'reappear every (s)', min: 10, max: 120, step: 1 });
+    cloud.addBinding(CLOUD_TRIBOO, 'gather', { label: 'light up (s)', min: 0.5, max: 8, step: 0.1 });
+    cloud.addBinding(CLOUD_TRIBOO, 'scatter', { label: 'fade out (s)', min: 0.5, max: 8, step: 0.1 });
     cloud.addBinding(CLOUD_TRIBOO, 'drift', { label: 'drift ×body', min: 0, max: 2, step: 0.05 });
     cloud.addBinding(CLOUD_TRIBOO, 'opacity', { min: 0.2, max: 1, step: 0.01 });
-    cloud.addBinding(CLOUD_TRIBOO, 'gold', { label: 'chest V glow', min: 0, max: 1.5, step: 0.01 });
+    cloud.addBinding(CLOUD_TRIBOO, 'gold', { label: 'chest V glow', min: 0, max: 2, step: 0.01 });
     cloud.addBinding(CLOUD_TRIBOO, 'afterIntro', { label: 'wait after stardust (s)', min: 0, max: 8, step: 0.1 });
-    cloud.addButton({ title: 'Replay (scatter & regather)' }).on('click', () => cloudTriboo()?.replay());
+    cloud.addButton({ title: 'Replay (fade & reappear)' }).on('click', () => cloudTriboo()?.replay());
     const dust = home.addFolder({ title: 'Stardust Triboo', expanded: false });
     dust.addBinding(STARDUST_TRIBOO, 'on', { label: 'play at opening', min: 0, max: 1, step: 1 });
     dust.addBinding(STARDUST_TRIBOO, 'at', { label: 'start at flight', min: 0, max: 1, step: 0.01 });
