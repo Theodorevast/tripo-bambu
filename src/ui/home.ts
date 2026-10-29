@@ -53,7 +53,8 @@ export function installHome(app: App): HomeDebug {
   if (title && typeof ResizeObserver !== 'undefined') {
     const measure = () => {
       if (title.dataset.home === undefined) return;
-      app.world.setHomeTop(title.getBoundingClientRect().bottom);
+      const r = title.getBoundingClientRect();
+      app.world.setHomeCard(r.right, r.bottom);
     };
     new ResizeObserver(measure).observe(title);
     addEventListener('resize', measure);

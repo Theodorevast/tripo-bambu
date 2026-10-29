@@ -11,7 +11,7 @@ afterEach(() => {
 
 describe('镜头表：距离都按星球半径换算', () => {
   it('首页：镜头放在 fitHomeCamera 给的位置，不自转；远近只让拉一点，上下只让转 tilt 度（星球视图的取景不受影响）', () => {
-    const cam = { target: new THREE.Vector3(3, -2, 1), position: new THREE.Vector3(3, 40, 300), distance: Math.hypot(42, 299), fov: 40 };
+    const cam = { target: new THREE.Vector3(3, -2, 1), position: new THREE.Vector3(3, 40, 300), distance: Math.hypot(42, 299), fov: 40, lift: 0, yaw: 0 };
     const f = homeFraming(cam);
     expect(f.target.equals(cam.target)).toBe(true);
     expect(f.position.equals(cam.position)).toBe(true);
@@ -21,8 +21,12 @@ describe('镜头表：距离都按星球半径换算', () => {
     expect(f.maxDistance).toBeCloseTo(cam.distance * SHOTS.galaxy.zoomOut, 9);
     const polar = Math.acos(42 / cam.distance);
     const tilt = THREE.MathUtils.degToRad(SHOTS.galaxy.tilt);
-    expect(f.minPolar).toBeCloseTo(Math.max(0.05, polar - tilt), 9);
-    expect(f.maxPolar).toBeCloseTo(Math.min(Math.PI / 2, polar + tilt), 9); // 往下最多到水平面
+    // 默认仰角上下各 tilt 度，再夹在 minElevation..maxElevation（螺旋星系：不低到云海、不转到正上方）
+    const highest = THREE.MathUtils.degToRad(90 - SHOTS.galaxy.maxElevation);
+    const lowest = THREE.MathUtils.degToRad(90 - SHOTS.galaxy.minElevation);
+    expect(f.minPolar).toBeCloseTo(Math.max(0.05, highest, polar - tilt), 9);
+    expect(f.maxPolar).toBeCloseTo(Math.min(Math.PI / 2, lowest, polar + tilt), 9);
+    expect(f.lift).toBe(0);
   });
 
   it('星球视图：沿展示方向的方位角、按镜头表的仰角和距离（× 半径）；抬头、远近限制都按半径；镜头不压到水平面 8° 以下', () => {
@@ -48,7 +52,7 @@ describe('镜头表：距离都按星球半径换算', () => {
     SHOTS.galaxy.zoomIn = 0.5;
     SHOTS.planet.lift = 0.2;
     SHOTS.planet.elevation = 50;
-    const g = homeFraming({ target: new THREE.Vector3(), position: new THREE.Vector3(0, 0, 100), distance: 100, fov: 40 });
+    const g = homeFraming({ target: new THREE.Vector3(), position: new THREE.Vector3(0, 0, 100), distance: 100, fov: 40, lift: 0, yaw: 0 });
     expect(g.minDistance).toBeCloseTo(50, 9);
     expect(planetFraming(new THREE.Vector3(), SHOTS.planet, 30).lift).toBeCloseTo(6, 9);
     expect(planetViewDir().y).toBeCloseTo(Math.sin(THREE.MathUtils.degToRad(50)), 9);

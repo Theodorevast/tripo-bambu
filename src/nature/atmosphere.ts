@@ -88,6 +88,14 @@ export interface AtmospherePlanetOptions {
 // 首页的云海放安静（H2）：calm = 1 时按这些比例改，0 时完全是原样（星球视图不受影响）。
 // 起伏变平、云团变大（少掉碎的高频细节）、贴图取更模糊的一级、明暗对比收一些、空气透视浓一点；
 // 天上的细云条和远处的积云淡掉，天空只剩一层柔和的渐变。步进次数跟着少（云面平了，少走几步也找得准），GPU 也省一点
+// 首页云海的暖奶油色（线性、曝光前，和 PRESETS 的云同一个空间）：亮面、中间调、背光、缝隙差得不多，整片是一层柔和的奶油
+const CALM_CREAM = {
+  lit: new THREE.Vector3(1.32, 1.04, 0.64),
+  mid: new THREE.Vector3(0.9, 0.67, 0.44),
+  shade: new THREE.Vector3(0.62, 0.45, 0.34),
+  deep: new THREE.Vector3(0.48, 0.34, 0.28),
+};
+
 export const CALM = {
   thickness: 0.45, // 云层厚度少多少（起伏）
   scale: 0.7, // 云团放大多少（+70%）
@@ -98,6 +106,8 @@ export const CALM = {
   puffs: 0.75, // 远处积云淡掉多少
   steps: 0.4, // 步进次数少多少
   horizon: 1.6, // 地平线附近融进雾色的范围宽多少（镜头低的时候，远处的云海和天空之间没有一条硬边）
+  cream: 0.7, // 云的颜色往一套暖奶油色（CALM_CREAM）靠多少：没有粉紫的斑驳，首页的星尘跳得出来
+  dim: 0.2, // 云海、地平线的雾色暗多少（金色的星尘叠在上面才「发光」）
 };
 
 export interface Atmosphere {
@@ -120,6 +130,8 @@ export interface Atmosphere {
   readonly horizon: THREE.Color; // 现在的地平线雾色（线性、曝光前；含预设过渡和雨）：首页把后排的星球往这个颜色淡（H2）
   // 漫游时地平线的「上」：传 camera.up（角色脚下的球面法线），标架直接跟着它；传 null 回到按镜头位置算（轨道视角）
   setHorizonUp(up: THREE.Vector3 | null): void;
+  // 首页（H2）：太阳的方位角再加多少度（跟着镜头左右转：星系转到背面也是迎光的，不会背光发黑）。只改 uniform，不加灯
+  setSunTurn(deg: number): void;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -590,6 +602,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   let rain = 0;
   let lookDirty = true;
   let horizonUp: THREE.Vector3 | null = null;
+  let sunTurn = 0; // setSunTurn：方位角再加多少度
 
   // ---- 状态
   const center = new THREE.Vector3();
@@ -1042,7 +1055,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
 
     // 标架和太阳（漫游时「上」跟着 camera.up）
     frame.update(dt, camPos, center, radius, horizonUp);
-    sunDirection(sunLocal, params.sunAzimuth, params.sunElevation);
+    sunDirection(sunLocal, params.sunAzimuth + sunTurn, params.sunElevation);
     sunDir.copy(sunLocal).applyQuaternion(frame.q).normalize();
     uUp.value.copy(frame.up);
     uE1.value.set(1, 0, 0).applyQuaternion(frame.q);
@@ -1088,9 +1101,16 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uHaze.value = (1 / (260 * R)) * Math.max(0.25, params.fog) * (1 + CALM.haze * calm);
     // 放安静：明暗对比收一些（背光、缝隙往中间调靠），天上的细云条、远处积云淡掉
     const soft = CALM.soft * calm;
-    const mid = look.cloudMid;
-    uCloudShade.value.set(look.cloudShade.r, look.cloudShade.g, look.cloudShade.b).lerp(tmp.set(mid.r, mid.g, mid.b), soft);
-    uCloudDeep.value.set(look.cloudDeep.r, look.cloudDeep.g, look.cloudDeep.b).lerp(tmp, soft);
+    const cream = CALM.cream * calm;
+    const dim = 1 - CALM.dim * calm;
+    const toCream = (u: { value: THREE.Vector3 }, c: THREE.Color, target: THREE.Vector3) => u.value.set(c.r, c.g, c.b).lerp(target, cream).multiplyScalar(dim);
+    toCream(uCloudLit, look.cloudLit, CALM_CREAM.lit);
+    toCream(uCloudMid, look.cloudMid, CALM_CREAM.mid);
+    toCream(uCloudShade, look.cloudShade, CALM_CREAM.shade).lerp(uCloudMid.value, soft);
+    toCream(uCloudDeep, look.cloudDeep, CALM_CREAM.deep).lerp(uCloudMid.value, soft);
+    const haze = 1 - CALM.dim * calm * 0.6; // 地平线的雾色也暗一点：远处的云海和雾接得上
+    uHorizon.value.set(look.horizon.r, look.horizon.g, look.horizon.b).multiplyScalar(haze);
+    uHorizonSun.value.set(look.horizonSun.r, look.horizonSun.g, look.horizonSun.b).multiplyScalar(haze);
     uStreaks.value = look.streaks * (1 - CALM.streaks * calm);
     uPuffs.value = 1 - CALM.puffs * calm;
     uGraze.value = 0.07 * (1 + CALM.horizon * calm);
@@ -1198,6 +1218,9 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     },
     get horizon() {
       return look.horizon;
+    },
+    setSunTurn(deg: number) {
+      sunTurn = deg;
     },
     setHorizonUp(up: THREE.Vector3 | null) {
       horizonUp = up;
