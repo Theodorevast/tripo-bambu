@@ -279,6 +279,48 @@ export class TuneShell {
     delete this.tip.dataset.on;
   }
 
+  // —— 整块显示 / 藏起来（左上角标题卡片上的「Tune」按钮，ui/tuneToggle.ts）——
+
+  get open(): boolean {
+    return !this.node.hidden;
+  }
+
+  // 藏起来时连收起后的小按钮也不留（画面上没有调参的东西）；显示时 expand：收着的就展开（点按钮就是想看面板），
+  // 刷新后还原时不展开（照上次收没收着）
+  setOpen(on: boolean, expand = true): void {
+    for (const a of this.toggling) a.cancel();
+    this.toggling = [];
+    if (!on) {
+      if (this.node.hidden) return;
+      this.hideTip();
+      const out = animate(this.node, [{ opacity: 1 }, { opacity: 0, transform: reducedMotion() ? 'none' : 'translateY(-8px) scale(0.96)' }], { duration: 160, easing: EASE_IN, fill: 'forwards' });
+      const done = (): void => {
+        out?.cancel();
+        if (this.closing === done) this.node.hidden = true;
+      };
+      this.closing = done;
+      if (out) void out.finished.then(done, done);
+      else done();
+      return;
+    }
+    this.closing = null;
+    const was = this.node.hidden;
+    this.node.hidden = false;
+    for (const a of this.node.getAnimations()) a.cancel();
+    if (expand && this.collapsed) {
+      this.setCollapsed(false, false);
+      return;
+    }
+    if (!was) return;
+    this.clamp(this.collapsed ? false : true);
+    const target = this.collapsed ? this.fab : this.card;
+    animate(target, reducedMotion()
+      ? [{ opacity: 0 }, { opacity: 1 }]
+      : [{ opacity: 0, transform: 'scale(0.6)' }, { opacity: 1, transform: 'none' }], { duration: reducedMotion() ? 160 : 560, easing: curve('spring'), fill: 'backwards' });
+  }
+
+  private closing: (() => void) | null = null;
+
   // —— 收起 / 展开 ——
 
   // Members / Museum / 查看器打开时，面板自动收成小按钮，不盖住页面右边；这些都关掉后，如果是自动收起的就再展开。

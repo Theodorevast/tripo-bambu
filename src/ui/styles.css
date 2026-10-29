@@ -134,6 +134,22 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
 .tb-create-icon { width: 1.15em; height: 1.15em; color: var(--yolk-ledge); }
 .tb-visit-arrow { width: 1.1em; height: 1.1em; transition: transform 0.35s var(--bounce); }
 .tb-visit:hover .tb-visit-arrow { transform: translateX(3px); }
+/* 标题卡片右上角的「Tune」小按钮（ui/tuneToggle.ts）：打开、关上右边的调参面板。小、淡、没有底色，不抢标题；
+   开着时像贴了一小块翠宝黄的贴纸。卡片右边留出它的位置，名字再长也不压到它底下 */
+.tb-title { position: relative; }
+.tb-title:has(> .tb-tune:not([hidden])) { padding-right: 50px; }
+:where(#app) .tb-tune {
+  position: absolute; top: 9px; right: 9px; width: 32px; height: 32px; padding: 0;
+  display: grid; place-items: center; border-radius: 11px;
+  color: var(--ink-faint); background: transparent; box-shadow: none;
+  transition: color 0.15s, background 0.15s, translate 0.3s var(--bounce), scale 0.3s var(--bounce);
+}
+:where(#app) .tb-tune .icon { width: 18px; height: 18px; }
+:where(#app) .tb-tune:hover { color: var(--ink); background: var(--paper-2); translate: none; scale: 1.06; }
+:where(#app) .tb-tune:active { scale: 0.92; translate: none; box-shadow: none; }
+:where(#app) .tb-tune[aria-pressed='true'] { color: var(--ink); background: #fff3c4; box-shadow: inset 0 0 0 2px var(--yolk); translate: none; }
+.tb-title[data-home]:has(> .tb-tune:not([hidden])) { padding-right: 20px; } /* 首页：右上角那一块本来就空着（联名标志那一行很短） */
+.tb-title[data-home] > .tb-tune { top: 10px; right: 10px; }
 
 #app > .planet-tags { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 :where(#app) .planet-tag {
@@ -186,6 +202,10 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
   :where(#app) .tb-visit { padding: 9px 13px 10px 14px; font-size: 13.5px; border-radius: 13px; }
   :where(#app) .tb-create { padding: 9px 12px 10px 10px; font-size: 13px; border-radius: 13px; }
   .tb-ctas { gap: 8px; }
+  .tb-title:has(> .tb-tune:not([hidden])) { padding-right: 42px; }
+  .tb-title[data-home]:has(> .tb-tune:not([hidden])) { padding-right: 14px; }
+  :where(#app) .tb-tune { top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 10px; }
+  .tb-title[data-home] > .tb-tune { top: 7px; right: 7px; }
   .pt-card { gap: 4px; padding: 3px 8px 4px 5px; }
   .pt-dot { width: 10px; height: 10px; }
   .pt-name { font-size: 11.5px; }
@@ -484,6 +504,7 @@ kbd { display: inline-block; padding: 2px 6px 3px; border-radius: 6px; backgroun
   /* 首页（H2）：名牌只淡入淡出，悬停不弹、按下不沉 */
   .planet-tags.is-shown .planet-tag:not(.is-off) .pt-card { animation: fade-in 0.25s ease-out both; }
   .pt-card, .tb-visit-arrow { transition: none !important; }
+  :where(#app) .tb-tune:hover, :where(#app) .tb-tune:active { scale: none; }
   .planet-tag.is-hover .pt-card, .planet-tag[data-tier='building'].is-hover .pt-card, .planet-tag:active .pt-card, .tb-visit:hover .tb-visit-arrow { transform: none; }
 }
 @keyframes fade-in { from { opacity: 0; } }
