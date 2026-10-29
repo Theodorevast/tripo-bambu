@@ -4,6 +4,7 @@
 //      a. 翠宝藏起来 b. 翠宝露出来（平时的样子）c. 翠宝探出来挥手 —— 差值就是右下角翠宝多出来的 GPU 时间
 //      d. 云海不放安静（calm = 0，原来的样子）：对比放安静以后省了多少
 //   3. 第一次点翠宝：从点下去到领券窗口完全展开，最长帧间隔（要求 ≤ 33 ms）
+//   4. 云里探头的翠宝：冒出来那一下、露着时的 GPU 时间、点它到领券窗口展开；悬停带路冒出来那一下（最长帧间隔都要求 ≤ 33 ms）
 // node scripts/perf-home.mjs [--webgl2] [--frames 240] [--no-gpu]。--webgl2 要开有界面的 Chrome（HEADED=1）：无头模式下 ANGLE 的计时查询拿不到结果
 import { chromium } from 'playwright-core';
 import { CHROME, startServer, watchErrors } from './lib/browser.mjs';
@@ -153,6 +154,47 @@ try {
   const card = await page.evaluate(() => window.__home.state().card);
 
   console.log(`第一次点翠宝 → 领券窗口展开：${click.length} 帧，最长 ${clickMax.toFixed(1)} ms，p95 ${pct(click, 0.95).toFixed(1)} ms，超过 33 ms 的 ${click.filter((f) => f > 33.4).length} 帧（${clickMax <= 33.4 ? '✓ ≤ 33 ms' : '✗ 超过 33 ms'}）；窗口 ${JSON.stringify(card)}`);
+
+  // 4. 云里探头的翠宝（cloudPeek.ts）：第一次冒出来那一下（右下角那只缩走、云面鼓起来、探出来）→ 露着时的 GPU 时间 → 点它 → 领券窗口；
+  //    悬停时带路（指针停在你的星球上 0.6 秒 → 从旁边冒出来）
+  const line = (name, f) => `${name}：${f.length} 帧，最长 ${Math.max(...f).toFixed(1)} ms，p95 ${pct(f, 0.95).toFixed(1)} ms，超过 33 ms 的 ${f.filter((x) => x > 33.4).length} 帧（${Math.max(...f) <= 33.4 ? '✓ ≤ 33 ms' : '✗ 超过 33 ms'}）`;
+  const closed = () => page.waitForFunction(() => !window.__home.state().card.open && document.querySelector('#app > .coupon-layer')?.hidden !== false, null, { timeout: 8000 });
+  await page.keyboard.press('Escape');
+  await closed();
+  await page.evaluate(async () => { (await import('/src/fun/cloudPeek.ts')).CLOUD_PEEK.enabled = false; });
+  await page.mouse.move(720, 10);
+  await page.waitForTimeout(3600); // 冷却过去、右下角那只回来
+  log('4 云里的翠宝冒出来');
+  await startRec();
+  if (!(await page.evaluate(() => window.__home.peekCloud()))) throw new Error('云里的翠宝冒不出来');
+  await page.waitForFunction(() => window.__home.state().cloud?.phase === 'stay' && !!window.__home.state().cloud.at, null, { timeout: 8000 });
+  await page.waitForTimeout(300);
+  const peekF = await stopRec();
+  const cAt = (await page.evaluate(() => window.__home.state().cloud)).at;
+  await page.mouse.move(cAt.x, cAt.y); // 指着它：一直露着
+  await page.waitForTimeout(400);
+  const cloudGpu = noGpu ? skip : await gpu(frames);
+  await startRec();
+  await page.mouse.click(cAt.x, cAt.y);
+  await page.waitForFunction(() => window.__home.state().card.shown, null, { timeout: 10000 });
+  await page.waitForTimeout(1000);
+  const cloudClickF = await stopRec();
+  await page.keyboard.press('Escape');
+  await closed();
+  await page.mouse.move(720, 10);
+  await page.waitForTimeout(2500);
+  log('4 悬停带路');
+  const youPos = await page.evaluate(() => window.__app.planetScreenPos(window.__home.state().you));
+  await startRec();
+  await page.mouse.move(youPos.x, youPos.y);
+  const guided = await page.waitForFunction(() => window.__home.state().cloud?.mode === 'guide' && window.__home.state().cloud.phase === 'stay', null, { timeout: 8000 }).then(() => true, () => false);
+  await page.waitForTimeout(400);
+  const guideF = await stopRec();
+  await page.mouse.move(720, 10);
+  console.log(line('云里的翠宝冒出来（右下角那只缩走 → 鼓起来 → 探出来 → 停着）', peekF));
+  if (!noGpu) console.log(`云里的翠宝露着：${fmt(cloudGpu)}  → 比 b +${(cloudGpu.p50 - on.p50).toFixed(3)} ms`);
+  console.log(line('点云里的翠宝 → 领券窗口展开', cloudClickF));
+  console.log(guided ? line('悬停带路（指针停在星球上 → 从旁边冒出来、指着它）', guideF) : '✗ 悬停带路：没冒出来');
 } catch (err) {
   console.log(`✗ 脚本出错：${err.message}`);
   process.exitCode = 1;

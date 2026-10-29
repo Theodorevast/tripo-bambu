@@ -128,6 +128,8 @@ export interface Atmosphere {
   readonly rain: number;
   readonly seaTop: number; // 云顶的平均高度（世界坐标 y；星系视图里「上」是 +Y）：星球在云海上的影子贴在这里（H2）
   readonly horizon: THREE.Color; // 现在的地平线雾色（线性、曝光前；含预设过渡和雨）：首页把后排的星球往这个颜色淡（H2）
+  // 云海现在的受光面、中间调、背光的颜色（线性、曝光前；含首页的暖奶油色）：云里探头的翠宝身边那几团小云跟着它（H2，只读）
+  readonly cloudTone: { readonly lit: THREE.Vector3; readonly mid: THREE.Vector3; readonly shade: THREE.Vector3 };
   // 漫游时地平线的「上」：传 camera.up（角色脚下的球面法线），标架直接跟着它；传 null 回到按镜头位置算（轨道视角）
   setHorizonUp(up: THREE.Vector3 | null): void;
   // 首页（H2）：太阳的方位角再加多少度（跟着镜头左右转：星系转到背面也是迎光的，不会背光发黑）。只改 uniform，不加灯
@@ -1219,6 +1221,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     get horizon() {
       return look.horizon;
     },
+    cloudTone: { lit: uCloudLit.value, mid: uCloudMid.value, shade: uCloudShade.value },
     setSunTurn(deg: number) {
       sunTurn = deg;
     },
