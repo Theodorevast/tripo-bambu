@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FONT_WEIGHTS, has3D, preloadFonts, settleWithin, stepStates } from '../src/ui/boot';
+import { FONT_FACES, has3D, preloadFonts, settleWithin, stepStates } from '../src/ui/boot';
 
 describe('stepStates', () => {
   it('还没开始：三步都没到', () => {
@@ -40,15 +40,16 @@ describe('settleWithin', () => {
 });
 
 describe('preloadFonts', () => {
-  it('界面用到的每个字重各要一次 Nunito', async () => {
+  it('第二版界面的每种字体各要一次（Cinzel、Cormorant Garamond 正体和斜体、Inter）', async () => {
     const load = vi.fn(() => Promise.resolve([]));
     await expect(preloadFonts({ load })).resolves.toBe(true);
-    expect(load.mock.calls.map((c: unknown[]) => c[0])).toEqual(FONT_WEIGHTS.map((w) => `${w} 1em Nunito`));
-    expect(FONT_WEIGHTS).toEqual([500, 600, 700, 800]); // 和 main.ts 引入的 @fontsource/nunito 字重一致
+    expect(load.mock.calls.map((c: unknown[]) => c[0])).toEqual([...FONT_FACES]);
+    // 和 ui/fonts-v2.css 的 @font-face 一致：三套可变字重，Cormorant 的斜体是单独一个文件
+    expect(FONT_FACES).toEqual(['600 1em Cinzel', "500 1em 'Cormorant Garamond'", "italic 500 1em 'Cormorant Garamond'", '500 1em Inter']);
   });
 
   it('有字重加载失败：返回 false，不抛', async () => {
-    const load = vi.fn((font: string) => (font.startsWith('700') ? Promise.reject(new Error('offline')) : Promise.resolve([])));
+    const load = vi.fn((font: string) => (font.includes('Inter') ? Promise.reject(new Error('offline')) : Promise.resolve([])));
     await expect(preloadFonts({ load })).resolves.toBe(false);
   });
 
