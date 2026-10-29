@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
-import { createAtmosphere, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
+import { createAtmosphere, seaCeiling, targetUp, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
 import { createLife, type Life, type LifePlanet } from '../nature/life';
 import { setGalaxyHaze, updatePlanetLook } from '../nature/planetLook';
 import { decorInstances } from '../planet/decor';
@@ -31,6 +31,24 @@ export const RING_OTHERS = 0.4;
 export const HALO_FOCUSED = 0.15; // 星球视图里聚焦星球的大气光晕：压淡（和云海叠在一起会多出一圈白光）
 export const NEIGHBOR_SCALE = 0.45; // 星球视图里别的星球缩到多大
 const RING_FADE = 4; // 每秒逼近目标的速率：约 1 秒淡完，和 1.2 秒的镜头飞行同时进行
+
+// 星球视图里沉进云海的邻居藏起来（F2）：最低处（中心往下 NEIGHBOR_REACH 个缩小后的半径：地形最高约 1.065 倍，后处理的冷暖按 1.1 倍算）
+// 低于云海圆盘（seaCeiling）的邻居，云海会把它整颗或下半截盖住，可是云海不写深度：它的深度还留在缓冲里，
+// 后处理的冷暖（post.ts 的 WASH）按深度把盖在它上面的云也染成它的明暗——日落时天上一个淡淡的圈；它的水面（半透明、画在云海之后）也会透出来。
+// 整颗浮在云海上的邻居照常画（参考图 F2 角上的小星球）
+export const NEIGHBOR_REACH = 1.1;
+const SINK_RATE = 6; // 星球视图里（镜头压低、漫游时「上」会转）邻居沉下去 / 浮上来的速率（每秒）：约 0.5 秒缩没、长回来
+const SINK_MARGIN = 0.02; // 已经藏起来的邻居要高出圆盘这么多（× 半径）才再露出来：「上」轻轻晃动时不来回闪
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const _rel = new THREE.Vector3();
+const _up = new THREE.Vector3();
+
+// 邻居沉没没沉：rel 是邻居中心减聚焦星球中心，沿「上」up 量，最低处（按缩小后的大小）低于云海圆盘 ceiling 就算沉了。
+// hidden：现在藏着的，要高出圆盘 SINK_MARGIN 才算浮上来
+export function sunkInSea(rel: THREE.Vector3, up: THREE.Vector3, radius: number, ceiling: number, hidden: boolean): boolean {
+  const bottom = rel.dot(up) - NEIGHBOR_REACH * radius * NEIGHBOR_SCALE;
+  return bottom < ceiling + (hidden ? SINK_MARGIN * radius : 0);
+}
 
 // 像素预算：主画面按「总像素封顶」定像素比，以后加后处理时靠它控制开销。
 // 上限取 4K（830 万像素）：常见的 2 倍屏都按原生清晰度画（用户要求模型不能糊），只有超大屏才降；再怎么降也不低于 1 倍
@@ -104,6 +122,11 @@ export class World {
   private readonly motions = new Map<PlanetEntry, PlanetMotion>();
   private readonly homeBase = new Map<PlanetEntry, number>(); // 版式的大小（逐帧逼近：首页按槽位，星球视图里 1）
   private readonly homeK = new Map<PlanetEntry, number>(); // 这一帧乘在星球组缩放上的系数（下一帧先除掉）
+  // 星球视图里沉进云海的邻居（F2）：沉没系数 1 照常、0 整颗藏起来（没有记录就是 1），和首页的系数一起乘在星球组的缩放上（stepHome）
+  private readonly sink = new Map<PlanetEntry, number>();
+  private readonly sinkGoals = new Map<PlanetEntry, number>();
+  private sinkLive = false; // 星球视图里转场的云层全遮住过了：每帧跟着云海重新判定哪些邻居沉在云里
+  private sinkToken = 0; // 每次聚焦 / 离开加一：被新转场顶掉的那次，全遮住时的判定不再生效
   private readonly glides = new Map<PlanetEntry, { from: THREE.Vector3; to: THREE.Vector3 }>();
   private glideT = 1;
   private readonly canvasRect = { left: 0, top: 0, width: 1, height: 1 }; // 画布在页面上的位置（铺满窗口：resize 时更新，每帧不读布局）
@@ -180,6 +203,8 @@ export class World {
     this.homeBase.clear();
     this.homeK.clear();
     this.glides.clear();
+    this.sink.clear();
+    this.sinkGoals.clear();
     teams.forEach((team) => {
       const planet = new PlanetObject(team.planet, team.color, team.status === 'under-construction'); // planet：团队色给星球染一点；建设中的有工地
       // 拾取球：单位球，按星球半径（和首页的大小）缩放（半径滑块拖动后只改缩放）
@@ -449,10 +474,13 @@ export class World {
     if (!e.planet.group.parent) this.scene.add(e.planet.group);
     this.atmosphere.setPlanet(e.home, PLANET_RADIUS);
     this.fadeRings(e);
+    const sink = this.beginSink(e);
     // 全遮住以后分三帧：先撤旧作品、摆新展台（App，作品最早开始准备）→ 换地表细分 → 草、石头、生机层。
-    // 首页的小动作（悬停转过的角度、回弹）在全遮住的那一刻归零：星球视图按「星球不旋转」算
+    // 首页的小动作（悬停转过的角度、回弹）在全遮住的那一刻归零：星球视图按「星球不旋转」算；
+    // 沉在新星球云海里的邻居也在这一刻藏起来（看不见它们消失）
     await this.director.focus(e, prev !== null && prev !== e, planetFraming(e.home), [
       () => {
+        sink();
         for (const m of this.motions.values()) m.reset();
         cues.covered?.();
       },
@@ -479,7 +507,9 @@ export class World {
     // 星系视图里云海压到所有星球下面（别的星球会穿过云层，云海只对聚焦的那颗做了解析剔除）：马上开始（1.2 秒缓动，云散开时已经快到位）
     this.galaxySky();
     this.setWalker(null);
+    const sink = this.beginSink(null); // 沉在云海里藏着的邻居等云层全遮住才露出来
     await this.director.unfocus(prev, this.galaxyView(slots ?? undefined), [() => {
+      sink();
       if (slots) this.applySlots(slots, false);
       cues.covered?.();
     }]);
@@ -594,12 +624,69 @@ export class World {
         spin = m.spin;
       }
       const g = e.planet.group;
+      const sunk = this.stepSink(e, dt); // 星球视图里沉进云海的邻居：缩没、整颗藏起来（F2）
+      if (sunk > 0) k *= sunk;
       if (k !== 1) g.scale.multiplyScalar(k);
       this.homeK.set(e, k);
       if (g.rotation.y !== spin) g.rotation.y = spin;
       const dimGoal = settle ? 0 : slot?.dim ?? 0;
       const d = e.planet.look.dim.value;
       if (d !== dimGoal) e.planet.look.dim.value = Math.abs(dimGoal - d) < 0.004 ? dimGoal : d + (dimGoal - d) * kd;
+    }
+  }
+
+  // —— 星球视图里沉进云海的邻居（F2，见 NEIGHBOR_REACH）——
+  // 沉没系数逐帧逼近目标，返回这一帧的系数（stepHome 把它乘进首页的系数里，下一帧 removeHomeScale 一起除掉）。
+  // 到 0 就整颗不画（不画就不留深度）；藏着时不乘 0，不出现缩放为 0 的矩阵
+  private stepSink(e: PlanetEntry, dt: number): number {
+    let s = this.sink.get(e) ?? 1;
+    const goal = this.sinkGoals.get(e);
+    if (goal !== undefined) {
+      const k = 1 - Math.exp(-SINK_RATE * dt);
+      s = Math.abs(goal - s) < 0.01 ? goal : s + (goal - s) * k;
+      if (s === goal) this.sinkGoals.delete(e);
+      if (s === 1) this.sink.delete(e);
+      else this.sink.set(e, s);
+    }
+    const g = e.planet.group;
+    if (g.visible !== s > 0) g.visible = s > 0;
+    return s;
+  }
+
+  // 转场开始：云层全遮住之前不重新判定（邻居不在画面里突然消失）；新聚焦的那颗要是沉着就浮上来。
+  // 返回全遮住时调的函数：进星球按镜头落地后的「上」一次判定好、立刻生效，之后每帧跟着云海判定；回星系时全部露出来
+  private beginSink(focus: PlanetEntry | null): () => void {
+    this.sinkLive = false;
+    const token = ++this.sinkToken;
+    if (focus && (this.sink.get(focus) ?? 1) < 1) this.sinkGoals.set(focus, 1);
+    return () => {
+      if (token !== this.sinkToken) return; // 又开始了新的转场：这一次的不算
+      const f = this.focused;
+      if (f) {
+        targetUp(_up, planetFraming(f.home).position, f.home, PLANET_RADIUS, WORLD_UP);
+        this.judgeSink(_up, true);
+        this.sinkLive = true;
+        return;
+      }
+      this.sink.clear();
+      this.sinkGoals.clear();
+    };
+  }
+
+  // 按「上」方向 up 判定每个邻居沉没沉（最低处低于云海圆盘，sunkInSea）。按缩小后的大小判定，不看正在缩放的大小：
+  // 缩没的过程中判定不会翻回来。instant：立刻生效（云层盖着时，这一帧的 stepHome 就按它画），否则慢慢缩没 / 长回来
+  private judgeSink(up: THREE.Vector3, instant: boolean): void {
+    const f = this.focused;
+    if (!f) return;
+    const ceiling = seaCeiling(this.atmosphere.params, PLANET_RADIUS);
+    for (const e of this.planets.values()) {
+      const was = this.sinkGoals.get(e) ?? this.sink.get(e) ?? 1;
+      const goal = e !== f && sunkInSea(_rel.subVectors(e.home, f.home), up, e.planet.radius, ceiling, was < 0.5) ? 0 : 1;
+      if (instant) {
+        this.sinkGoals.delete(e);
+        if (goal === 1) this.sink.delete(e);
+        else this.sink.set(e, 0);
+      } else if (goal !== was) this.sinkGoals.set(e, goal);
     }
   }
 
@@ -692,6 +779,8 @@ export class World {
     // 漫游时地平线的「上」是 camera.up（角色脚下的球面法线，进出漫游时和 +Y 之间插值）；轨道镜头时按镜头位置推算
     this.atmosphere.setHorizonUp(this.rig.drive ? camera.up : null);
     this.atmosphere.update(dt, camera);
+    // 星球视图落定以后（不在转场、镜头不在飞）：邻居跟着云海判定沉没（轨道镜头压得很低、漫游时「上」会转，云海圆盘跟着斜）
+    if (this.sinkLive && this.focused && !this.director.busy && !this.rig.flying) this.judgeSink(this.atmosphere.up, false);
     this.placeSun();
     // 太阳和傍晚系数：方向按 sun.position − sun.target.position 算（placeSun 每帧挪 target，不能只看 position）；
     // 傍晚系数跟着天空预设的太阳高度走（?tune 可以手动定）

@@ -271,6 +271,18 @@ export function ease(t: number): number {
   return x * x * x * (x * (x * 6 - 15) + 10);
 }
 
+// 星球周围堆起来的云有多高（× 半径；首页放安静时按 1 − calm 收掉）
+const COLLAR = 0.45;
+
+// 云海圆盘离星球中心多高（沿「上」，米）：云层最高处（云底 + 厚度 + 星球周围的堆云）再高 0.5 米；drop、calm 是 setPlanet 的 seaDrop、calm。
+// 圆盘以上没有云；圆盘以下、离星球远的地方云海是不透明的，挡在它后面的东西都被盖住（云海不写深度，被盖住的东西深度还在）。
+// World 按它把星球视图里沉进云海的邻居藏起来（F2）
+export function seaCeiling(params: Pick<AtmosphereParams, 'seaHeight' | 'seaThickness'>, radius: number, drop = 0, calm = 0): number {
+  const top = (params.seaHeight - drop) * radius;
+  const thick = Math.max(0.02, params.seaThickness) * radius * (1 - CALM.thickness * calm);
+  return top - thick * 0.6 + thick + radius * COLLAR * (1 - calm) + 0.5;
+}
+
 // 方位角、高度角 → 单位方向（和 scenes/lights.ts 的约定一样：方位角从 +Z 转向 +X）
 export function sunDirection(out: THREE.Vector3, azimuthDeg: number, elevationDeg: number): THREE.Vector3 {
   const az = THREE.MathUtils.degToRad(azimuthDeg);
@@ -1059,7 +1071,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uSeaBase.value = top - thick * 0.6; // 平均顶面以下 0.6 个厚度是缝隙最深处
     uSeaThick.value = thick;
     uSeaTopNow.value = top;
-    uCollar.value = R * 0.45 * (1 - calm); // 星系视图里没有聚焦的星球：中间不堆云
+    uCollar.value = R * COLLAR * (1 - calm); // 星系视图里没有聚焦的星球：中间不堆云
     uCollarR.value = R * 1.75;
     const scale = Math.max(0.1, params.cloudScale) * (1 + CALM.scale * calm);
     uScale1.value = 1 / (7 * R * scale);
@@ -1084,7 +1096,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     uGraze.value = 0.07 * (1 + CALM.horizon * calm);
 
     // 圆盘：放在云层最高处（含堆云），中心在镜头正下方，半径铺到远平面以内
-    const discTop = uSeaBase.value + thick + uCollar.value + 0.5;
+    const discTop = seaCeiling(params, R, extra.drop, calm);
     const camH = tmp.subVectors(camPos, center).dot(frame.up);
     sea.position.copy(camPos).addScaledVector(frame.up, discTop - camH);
     sea.quaternion.copy(frame.q);
