@@ -1,4 +1,3 @@
-import { Pane } from 'tweakpane';
 import { FOLLOW, WALK } from './play/params';
 import { applyDecor, DECOR } from './planet/decor';
 import { applyGround, applyGroundPalette, GRASS_GROUND, GROUND } from './planet/ground';
@@ -15,6 +14,7 @@ import { installPlanetLookTune, planetLookParams } from './nature/planetLook';
 import { LIFE_EFFECTS, type LifeEffect, type LifeQuality } from './nature/life';
 import { tuneWater, WATER, WATER_COLORS, WATER_ICE } from './nature/water';
 import { toast } from './ui/toast';
+import { TuneShell, type TuneFolder } from './ui/tuneShell';
 
 // 实时调参面板：地址带 ?tune 时由 main.ts 动态加载（Tweakpane 打成单独的包，平时不下载）。改动立刻生效，不用刷新。
 // 分组（I1 整理）：
@@ -25,16 +25,11 @@ import { toast } from './ui/toast';
 // - Camera：星系、星球、漫游三套镜头
 // - Museum & viewer：Museum 卡片和查看器的色调映射、摄影棚灯（主画面不用它们）
 // 「Copy parameters」把这些表的 JSON 复制到剪贴板：用户调好发给我们，写回代码里的默认值
+// 面板的样子（U1）：ui/tuneShell.ts 的外壳——能拖、能收成小按钮，每个顶层分组一页（左边一列带图标的标签），
+// 复制按钮在底部，点了以后按钮上直接给反馈。这里和各模块照旧往 pane 上 addFolder，外壳把顶层分组变成一页
 
-// 用到的那部分 Tweakpane 接口。Tweakpane 4 的类型声明引用 @tweakpane/core（没装），这里自己写，类型检查不依赖它
-interface Events {
-  on(event: 'change' | 'click', handler: () => void): unknown;
-}
-interface Folder extends Events {
-  addFolder(params: { title: string; expanded?: boolean }): Folder;
-  addBinding<T extends object>(target: T, key: keyof T & string, params?: Record<string, unknown>): Events;
-  addButton(params: { title: string }): Events;
-}
+// 用到的那部分 Tweakpane 接口（Tweakpane 4 的类型声明引用 @tweakpane/core，没装，所以自己写）
+type Folder = TuneFolder;
 
 // 面板上直接拖的「星球」参数：半径滑块拖动时实时重建（拖动中每次变化都建一遍，松手不用再等）
 const PLANET_TUNE = { radius: PLANET_RADIUS, sky: 'day' as 'day' | 'sunset' };
@@ -74,24 +69,22 @@ export function tuneJson(world?: World): string {
   );
 }
 
-async function copy(text: string): Promise<void> {
+// 复制成功返回 true（按钮变绿打勾）；剪贴板不让写（不是安全上下文、页面没有焦点）时打印到控制台、提示一下，返回 false
+async function copy(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
-    toast('Parameters copied');
+    return true;
   } catch {
-    // 剪贴板不让写（不是安全上下文、页面没有焦点）：打印到控制台
     console.log(text);
     toast('Could not copy. The parameters are in the browser console.');
+    return false;
   }
 }
 
 export function installTune(world: World): void {
-  const container = document.createElement('div');
-  container.className = 'tune-pane';
-  // 压在顶栏、Members / Museum、查看器上面（它们的 z-index 最高 20），顶栏下面靠右
-  Object.assign(container.style, { position: 'fixed', top: '76px', right: '12px', width: '300px', maxHeight: 'calc(100vh - 88px)', overflowY: 'auto', zIndex: '30' });
-  document.body.append(container);
-  const pane = new Pane({ title: 'Tune', container }) as unknown as Folder;
+  // 外壳压在顶栏、Members / Museum、查看器上面（tune.css：z-index 30），默认在顶栏下面靠右
+  const shell = new TuneShell(() => copy(tuneJson(world)));
+  const pane: Folder = shell.root;
 
   // —— Planet ——
   const planetFolder = pane.addFolder({ title: 'Planet' });
@@ -241,6 +234,5 @@ export function installTune(world: World): void {
   perf.addBinding(stats, 'grass', { label: 'grass', readonly: true });
   perf.addBinding(stats, 'rocks', { label: 'rocks', readonly: true });
   perf.addBinding(stats, 'life', { label: 'life', readonly: true });
-
-  pane.addButton({ title: 'Copy parameters' }).on('click', () => void copy(tuneJson(world)));
+  // 「Copy parameters」在外壳底部（TuneShell 构造时传进去的 copy）
 }

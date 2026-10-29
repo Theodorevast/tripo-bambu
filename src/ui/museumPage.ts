@@ -10,6 +10,8 @@ import { toHash, type Route } from '../router';
 import { addStudioLights } from '../scenes/lights';
 import type { World } from '../scenes/world';
 import { el } from './dom';
+import { activeElement, animate, bindTilt, curve, EASE_IN, EASE_OUT, finished, focusQuietly, Presence, reducedMotion, setLaunchOrigin } from './motion';
+import { plural, sheetHead } from './sheet';
 import { toast } from './toast';
 import { authorLine, failedNote, workNumber } from './workCard';
 
@@ -20,26 +22,55 @@ interface Card {
   node: HTMLElement;
   preview: HTMLElement;
   work: Work;
+  hovered: boolean;
 }
 
-// Museum：团队作品网格，每张卡片里一个慢慢自转的模型；点开进入大图查看器
+// 这一次打开建出来的几块（进场、退场动画要用）
+interface Parts {
+  panel: HTMLElement;
+  head: HTMLElement;
+  cards: HTMLElement[];
+}
+
+// 悬停时作品转快一点、稍微放大；离开时慢慢回到平时的速度
+const SPIN_IDLE = 0.45;
+const SPIN_HOVER = 2.1;
+
+// 作品第一次出现在卡片里时「蹦」出来：阻尼弹簧，0 → 1，带一点过冲（约 0.55 秒停稳）
+function pop(t: number): number {
+  if (t >= 0.6) return 1;
+  const w = 15;
+  const z = 0.48;
+  const wd = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + ((z * w) / wd) * Math.sin(wd * t));
+}
+
+// Museum：团队作品挂在一块「展板」上，每张卡片里一个慢慢自转的模型；点开进入大图查看器
 // open() 不等任何模型（路由是串行的，等了就会卡住 Esc、返回这些操作）：网格和查看器面板马上出来，模型在后台加载
 // 给脚本的就绪信号：每张卡片的模型挂好后 .mc-preview 加 ready 类；全部挂好后 section.museum 加 data-ready="true"；
 // 查看器的模型画出第一帧后 .viewer-stage 加 ready 类
+// 动效（U1）：展板从上面荡下来，卡片一张张弹进来；模型到了在卡片里蹦出来；悬停时卡片朝鼠标倾斜、抬起，模型转快；
+// 按下回弹；点开时卡片放大成查看器（共用元素过渡），关掉时缩回卡片。关掉 Museum：展板往上收走、淡掉，放完才藏起来。
+// 减弱动效时只淡入淡出。打开时主画面停画（被盖住了，省 GPU），关掉时恢复
 export class MuseumPage implements Sheet {
   private readonly node = el('section', { className: 'sheet museum' });
+  private readonly presence = new Presence(this.node);
   private readonly canvas = el('canvas', { className: 'museum-canvas' });
   private readonly library = new ModelLibrary(); // 卡片预览的渲染器专用
   private readonly viewer: Viewer;
   private readonly world: World;
   private readonly onClose: () => void;
   private readonly onSelect: (workId: string | null) => void;
+  private readonly cards = new Map<string, Card>();
   private multiview: MultiView | null = null;
   private multiviewReady: Promise<MultiView> | null = null;
   private teamId: string | null = null;
   private token = 0;
+  private parts: Parts | null = null;
   private previewing = false; // 卡片预览的渲染循环该不该跑（Museum 开着、预览已经开始）
   private watchingVisibility = false;
+  private canvasFade: Animation | null = null;
+  private returnFocus: HTMLElement | null = null;
   private readonly onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !this.viewer.isOpen) this.onClose(); };
 
   constructor(root: HTMLElement, world: World, onClose: () => void, onSelect: (workId: string | null) => void) {
@@ -47,12 +78,13 @@ export class MuseumPage implements Sheet {
     this.onClose = onClose;
     this.onSelect = onSelect;
     this.node.hidden = true;
+    this.node.setAttribute('aria-label', 'Museum');
     this.canvas.hidden = true;
     this.node.addEventListener('click', (e) => { if (e.target === this.node) this.onClose(); });
     // 预览 canvas 在最上层：查看器打开时要藏起来，否则卡片会画到查看器上面
     this.viewer = new Viewer(root, () => this.onSelect(null), (open) => {
       this.canvas.hidden = open || !LIVE_CARD_PREVIEWS || this.teamId === null;
-    });
+    }, (workId) => this.cards.get(workId)?.preview ?? null);
     root.append(this.node, this.canvas);
   }
 
@@ -77,15 +109,32 @@ export class MuseumPage implements Sheet {
     if (this.teamId === null) return;
     this.token++;
     this.teamId = null;
-    this.node.hidden = true;
     delete this.node.dataset.ready;
-    this.canvas.hidden = true;
     this.viewer.close();
     this.previewing = false;
     this.multiview?.clearViews();
     this.multiview?.renderer.setAnimationLoop(null);
     this.world.paused = false;
     removeEventListener('keydown', this.onKey);
+    // 焦点在 Museum 里（Esc 关的）：还给打开前的按钮
+    const a = activeElement();
+    const back = a && this.node.contains?.(a) ? this.returnFocus : null;
+    this.returnFocus = null;
+    // 预览画布（停在最后一帧）先很快淡掉，卡片和展板再收走
+    this.canvasFade?.cancel();
+    const fade = reducedMotion() ? null : animate(this.canvas, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: 'ease-in', fill: 'forwards' });
+    this.canvasFade = fade;
+    if (fade) {
+      void finished([fade]).then(() => {
+        if (this.canvasFade !== fade) return;
+        this.canvas.hidden = true;
+        fade.cancel();
+        this.canvasFade = null;
+      });
+    } else this.canvas.hidden = true;
+    const parts = this.parts;
+    void this.presence.hide(() => this.exit(parts));
+    if (back) focusQuietly(back);
   }
 
   private renderGrid(team: Team): void {
@@ -93,24 +142,62 @@ export class MuseumPage implements Sheet {
     this.teamId = team.id;
     this.world.paused = true; // 主画面被盖住了，停掉省 GPU
     addEventListener('keydown', this.onKey);
-    const cards = team.works.map((w) => this.card(team, w));
-    const count = team.works.length;
-    this.node.replaceChildren(el('div', { className: 'sheet-panel wide' },
-      el('header', { className: 'sheet-head' },
-        el('div', {},
-          el('div', { className: 'mono', textContent: `${count} ${count === 1 ? 'work' : 'works'} · ${team.name}` }),
-          el('h1', { className: 'display', textContent: 'Museum' }),
-        ),
-        el('button', { className: 'sheet-close', textContent: 'Close', onclick: () => this.onClose() }),
-      ),
-      cards.length ? el('div', { className: 'museum-grid' }, ...cards.map((c) => c.node)) : el('p', { className: 'empty display', textContent: 'No works yet' }),
-    ));
+    this.canvasFade?.cancel();
+    this.canvasFade = null;
+    this.cards.clear();
+    const cards = team.works.map((w, i) => this.card(team, w, i));
+    for (const c of cards) this.cards.set(c.work.id, c);
+    const head = sheetHead(team, 'Museum', cards.length ? `${plural(cards.length, 'work', 'works')} on display` : 'The halls are still empty', () => this.onClose());
+    const grid = cards.length
+      ? el('div', { className: 'museum-grid' }, ...cards.map((c) => c.node))
+      : el('div', { className: 'museum-empty' }, el('i', { className: 'empty-plinth' }), el('p', { className: 'empty display', textContent: 'No works yet' }));
+    const panel = el('div', { className: 'sheet-panel wide', tabIndex: -1 }, head, grid);
+    this.parts = { panel, head, cards: cards.map((c) => c.node) };
+    this.node.replaceChildren(panel);
     delete this.node.dataset.ready;
-    this.node.hidden = false;
+    if (!this.presence.shown) this.returnFocus = activeElement();
+    const parts = this.parts;
+    this.presence.show(() => this.enter(parts));
+    focusQuietly(panel);
     this.startPreviews(cards, token).then(
       () => { if (token === this.token) this.node.dataset.ready = 'true'; },
       (err: unknown) => console.error(err),
     );
+  }
+
+  // —— 进场：背景淡入，展板从上面荡下来（像挂在绳子上），标题、卡片依次弹进来 ——
+  private enter(p: Parts): Array<Animation | null> {
+    const list: Array<Animation | null> = [animate(this.node, [{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: 'ease-out' })];
+    if (reducedMotion()) {
+      list.push(animate(p.panel, [{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'ease-out', fill: 'backwards' }));
+      return list;
+    }
+    list.push(
+      animate(p.panel, [
+        { opacity: 0, transform: 'translateY(-70px) rotate(-3.5deg)', transformOrigin: '50% -120px' },
+        { opacity: 1, transform: 'none', transformOrigin: '50% -120px' },
+      ], { duration: 820, easing: curve('spring'), fill: 'backwards' }),
+      animate(p.head, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: 220, easing: EASE_OUT, fill: 'backwards' }),
+    );
+    p.cards.forEach((c, i) => {
+      list.push(animate(c, [
+        { opacity: 0, transform: `translateY(34px) scale(0.8) rotate(${i % 2 ? 4 : -4}deg)` },
+        { opacity: 1, transform: 'none' },
+      ], { duration: 660, delay: 300 + i * 70, easing: curve('spring'), fill: 'backwards' }));
+    });
+    return list;
+  }
+
+  // —— 退场：卡片一起收小，展板往上提走、淡掉 ——
+  private exit(p: Parts | null): Array<Animation | null> {
+    const reduce = reducedMotion();
+    const fadeAll = animate(this.node, [{ opacity: 1 }, { opacity: 0 }], { duration: reduce ? 200 : 340, delay: reduce ? 0 : 40, easing: 'ease-in', fill: 'forwards' });
+    if (reduce || !p) return [fadeAll];
+    return [
+      fadeAll,
+      ...p.cards.map((c) => animate(c, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.9)' }], { duration: 150, easing: EASE_IN, fill: 'forwards' })),
+      animate(p.panel, [{ transform: 'none' }, { transform: 'translateY(-46px) rotate(2deg)' }], { duration: 320, delay: 40, easing: EASE_IN, fill: 'forwards' }),
+    ];
   }
 
   // 卡片预览：共用一个 canvas，每张卡片一个视口；模型各自加载，好一个挂一个
@@ -139,13 +226,30 @@ export class MuseumPage implements Sheet {
       queue = compiled.catch(() => {});
       await compiled;
       if (token !== this.token) return;
-      if (model.failed) c.node.append(failedNote());
+      if (model.failed) c.node.querySelector('.mc-plate')?.append(failedNote());
       c.preview.classList.add('ready');
-      mv.add({ element: c.preview, scene, camera, tick: (dt) => { model.object.rotation.y += dt * 0.5; } });
+      // 自转：平时慢慢转，悬停时转快、放大一点点；第一次出现时从 0 蹦到原来的大小（缩放乘在模型原有的缩放上）
+      const base = model.object.scale.clone();
+      let age = reducedMotion() ? 1 : 0;
+      let spin = SPIN_IDLE;
+      let lift = 0;
+      mv.add({
+        element: c.preview,
+        scene,
+        camera,
+        tick: (dt) => {
+          age += dt;
+          const k = 1 - Math.exp(-dt * 5);
+          spin += ((c.hovered ? SPIN_HOVER : SPIN_IDLE) - spin) * k;
+          lift += ((c.hovered ? 1 : 0) - lift) * k;
+          model.object.rotation.y += dt * spin;
+          model.object.scale.copy(base).multiplyScalar(pop(age) * (1 + 0.06 * lift));
+        },
+      });
     }));
   }
 
-  // 卡片预览的渲染循环：按真实帧间隔转，刷新率高的屏幕上也是每秒 0.5 弧度；每次开始时第一帧的 dt 是 0，
+  // 卡片预览的渲染循环：按真实帧间隔转，刷新率高的屏幕上也是同样的速度；每次开始时第一帧的 dt 是 0，
   // 切回标签页时不补后台那段时间
   private runPreviews(mv: MultiView): void {
     let last = -1;
@@ -168,24 +272,45 @@ export class MuseumPage implements Sheet {
     });
   }
 
-  private card(team: Team, work: Work): Card {
+  // 一张展品卡：画框（里面是 3D 预览）+ 下面的小展签（作品名、作者、编号）
+  private card(team: Team, work: Work, i: number): Card {
     const preview = el('div', { className: 'mc-preview' });
     if (!LIVE_CARD_PREVIEWS) {
       preview.classList.add('ready');
       if (work.thumb) preview.append(el('img', { src: thumbUrl(work.thumb), alt: work.title }));
     }
-    const node = el('article', {
-      className: 'museum-card',
-      tabIndex: 0,
-      onclick: () => this.onSelect(work.id),
-      onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') this.onSelect(work.id); },
-    },
-      preview,
+    const plate = el('div', { className: 'mc-plate' },
       el('div', { className: 'mc-title display', textContent: work.title }),
       el('div', { className: 'mc-by', textContent: authorLine(work, team) }),
       el('div', { className: 'mono', textContent: workNumber(work, team) }),
     );
+    const layer = el('div', { className: 'mc-tilt' }, el('div', { className: 'mc-frame' }, preview, el('i', { className: 'mc-shine' })), plate);
+    const select = (): void => {
+      setLaunchOrigin(preview);
+      this.onSelect(work.id);
+    };
+    const node = el('article', {
+      className: 'museum-card',
+      tabIndex: 0,
+      onclick: select,
+      onkeydown: (e: KeyboardEvent) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        // 键盘也有「按下去」的感觉：先压一下再打开
+        if (!reducedMotion()) animate(layer, [{ transform: 'none' }, { transform: 'scale(0.95)', offset: 0.4 }, { transform: 'none' }], { duration: 260, easing: EASE_OUT, composite: 'add' });
+        select();
+      },
+    }, layer);
     node.setAttribute('role', 'button');
-    return { node, preview, work };
+    node.setAttribute('aria-label', `${work.title}, ${authorLine(work, team)}. Open in the viewer`);
+    node.style.setProperty?.('--i', String(i));
+    const card: Card = { node, preview, work, hovered: false };
+    const hover = (on: boolean) => () => { card.hovered = on; };
+    node.addEventListener('pointerenter', hover(true));
+    node.addEventListener('pointerleave', hover(false));
+    node.addEventListener('focus', hover(true));
+    node.addEventListener('blur', hover(false));
+    bindTilt(node, layer, 7);
+    return card;
   }
 }
