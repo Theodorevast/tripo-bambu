@@ -1,4 +1,4 @@
-// 首页（H2）自查：版式和名牌、标题区、悬停和进星球、右下角的翠宝和领券窗口（Claim、Esc、点外面、关闭按钮、冷却）、减少动态效果。
+// 首页（H2）自查：版式和名牌、标题区、悬停和进星球、右下角的翠宝和领券窗口（Claim、Esc、点外面、关闭按钮、冷却）、云里探头的翠宝（不压名牌、点它领券、冷却中摇头）、减少动态效果。
 // node scripts/check-home.mjs。WEBGL2=1：藏起 navigator.gpu 走 WebGL2；HEADED=1：有界面的 Chrome（无头模式可能拿不到 WebGPU）；
 // SIZE=390x844：手机竖屏。翠宝那几项连做 ROUNDS 轮（默认 3）：点翠宝 → 窗口出来 → 用不同的方式关掉 → 冷却中再点只摇头
 import { readFileSync } from 'node:fs';
@@ -42,6 +42,27 @@ async function open({ reduced = false } = {}) {
 }
 
 const homeState = (page) => page.evaluate(() => window.__home.state());
+// 云里的翠宝露出来的那一块（rect）压到了什么：显示着的名牌、标题卡片、星球（画面上的圆）、看得清的云朵翠宝（P3）
+const cloudClash = (page, rect) => page.evaluate(async (r) => {
+  if (!r) return ['没有露出来'];
+  const out = [];
+  const hit = (b) => b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top;
+  for (const t of document.querySelectorAll('.planet-tags.is-shown .planet-tag:not(.is-off)')) if (hit(t.getBoundingClientRect())) out.push(`名牌 ${t.querySelector('.pt-name')?.textContent}`);
+  const title = document.querySelector('.tb-title')?.getBoundingClientRect();
+  if (title && hit(title)) out.push('标题卡片');
+  const ct = (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo();
+  const cr = ct?.screenRect();
+  if (cr && ct.opacity >= 0.12 && hit(cr)) out.push(`云朵翠宝（${ct.state.phase}）`);
+  const w = window.__world;
+  const d = { x: 0, y: 0, r: 0 };
+  for (const [id, e] of w.planets) {
+    if (!w.planetOnScreen(e, d)) continue;
+    const cx = Math.min(Math.max(d.x, r.left), r.right);
+    const cy = Math.min(Math.max(d.y, r.top), r.bottom);
+    if (Math.hypot(d.x - cx, d.y - cy) < d.r) out.push(`星球 ${id}`);
+  }
+  return out;
+}, rect);
 const tribooAt = async (page) => {
   await until(page, () => !!window.__home.state().triboo?.at, null, 15000);
   return (await homeState(page)).triboo?.at ?? null;
@@ -129,6 +150,15 @@ try {
     `大小 ${before.toFixed(3)} → ${hover.scale.toFixed(3)}，转了 ${hover.rot.toFixed(2)} rad，名牌 ${hover.tag}`);
   await page.mouse.move(W * 0.5, 40);
   await page.waitForTimeout(400);
+
+  // —— 3b. 云里探头的翠宝：开场演完以后至少 8 秒才第一次冒出来。之后先关掉定时（5a 用 peekCloud 叫它出来），免得半路冒出来挡着别的检查 ——
+  {
+    await until(page, () => (window.__home.state().cloud?.since ?? -1) >= 0 && window.__home.state().cloud.nextIn > 0, null, 15000);
+    const c = (await homeState(page)).cloud;
+    const first = c ? c.since + c.nextIn : -1;
+    check('云里的翠宝：开场演完以后至少 8 秒才第一次冒出来', !!c && (c.count === 0 ? first >= 8 : c.since >= 8), c ? `排在开场后 ${first.toFixed(1)} 秒，已经冒了 ${c.count} 次` : '没有');
+    await page.evaluate(async () => { (await import('/src/fun/cloudPeek.ts')).CLOUD_PEEK.enabled = false; });
+  }
 
   // —— 4. 右下角的翠宝：探头、靠近、悬停 ——
   const t0 = await tribooAt(page);
@@ -220,6 +250,236 @@ try {
     }
   }
   check('第一次点翠宝：最长帧间隔 ≤ 33 ms', firstMax !== null && firstMax <= 33.4, `${backend}，${firstMax?.toFixed(1)} ms`);
+
+  // —— 5a. 云里探头的翠宝：叫它出来（window.__home.peekCloud；?tune 的 Peek now 也是它）→ 露出来的那一块不压名牌、星球、标题卡片
+  //        → 悬停手形光标 → 点它吐一张券、领券窗口打开 → 关掉，再叫出来，冷却中用键盘按它只摇头；冒出来那一下、点它以后最长帧间隔 ≤ 33 ms ——
+  {
+    const open0 = () => !window.__home.state().card.open && document.querySelector('#app > .coupon-layer')?.hidden !== false;
+    await until(page, open0, null, 10000);
+    await until(page, () => window.__home.state().triboo.cooldown === 0, null, 10000);
+    // 冷却拉长到 30 秒（只在这一页）：第二次叫它出来时还在冷却中；最后改回来
+    const cooldown = await page.evaluate(async () => {
+      const m = await import('/src/fun/couponsMath.ts');
+      const was = m.COUPONS.cooldown;
+      m.COUPONS.cooldown = 30;
+      return was;
+    });
+    await page.mouse.move(W * 0.5, 12);
+    await page.waitForTimeout(500);
+    // 场上同一时间只有一只翠宝：每帧记一下，云里那只露着（鼓起来以后）的时候右下角那只是不是也露着
+    await page.evaluate(() => {
+      const o = (window.__both = { both: 0, cloud: 0, on: true });
+      const tick = () => {
+        const s = window.__home.state();
+        if (s.cloud?.active && s.cloud.phase !== 'wait') {
+          o.cloud++;
+          if (s.triboo?.shown) o.both++;
+        }
+        if (o.on) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await page.evaluate(() => { window.__rec = { frames: [], last: performance.now() }; });
+    const peeked = await page.evaluate(() => window.__home.peekCloud());
+    const up = await until(page, () => window.__home.state().cloud?.phase === 'stay' && !!window.__home.state().cloud.at, null, 4000);
+    const peekMax = await page.evaluate(() => { const r = window.__rec; window.__rec = null; return Math.max(...r.frames.slice(1)); });
+    const c1 = (await homeState(page)).cloud;
+    const clash = await cloudClash(page, c1?.rect ?? null);
+    const rect = c1?.rect ? `(${Math.round(c1.rect.left)}, ${Math.round(c1.rect.top)})–(${Math.round(c1.rect.right)}, ${Math.round(c1.rect.bottom)})` : '没有';
+    check('云里的翠宝：叫它出来 → 云面鼓起来、探出身子停着；露出来的那一块不压名牌、星球、标题卡片', peeked && up && clash.length === 0, `${rect}${clash.length ? `；压到 ${clash.join('、')}` : ''}`);
+    // 悬停：手形光标（星球不接这一下）
+    if (c1?.at) await page.mouse.move(c1.at.x, c1.at.y);
+    await page.waitForTimeout(350);
+    const hov = await page.evaluate(() => ({ hover: window.__home.state().cloud.hover, cursor: document.querySelector('#stage').style.cursor, planet: window.__world.hovered?.team.id ?? null }));
+    check('云里的翠宝：悬停时手形光标，一直露着', hov.hover && hov.cursor === 'pointer' && !hov.planet, JSON.stringify(hov));
+    // 点它：吐一张券，领券窗口打开（和右下角那只同一张券、同一个窗口）
+    const counts = () => page.evaluate(() => window.__coupons.state().counts);
+    const n0 = await counts();
+    const c2 = (await homeState(page)).cloud;
+    await page.evaluate(() => { window.__rec = { frames: [], last: performance.now() }; });
+    if (c2?.at) await page.mouse.click(c2.at.x, c2.at.y);
+    const opened = await until(page, () => window.__home.state().card.shown, null, 6000);
+    await page.waitForTimeout(600);
+    const clickMax = await page.evaluate(() => { const r = window.__rec; window.__rec = null; return Math.max(...r.frames.slice(1)); });
+    const n1 = await counts();
+    const card1 = (await homeState(page)).card;
+    check('云里的翠宝：点它 → 吐一张券 → 领券窗口打开（同一张券、同一个窗口）', opened && n1.spits - n0.spits === 1 && card1.open && !!card1.claim, `${card1.title ?? '没有窗口'}`);
+    // 关掉窗口，再叫它出来；冷却中用键盘（它身上那个看不见的按钮，回车）按它：只摇头，不吐券
+    await page.keyboard.press('Escape');
+    await until(page, () => !window.__home.state().card.open && document.querySelector('#app > .coupon-layer')?.hidden === true, null, 3000);
+    await page.mouse.move(W * 0.5, 12);
+    await until(page, () => window.__home.state().cloud.phase === 'idle', null, 5000);
+    const again = await page.evaluate(() => window.__home.peekCloud());
+    await until(page, () => window.__home.state().cloud?.phase === 'stay' && !!window.__home.state().cloud.at, null, 4000);
+    const n2 = await counts();
+    const key = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('#app > .home-triboo-key')].find((x) => /clouds/.test(x.textContent));
+      if (!b || b.hidden) return false;
+      b.focus();
+      return document.activeElement === b;
+    });
+    if (key) await page.keyboard.press('Enter');
+    const shook = await until(page, (n) => window.__coupons.state().counts.shakes > n, n2.shakes, 2000);
+    const st5 = await homeState(page);
+    const n3 = await counts();
+    check('云里的翠宝：冷却中再按它（键盘：它身上的按钮、回车）只摇头，不吐券', again && key && shook && n3.spits === n2.spits && !st5.card.open && st5.cloud.act === 'shake',
+      `act ${st5.cloud.act}，冷却还剩 ${st5.triboo.cooldown.toFixed(1)} 秒`);
+    await page.evaluate(() => document.activeElement?.blur());
+    check('云里的翠宝：冒出来那一下、点它以后最长帧间隔 ≤ 33 ms', Math.max(peekMax, clickMax) <= 33.4, `${backend}，冒出来 ${peekMax.toFixed(1)} ms，点它以后 ${clickMax.toFixed(1)} ms`);
+    const gone = await until(page, () => window.__home.state().cloud.phase === 'idle', null, 6000);
+    check('云里的翠宝：停一会儿沉回云里', gone);
+    const both = await page.evaluate(() => {
+      window.__both.on = false;
+      return window.__both;
+    });
+    check('场上同一时间只有一只翠宝：云里那只冒头前右下角那只整个缩到画面外', both.cloud > 0 && both.both === 0, `云里那只露着 ${both.cloud} 帧，其中右下角那只也露着 ${both.both} 帧`);
+    const back = await tribooAt(page);
+    check('云里那只沉下去以后，右下角那只探回原来的位置', !!back && back.x > W * 0.8 && back.y > H * 0.55, back ? `(${Math.round(back.x)}, ${Math.round(back.y)})` : '没回来');
+    await page.evaluate(async (was) => { (await import('/src/fun/couponsMath.ts')).COUPONS.cooldown = was; }, cooldown);
+  }
+
+  // —— 5c. 悬停时带路：指针在一颗星球上停 0.6 秒 → 云里的翠宝从它旁边冒出来指着它（不压这颗星球、它的名牌，也不压别的）；
+  //        指针移开就沉回去；带路的时候点星球照样进星球（带路的那只不接点击） ——
+  {
+    await until(page, () => !window.__home.state().card.open && !window.__home.state().cloud.active, null, 8000);
+    await page.mouse.move(W * 0.5, 12);
+    await page.waitForTimeout(400);
+    const pos = await page.evaluate((id) => window.__app.planetScreenPos(id), you.id);
+    const guideUp = (id) => {
+      const c = window.__home.state().cloud;
+      return c.mode === 'guide' && c.guideFor === id && c.phase === 'stay' && !!c.rect;
+    };
+    // 场上同一时间只有一只翠宝：带路的那只露着的时候右下角那只不露（同 5a，每帧记）
+    await page.evaluate(() => {
+      const o = (window.__both = { both: 0, cloud: 0, on: true });
+      const tick = () => {
+        const s = window.__home.state();
+        if (s.cloud?.active && s.cloud.phase !== 'wait') {
+          o.cloud++;
+          if (s.triboo?.shown) o.both++;
+        }
+        if (o.on) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const t0 = Date.now();
+    await page.mouse.move(pos.x, pos.y);
+    const early = await page.evaluate(() => window.__home.state().cloud.active);
+    const guided = await until(page, guideUp, you.id, 5000);
+    const took = (Date.now() - t0) / 1000;
+    const g = (await homeState(page)).cloud;
+    const clash = await cloudClash(page, g?.rect ?? null);
+    // 在它旁边：露出来的那一块离这颗星球的圆不超过它自己高度的两倍（手机上你的星球两边被它的宽名牌占着，只能站得远一点）
+    const near = await page.evaluate(([id, r]) => {
+      const w = window.__world;
+      const d = { x: 0, y: 0, r: 0 };
+      if (!r || !w.planetOnScreen(w.planets.get(id), d)) return null;
+      const cx = Math.min(Math.max(d.x, r.left), r.right);
+      const cy = Math.min(Math.max(d.y, r.top), r.bottom);
+      return { gap: Math.round(Math.hypot(d.x - cx, d.y - cy) - d.r), side: (r.left + r.right) / 2 < d.x ? 'left' : 'right', h: Math.round(r.bottom - r.top) };
+    }, [you.id, g?.rect ?? null]);
+    check('悬停带路：指针在星球上停 0.6 秒 → 翠宝从它旁边的云里冒出来指着它，不压名牌、星球',
+      !early && guided && clash.length === 0 && !!near && near.gap < near.h * 2,
+      `${took.toFixed(1)} 秒露出来，${near ? `在${near.side === 'left' ? '左' : '右'}边，离星球 ${near.gap} px（它自己高 ${near.h} px）` : '没露出来'}${clash.length ? `；压到 ${clash.join('、')}` : ''}`);
+    await page.mouse.move(W * 0.5, 12);
+    const gone = await until(page, () => !window.__home.state().cloud.active, null, 3000);
+    const both = await page.evaluate(() => {
+      window.__both.on = false;
+      return window.__both;
+    });
+    check('悬停带路：指针移开就沉回云里；带路的时候右下角那只缩在画面外', gone && both.cloud > 0 && both.both === 0, `带路的那只露着 ${both.cloud} 帧，其中右下角那只也露着 ${both.both} 帧`);
+    // 再指一次（前 3 次一定带），带路的时候点星球：照样进星球
+    await page.waitForTimeout(300);
+    await page.mouse.move(pos.x, pos.y);
+    const guided2 = await until(page, guideUp, you.id, 5000);
+    await page.mouse.click(pos.x, pos.y);
+    const entered = await until(page, (id) => location.hash === `#/t/${id}` && window.__app.routeIdle(), you.id, 30000);
+    const after = (await homeState(page)).cloud;
+    check('悬停带路：带路的时候点星球照样进星球（带路的那只不接点击），进了星球它就不在了', guided2 && entered && !after.active, `guided ${guided2}，entered ${entered}`);
+    if (entered) {
+      await page.locator('.topbar button', { hasText: 'Galaxy' }).click();
+      await until(page, () => window.__app.routeIdle() && (location.hash === '#/' || location.hash === ''), null, 30000);
+      await page.waitForTimeout(800);
+    }
+    // 定时那只露着的时候指到另一颗星球上：它先沉下去，再从那颗星球旁边冒出来（那颗 30 秒内没带过路）。
+    // 有的星球旁边没地方（手机上挤，P3 的云朵翠宝也占着一块）：这一次不带路，换下一颗再试；定时那只沉下去这一步每次都要对
+    const others = await page.evaluate(() => window.__home.state().tags.filter((t) => t.shown && !t.you).map((t) => t.id));
+    const tried = [];
+    let reEmerged = null;
+    for (const other of others) {
+      await page.mouse.move(W * 0.5, 12);
+      await until(page, () => !window.__home.state().cloud.active && !window.__home.state().card.open, null, 6000);
+      const peeked = await page.evaluate(() => window.__home.peekCloud());
+      const up = await until(page, () => window.__home.state().cloud?.phase === 'stay' && window.__home.state().cloud.mode === 'timer', null, 4000);
+      const op = await page.evaluate((id) => window.__app.planetScreenPos(id), other);
+      if (op) await page.mouse.move(op.x, op.y);
+      const sank = await until(page, () => ['sink', 'close'].includes(window.__home.state().cloud.phase), null, 1500);
+      const moved = await until(page, guideUp, other, 5000);
+      tried.push(`${other}：${moved ? '旁边冒出来了' : '旁边没地方，没带'}${peeked && up && sank ? '' : `（peek ${peeked}，up ${up}，sank ${sank}）`}`);
+      if (!(peeked && up && sank)) break;
+      if (moved) {
+        reEmerged = other;
+        break;
+      }
+    }
+    check('定时那只露着的时候指到星球上：它先沉下去，再从那颗星球旁边冒出来', !!reEmerged, tried.join('；') || '没有显示着的别的名牌');
+    await page.mouse.move(W * 0.5, 12);
+    await until(page, () => !window.__home.state().cloud.active, null, 3000);
+  }
+
+  // —— 5d. 和 P3 的云朵翠宝（scenes/homeCloudTriboo.ts）互相避开：它聚好、散开、聚拢的时候各叫一次云里那只，
+  //        每帧记：云里那只探出来、停着，云朵翠宝也看得清（opacity ≥ 0.12）的时候，两个在画面上叠在一起的帧数（要 0）；
+  //        散开时云朵翠宝占的地方比聚好时大 ——
+  {
+    await page.evaluate(async () => { window.__cloudTriboo = (await import('/src/scenes/homeCloudTriboo.ts')).cloudTriboo; });
+    const cloudPhase = (ph) => until(page, (p) => window.__cloudTriboo?.()?.state.phase === p, ph, 60000);
+    const width = () => page.evaluate(() => { const r = window.__cloudTriboo?.()?.screenRect(); return r ? r.right - r.left : 0; });
+    const idle = () => until(page, () => !window.__home.state().cloud.active && !window.__home.state().card.open, null, 9000);
+    const peekOnce = async () => {
+      await idle();
+      const ok = await page.evaluate(() => window.__home.peekCloud());
+      await until(page, () => window.__home.state().cloud.phase === 'stay' || !window.__home.state().cloud.active, null, 4000);
+      await idle();
+      return ok;
+    };
+    await page.mouse.move(W * 0.5, 12);
+    await page.evaluate(() => {
+      const o = (window.__overlap = { both: 0, frames: 0, on: true });
+      const tick = () => {
+        const c = window.__home.state().cloud;
+        const ct = window.__cloudTriboo?.();
+        const r = ct?.screenRect();
+        if (c?.rect && (c.phase === 'rise' || c.phase === 'stay')) {
+          o.frames++;
+          if (r && ct.opacity >= 0.12 && c.rect.left < r.right && c.rect.right > r.left && c.rect.top < r.bottom && c.rect.bottom > r.top) o.both++;
+        }
+        if (o.on) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const shown = await cloudPhase('show');
+    const p1 = await peekOnce();
+    // 云朵翠宝自己大约 40 秒散一次：等它聚好（错过了就等下一次聚好），量一下聚好时多大，再让它马上散开
+    await cloudPhase('show');
+    const wShow = await width();
+    await page.evaluate(() => window.__cloudTriboo?.()?.replay());
+    const scattering = await cloudPhase('scatter');
+    await page.waitForTimeout(500);
+    const wScatter = await width();
+    const p2 = await peekOnce();
+    // 散开以后一会儿就换个地方聚拢；错过了（已经聚好）就再散一次
+    if (!(await page.evaluate(() => window.__cloudTriboo?.()?.state.phase === 'gather'))) await page.evaluate(() => window.__cloudTriboo?.()?.replay());
+    const gathering = await cloudPhase('gather');
+    await page.waitForTimeout(400);
+    const p3 = await peekOnce();
+    const o = await page.evaluate(() => {
+      window.__overlap.on = false;
+      return window.__overlap;
+    });
+    check('和云朵翠宝互相避开：它聚好、散开、聚拢的时候叫云里那只出来，探出来、停着的时候都不和它叠在一起；散开时它占的地方更大',
+      shown && scattering && gathering && p1 && p2 && p3 && o.frames > 0 && o.both === 0 && wScatter > wShow,
+      `云里那只探出来、停着 ${o.frames} 帧，叠在一起 ${o.both} 帧；云朵翠宝聚好时宽 ${Math.round(wShow)} px，散开 0.5 秒时 ${Math.round(wScatter)} px`);
+  }
 
   // —— 5b. 螺旋星系随便转：左右拖 180° 以后，照样能悬停名牌、点进星球；回首页时回到正面的取景 ——
   {
@@ -330,6 +590,10 @@ try {
   await r.page.waitForTimeout(800);
   const rAt = await tribooAt(r.page);
   const rIntro = (await homeState(r.page)).intro;
+  // 云里的翠宝：减弱动效时不冒出来（叫它也不出来）
+  await until(r.page, () => window.__home.state().cloud?.ready === true, null, 15000);
+  const rCloud = await r.page.evaluate(() => ({ peek: window.__home.peekCloud?.() ?? null, active: window.__home.state().cloud?.active ?? null }));
+  check('减少动态效果：云里的翠宝不冒出来（叫它也不出来）', rCloud.peek === false && rCloud.active === false, JSON.stringify(rCloud));
   if (rAt) await r.page.mouse.click(rAt.x, rAt.y);
   let flew = false;
   const rShown = await until(r.page, () => window.__home.state().card.shown, null, 6000);

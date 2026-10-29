@@ -389,7 +389,54 @@ export class CloudTriboo {
     const c = this.uCenter.value;
     return { phase: this.phase, center: [c.x, c.y, c.z], scale: this.uScale.value };
   }
+
+  // 只读：这朵云现在看得多清楚（0..1：散开的进度、首页淡入淡出都算上，同着色器）
+  get opacity(): number {
+    if (this.phase === 'hidden' || !this.sprite.visible) return 0;
+    const sc = this.scatterK();
+    return (1 - sc ** 1.4) * this.fade;
+  }
+
+  // 只读：这朵云现在在画面上占的地方（CSS 像素的方框；没在画时 null）。
+  // 聚好时按连手带脚约 1.9 倍身子半径的圆算（同 clearance）；散开、聚拢的时候按云絮散到多远算（着色器里每团最多往外散 2.4 倍、往上 0.5 倍），
+  // 散得越开越大。聚拢时从一开始就算（它要聚到这里来）；散开时淡到快看不见就不算（它要走了）。
+  // 首页云里探头的翠宝（fun/cloudPeek.ts）挑位置时躲开它
+  screenRect(out: ScreenRect = { left: 0, top: 0, right: 0, bottom: 0 }): ScreenRect | null {
+    if (this.phase === 'hidden' || !this.sprite.visible) return null;
+    const sc = this.scatterK();
+    if (this.phase === 'scatter' && (1 - sc ** 1.4) * this.fade < 0.12) return null;
+    const cam = this.world.rig.camera;
+    const S = this.uScale.value;
+    _rc.copy(this.uCenter.value).addScaledVector(this.uUp.value, 0.5 * sc * S);
+    _rp.copy(_rc).project(cam);
+    if (_rp.z > 1) return null;
+    const x = ((_rp.x + 1) / 2) * innerWidth;
+    const y = ((1 - _rp.y) / 2) * innerHeight;
+    const d = Math.max(1e-3, cam.position.distanceTo(_rc));
+    const r = ((S * (1.9 + 2.4 * sc)) / d / Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2)) * (innerHeight / 2);
+    out.left = x - r;
+    out.top = y - r;
+    out.right = x + r;
+    out.bottom = y + r;
+    return out;
+  }
+
+  // 散开的进度（同着色器里的 smoothstep(0, 1, uScatter)）
+  private scatterK(): number {
+    const u = THREE.MathUtils.clamp(this.uScatter.value, 0, 1);
+    return u * u * (3 - 2 * u);
+  }
 }
+
+export interface ScreenRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+const _rc = new THREE.Vector3();
+const _rp = new THREE.Vector3();
 
 let installed: CloudTriboo | null = null;
 
