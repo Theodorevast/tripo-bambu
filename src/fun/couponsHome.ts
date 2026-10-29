@@ -22,7 +22,12 @@ import { findArms, type Arm } from './tribooRig';
 // - 转场、星球视图里缩到边外；减弱动效时不探头、不挥手、不蹦，点了只亮一下 logo，领券窗口淡入
 // - 键盘：一个看不见的按钮（Tab 能选到，回车吐券），选中时翠宝探出来
 
-type Phase = 'away' | 'idle' | 'peek' | 'near' | 'greet' | 'spit' | 'shake';
+type Phase = 'away' | 'idle' | 'peek' | 'near' | 'greet' | 'spit' | 'shake' | 'hush';
+
+// 云里那只在场上时这只缩到边外；它沉下去以后先等 HUSH_WAIT 秒，再用放慢的弹簧（× HUSH_SLOW）花大约 HUSH_BACK 秒探回来
+const HUSH_WAIT = 0.5;
+const HUSH_BACK = 1.6;
+const HUSH_SLOW = 0.45;
 
 interface Act {
   mode: 'spit' | 'shake';
@@ -68,6 +73,7 @@ export class HomeTriboo {
   private waveT = 0;
   private raise = 0;
   private started = false; // 开过场了：打过招呼，或者直接从星球页回到首页
+  private hushT = -1; // 云里那只沉下去以后过了多久（秒；-1：没在等着探回来）
   private homeFor = 0;
   private time = 0;
   private hovering = false;
@@ -253,12 +259,21 @@ export class HomeTriboo {
       this.greetT += dt;
       if (this.greetT >= p.greetHold) this.greetT = -1;
     }
+    // 云里那只在场上（cloudPeek.ts，等着冒头的那一下也算）：整个缩到画面外（场上同一时间只有一只翠宝）；
+    // 它沉下去以后先在边外等一会儿，再慢慢探回原来的位置
+    const quiet = home && this.started && !this.act && this.greetT < 0 && (this.quiet?.() ?? false);
+    if (quiet) this.hushT = 0;
+    else if (this.hushT >= 0) {
+      this.hushT += dt;
+      if (this.hushT >= HUSH_WAIT + HUSH_BACK) this.hushT = -1;
+    }
+    const hushed = quiet || (this.hushT >= 0 && this.hushT < HUSH_WAIT);
     // 指针靠近（露出来那一块的中心）：探出更多、挥手；键盘选中也一样
     const s = this.screen;
-    this.near = home && this.started && !reduced && !this.coupons.card.open
+    this.near = home && this.started && !reduced && !this.coupons.card.open && !hushed
       && (this.focused || (this.pointer.inside && s.visible && Math.hypot(this.pointer.x - s.x, this.pointer.y - s.y) < p.reach));
     // 偶尔探头：只在没事干的时候
-    const idle = home && this.started && !this.act && this.greetT < 0 && !this.near && !reduced && !this.quiet?.();
+    const idle = home && this.started && !this.act && this.greetT < 0 && !this.near && !reduced && this.hushT < 0;
     if (this.peekT >= 0) {
       this.peekT += dt;
       if (this.peekT >= p.peekHold || !idle) this.peekT = -1;
@@ -281,7 +296,8 @@ export class HomeTriboo {
         target = g.out;
         raise = g.raise;
         wave = g.wave;
-      } else if (this.near) {
+      } else if (hushed) target = p.away;
+      else if (this.near) {
         target = p.near;
         raise = 1;
       } else if (this.peekT >= 0) {
@@ -296,7 +312,7 @@ export class HomeTriboo {
       this.out[0] = target;
       this.out[1] = 0;
       out = target;
-    } else out = stepOut(this.out, target, dt);
+    } else out = stepOut(this.out, target, this.hushT >= HUSH_WAIT ? dt * HUSH_SLOW : dt); // 探回来时慢一点（弹簧放慢）
     this.raise += (raise - this.raise) * (1 - Math.exp(-10 * dt));
     if (this.raise > 0.01) this.waveT += dt;
     else this.waveT = 0;
@@ -381,7 +397,7 @@ export class HomeTriboo {
   debug(): NonNullable<ReturnType<HomeDebug['state']>['triboo']> {
     const home = this.home();
     const a = this.act;
-    const phase: Phase = !home || !this.started ? 'away' : a ? a.mode : this.greetT >= 0 ? 'greet' : this.near ? 'near' : this.peekT >= 0 ? 'peek' : 'idle';
+    const phase: Phase = !home || !this.started ? 'away' : a ? a.mode : this.greetT >= 0 ? 'greet' : this.hushT >= 0 ? 'hush' : this.near ? 'near' : this.peekT >= 0 ? 'peek' : 'idle';
     const s = this.screen;
     return {
       ready: this.ready,
@@ -405,6 +421,11 @@ export class HomeTriboo {
   // 开场演完了（打过招呼，或者直接从星球页回到首页）：云里的那只从这时开始计时
   get opened(): boolean {
     return this.started && !this.greeting;
+  }
+
+  // 整个缩到画面外了：云里的那只等到这时才冒头
+  get tucked(): boolean {
+    return !this.ready || !this.root.visible || this.out[0] < -0.02;
   }
 }
 

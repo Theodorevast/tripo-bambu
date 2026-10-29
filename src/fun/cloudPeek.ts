@@ -22,7 +22,8 @@ import { findArms, type Arm } from './tribooRig';
 // - 点它：蓄力、弹起来吐一张券（Coupons.spitHome：和右下角那只同一张券、同一个领券窗口、同一个冷却），冷却中点只摇头；
 //   悬停时手形光标、身子轻轻一缩；键盘：露头的时候有一个看不见的按钮盖在它身上（同右下角那只）
 // 位置每次按当时的镜头挑（左右转 360° 都行）：画面中间偏下，躲开星球、名牌、标题卡片、右下角的翠宝、左下角的徽章。
-// 和别的东西错开：它露头时右下角那只不探头；指着星球或名牌、在拖、镜头还在动、在转场、造星窗口开着、领券窗口开着时不冒；
+// 和别的东西错开：场上同一时间只有一只翠宝——冒头前右下角那只先整个缩到画面外，这只沉下去以后它再慢慢探回来；
+// 指着星球或名牌、在拖、镜头还在动、在转场、造星窗口开着、领券窗口开着时不冒；
 // 开场结束后至少等 8 秒；减弱动效时不冒。
 // 开销：翠宝是开场探头那只（已经加载、编译好）的克隆，几何、材质共用，不编新的着色器，只在露头时显示；
 // 身边的小云是一批朝向镜头的面片（14 片，一次绘制），开场时在后台编好，只在露头时显示
@@ -46,7 +47,9 @@ export const CLOUD_PEEK = {
   puff: 1, // 小云的亮度
 };
 
-type Phase = 'idle' | 'bulge' | 'rise' | 'stay' | 'sink' | 'close';
+// wait：等右下角那只整个缩到画面外（场上同一时间只有一只翠宝），再让云面鼓起来
+type Phase = 'idle' | 'wait' | 'bulge' | 'rise' | 'stay' | 'sink' | 'close';
+const WAIT_MAX = 1.2; // 最多等多久（秒）
 type Mode = 'timer' | 'guide';
 
 interface Act {
@@ -283,15 +286,14 @@ export class CloudPeek {
   private start(mode: Mode, force: boolean): boolean {
     if (!this.choose(force)) return false;
     this.mode = mode;
-    this.phase = 'bulge';
+    this.phase = 'wait';
     this.t = 0;
     this.act = null;
     this.ours = false;
     this.turnFrom = Math.random() < 0.5 ? -1 : 1;
     this.raise = 0;
     this.count++;
-    this.fluff.sprite.visible = true;
-    this.place(0);
+    if (this.corner.tucked) this.toPhase('bulge');
     return true;
   }
 
@@ -494,17 +496,10 @@ export class CloudPeek {
 
   // 立刻收掉（转场、离开首页、造星窗口打开）
   private reset(): void {
-    this.phase = 'idle';
     this.act = null;
-    this.root.visible = false;
-    this.fluff.sprite.visible = false;
-    this.button.hidden = true;
-    this.box.valid = false;
-    this.body.valid = false;
-    if (this.hovering) this.setHover(false);
     this.logo?.(0);
     for (const a of this.arms) a.pivot.rotation.z = a.rest;
-    this.schedule();
+    this.finish();
   }
 
   private schedule(): void {
@@ -515,6 +510,10 @@ export class CloudPeek {
   private toPhase(phase: Phase): void {
     this.phase = phase;
     this.t = 0;
+    if (phase === 'bulge') {
+      this.fluff.sprite.visible = true;
+      this.place(0);
+    }
     if (phase === 'rise') this.root.visible = true;
     if (phase === 'close') {
       this.root.visible = false;
@@ -527,8 +526,14 @@ export class CloudPeek {
     const p = CLOUD_PEEK;
     this.t += dt;
     const out = this.phase === 'bulge' || this.phase === 'rise' || this.phase === 'stay';
-    // 别的东西开了领券窗口（右下角那只吐的）、开始指着星球或名牌：沉回去（自己吐的券开的窗口照样演完）
-    if (out && !this.act && ((this.coupons.card.open && !this.ours) || (this.mode === 'timer' && this.world.hovered !== null))) this.toPhase('sink');
+    // 别的东西开了领券窗口（右下角那只吐的）、开始指着星球或名牌：沉回去（自己吐的券开的窗口照样演完）；还没冒头就直接不冒了
+    if (!this.act && ((this.coupons.card.open && !this.ours) || (this.mode === 'timer' && this.world.hovered !== null))) {
+      if (this.phase === 'wait') {
+        this.finish();
+        return;
+      }
+      if (out) this.toPhase('sink');
+    }
     const a = this.act;
     if (a) {
       a.t += dt;
@@ -545,6 +550,10 @@ export class CloudPeek {
       } else if (a.t >= COUPONS.shakeSeconds) this.act = null;
     }
     switch (this.phase) {
+      case 'wait':
+        if (this.corner.tucked || this.t >= WAIT_MAX) this.toPhase('bulge');
+        else return;
+        break;
       case 'bulge':
         if (this.t >= p.bulge) this.toPhase('rise');
         break;
@@ -560,11 +569,7 @@ export class CloudPeek {
         break;
       case 'close':
         if (this.t >= p.close) {
-          this.phase = 'idle';
-          this.fluff.sprite.visible = false;
-          this.box.valid = false;
-          this.body.valid = false;
-          this.schedule();
+          this.finish();
           return;
         }
         break;
@@ -572,6 +577,18 @@ export class CloudPeek {
         break;
     }
     this.place(dt);
+  }
+
+  // 演完了（或者还没冒头就不冒了）：藏起来，排下一次
+  private finish(): void {
+    this.phase = 'idle';
+    this.root.visible = false;
+    this.fluff.sprite.visible = false;
+    this.button.hidden = true;
+    this.box.valid = false;
+    this.body.valid = false;
+    if (this.hovering) this.setHover(false);
+    this.schedule();
   }
 
   // 每帧：位置、朝向、姿态、手臂、身边的小云、盖在身上的按钮

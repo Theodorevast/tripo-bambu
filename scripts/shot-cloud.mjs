@@ -58,7 +58,7 @@ try {
     if (!ok) throw new Error(`${w}×${h}: 云里的翠宝冒不出来（peekCloud 返回 false）`);
     await page.evaluate(() => window.__trans.timeScale(0));
     const name = (s) => join(out, `cloud-${w}-${turn ? `turn${turn}-` : ''}${s}-${tag}.png`);
-    await advance(page, 0.3); // 云面鼓起来
+    await advance(page, 0.5); // 右下角那只先缩走，云面鼓起来
     await page.screenshot({ path: name('1-bulge') });
     await advance(page, 0.45); // 正在探出来
     await page.screenshot({ path: name('2-rise') });

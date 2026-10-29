@@ -91,7 +91,7 @@ at[175] = async () => {
   glide(at, 176, from, target, 34);
 };
 at[222] = () => page.mouse.click(target.x, target.y);
-await record('cloud-claim', 6.4, at, { bulge: 32, rise: 62, look: 110, wave: 168, hover: 214, charge: 232, spit: 244, fly: 262, open: 330 });
+await record('cloud-claim', 6.4, at, { bulge: 46, rise: 74, look: 122, wave: 180, hover: 214, charge: 232, spit: 244, fly: 262, open: 330 });
 const card = await page.evaluate(() => window.__home.state().card);
 console.log(`领券窗口：${JSON.stringify(card)}`);
 
