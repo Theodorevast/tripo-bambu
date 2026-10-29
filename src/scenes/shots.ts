@@ -10,12 +10,15 @@ import type { HomeCamera } from './homeLayout';
 // 距离都按星球半径换算（星球的按半径的倍数），拖半径滑块时取景跟着变
 
 // 首页（星系视图，H2）：镜头按版式取景（homeLayout.ts 的 fitHomeCamera：仰角、视角、画面里的安全区在 HOME_FIT），
-// 这里只管手动拖动的范围。版式是正对镜头排好的：左右、上下都只让转一点点（看得到一点侧面），滚轮远近也只给一点
+// 这里管手动拖动的范围：螺旋星系左右随便转（带惯性），上下在舒服的范围里（不低到云海、不转到正上方），远近也放宽
 export interface GalaxyShot {
   zoomIn: number; // 滚轮最多拉近到取景距离的几倍
   zoomOut: number; // 最多推远到几倍
-  orbit: number; // 左右最多转多少度
-  tilt: number; // 上下最多转多少度
+  orbit: number; // 左右最多转多少度（≥ 180 = 不限，随便转）
+  tilt: number; // 上下在默认仰角上下各能转多少度
+  minElevation: number; // 不管 tilt，镜头最低压到水平面以上多少度（再低就看到云海下面了）
+  maxElevation: number; // 最高多少度（不转到正上方）
+  spin: number; // 整个星系慢慢转（每分钟几圈；0 = 不转）：指着星球、名牌，或者在拖的时候停
 }
 
 export interface PlanetShot {
@@ -30,7 +33,7 @@ export interface PlanetShot {
 }
 
 export const SHOTS: { galaxy: GalaxyShot; planet: PlanetShot } = {
-  galaxy: { zoomIn: 0.84, zoomOut: 1.14, orbit: 45, tilt: 10 },
+  galaxy: { zoomIn: 0.62, zoomOut: 1.45, orbit: 180, tilt: 26, minElevation: 18, maxElevation: 78, spin: 0.4 },
   // 星球视图：沿展示方向的方位角、从斜上方 30° 看，离星球中心 2.8 个半径；画面中心比星球中心高 0.2 个半径（look 调的）：
   // 整颗星球坐在云海上，左右和下面都留出一圈云，作品那一带在画面中上部
   planet: { distance: 2.8, elevation: 30, lift: 0.2, fov: 45, minDistance: 1.35, maxDistance: 4, minElevation: 8, maxElevation: 80 },
@@ -171,20 +174,23 @@ export const PEEK: PeekShot = { delay: 0.2, rise: 0.55, wave: 1.2, waves: 3, duc
 const POLE = new THREE.Vector3(...SHOWCASE_POLE);
 const AZIMUTH = Math.atan2(POLE.x, POLE.z); // 展示方向的方位角（从 +Z 转向 +X）
 
-// 首页的取景：位置、看的点、视角来自 fitHomeCamera；不自转（版式正对镜头），上下只让转 tilt 度、远近只让拉一点。
-// 左右转的范围（orbit）CameraRig 不管：World 在首页时直接设到 OrbitControls 上，离开首页时放开
+// 首页的取景：位置、看的点、视角、抬头来自 fitHomeCamera；上下在默认仰角 ± tilt 度里转（再夹在 minElevation..maxElevation），
+// 远近按取景距离放宽。左右转的范围（orbit）和慢慢自转（spin）CameraRig 不管：World 在首页时每帧设到 OrbitControls 上
 export function homeFraming(cam: HomeCamera, shot: GalaxyShot = SHOTS.galaxy): Framing {
   const offset = cam.position.clone().sub(cam.target);
   const polar = Math.acos(THREE.MathUtils.clamp(offset.y / Math.max(1e-6, offset.length()), -1, 1));
   const tilt = THREE.MathUtils.degToRad(shot.tilt);
+  const lowest = THREE.MathUtils.degToRad(90 - shot.minElevation); // 极角越大越低
+  const highest = THREE.MathUtils.degToRad(90 - shot.maxElevation);
   return {
     target: cam.target.clone(),
     position: cam.position.clone(),
+    lift: cam.lift,
     fov: cam.fov,
     minDistance: cam.distance * Math.min(1, shot.zoomIn),
     maxDistance: cam.distance * Math.max(1, shot.zoomOut),
-    minPolar: Math.max(0.05, polar - tilt),
-    maxPolar: Math.min(Math.PI / 2, polar + tilt),
+    minPolar: Math.max(0.05, highest, Math.min(polar, polar - tilt)),
+    maxPolar: Math.min(Math.PI / 2, lowest, Math.max(polar, polar + tilt)),
     autoRotate: false,
   };
 }

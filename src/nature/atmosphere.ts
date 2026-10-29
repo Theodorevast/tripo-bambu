@@ -120,6 +120,8 @@ export interface Atmosphere {
   readonly horizon: THREE.Color; // 现在的地平线雾色（线性、曝光前；含预设过渡和雨）：首页把后排的星球往这个颜色淡（H2）
   // 漫游时地平线的「上」：传 camera.up（角色脚下的球面法线），标架直接跟着它；传 null 回到按镜头位置算（轨道视角）
   setHorizonUp(up: THREE.Vector3 | null): void;
+  // 首页（H2）：太阳的方位角再加多少度（跟着镜头左右转：星系转到背面也是迎光的，不会背光发黑）。只改 uniform，不加灯
+  setSunTurn(deg: number): void;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -590,6 +592,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
   let rain = 0;
   let lookDirty = true;
   let horizonUp: THREE.Vector3 | null = null;
+  let sunTurn = 0; // setSunTurn：方位角再加多少度
 
   // ---- 状态
   const center = new THREE.Vector3();
@@ -1042,7 +1045,7 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
 
     // 标架和太阳（漫游时「上」跟着 camera.up）
     frame.update(dt, camPos, center, radius, horizonUp);
-    sunDirection(sunLocal, params.sunAzimuth, params.sunElevation);
+    sunDirection(sunLocal, params.sunAzimuth + sunTurn, params.sunElevation);
     sunDir.copy(sunLocal).applyQuaternion(frame.q).normalize();
     uUp.value.copy(frame.up);
     uE1.value.set(1, 0, 0).applyQuaternion(frame.q);
@@ -1198,6 +1201,9 @@ export function createAtmosphere(scene: THREE.Scene, renderer: THREE.WebGPURende
     },
     get horizon() {
       return look.horizon;
+    },
+    setSunTurn(deg: number) {
+      sunTurn = deg;
     },
     setHorizonUp(up: THREE.Vector3 | null) {
       horizonUp = up;
