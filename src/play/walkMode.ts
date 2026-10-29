@@ -8,7 +8,7 @@ import type { PlanetScreen } from '../ui/planetScreen';
 import { authorLine } from '../ui/workCard';
 import { CharacterView, loadCharacter } from './character';
 import { FollowCamera } from './followCamera';
-import { CHAR_RADIUS, FOLLOW, NEAR_DISTANCE, WALK } from './params';
+import { CHAR_RADIUS, FOLLOW, NEAR_DISTANCE, WADE_DEPTH, WALK } from './params';
 import { blendPose, easeInOutCubic, retangent, slerpDir, walkGround } from './sphere';
 import { setObstacle, Walker, type Obstacle } from './walker';
 import './walk.css';
@@ -144,10 +144,14 @@ export class WalkMode {
         // 角色投影（脚下有影子才站得住）；要在预编译之前设好
         object.traverse((o) => { o.castShadow = true; });
         this.character.setModel(object);
-        await this.app.world.stage.precompile(object);
+        // 预编译拆好的部件（翠宝的鞋分成了左右两个新网格）：第一次进漫游时不卡
+        await this.app.world.stage.precompile(this.character.model);
         this.ready = true;
         // 模型还没好就进了漫游：好了马上出场
-        if (this.active && this.entry) this.character.show(this.entry.planet.group);
+        if (this.active && this.entry) {
+          this.character.resetGait(this.walker); // 脚的站姿按模型重新算过：站回去
+          this.character.show(this.entry.planet.group);
+        }
       })
       .catch((err: unknown) => console.error(err));
     return this.loading;
@@ -186,6 +190,7 @@ export class WalkMode {
     this.syncObstacles(true);
     this.walker.place(dir, facing, this.obstacles, this.obstacleCount);
     this.walker.distance = 0;
+    this.character.resetGait(this.walker);
     this.cam.reset(this.walker, this.walker.facing);
     this.cam.update(0, this.walker, false, this.floor);
     this.beginTransition('enter');
@@ -224,6 +229,7 @@ export class WalkMode {
     if (!this.entry) return;
     this.syncObstacles(true);
     this.walker.place(dir, heading, this.obstacles, this.obstacleCount);
+    this.character.resetGait(this.walker);
     this.cam.reset(this.walker, heading);
   }
 
@@ -267,6 +273,10 @@ export class WalkMode {
     const entry = this.entry;
     if (!entry) return;
     this.syncObstacles(false);
+    // 涉水：脚下的水深（地面最多比海面低 WADE_DEPTH），越深走得越慢
+    const sea = entry.planet.sea;
+    const depth = sea > 0 ? Math.max(0, sea - this.walker.radius) : 0;
+    this.walker.speedScale = 1 - WALK.wadeSlow * Math.min(1, depth / WADE_DEPTH);
     _wish.set(0, 0, 0);
     if (this.phase !== 'exit') {
       if (this.inputX !== 0 || this.inputY !== 0) {
@@ -274,13 +284,14 @@ export class WalkMode {
         // 镜头的右 = heading × up；斜着走不比直着快
         _v.crossVectors(this.cam.heading, this.cam.up);
         _wish.copy(this.cam.heading).multiplyScalar(this.inputY).addScaledVector(_v, this.inputX);
-        _wish.multiplyScalar(WALK.speed / _wish.length());
+        _wish.multiplyScalar((WALK.speed * this.walker.speedScale) / _wish.length());
       } else {
         this.walker.autoWish(dt, _wish);
       }
     }
     this.walker.step(dt, _wish, this.obstacles, this.obstacleCount);
     this.cam.update(dt, this.walker, this.walker.hasTarget && !this.dragging, this.floor);
+    this.character.depth = sea > 0 ? Math.max(0, sea - this.walker.radius) : 0;
     this.character.pose(this.walker, dt);
     // 生机层：脚底的世界坐标、世界坐标下的速度、着地（角色一直贴地走）。星球组没有旋转，本地 → 世界只差平移和缩放
     if (this.phase !== 'exit') {

@@ -34,6 +34,14 @@ export interface WalkState {
   near: string | null; // 显示标签的作品
   label: { visible: boolean; text: string; x: number; y: number };
   camera: { position: Vec; up: Vec; drive: boolean; controls: boolean };
+  anim: { rig: boolean; shoeTris: number[] | null; phase: number; amp: number }; // 走路动画：翠宝拆成部件了没有、鞋分成左右后的三角形数（左、右、原来）
+}
+
+// 走路动画里一只脚这一帧的样子（星球本地坐标）
+export interface FootSample {
+  planted: boolean;
+  pos: Vec;
+  lift: number;
 }
 
 declare global {
@@ -43,6 +51,7 @@ declare global {
       obstacles(): Array<{ id: string; dir: Vec; minAngle: number }>;
       teleport(dir: Vec, heading: Vec): boolean;
       trace(on: boolean): WalkSample[]; // trace(true) 开始记、返回空数组；trace(false) 停下、返回记下的每一帧
+      feet(): { left: FootSample; right: FootSample; phase: number; amp: number; bob: number; squash: number }; // 两只脚、身体颠的高度和伸缩：自查、录屏脚本算着地时滑了多远
     };
   }
 }
@@ -97,6 +106,7 @@ export function installWalkDebug(app: App, walk: WalkMode): void {
         near: walk.nearWork?.work.id ?? null,
         label: { visible: !!box, text: label?.textContent ?? '', x: box ? box.left + box.width / 2 : NaN, y: box ? box.top + box.height / 2 : NaN },
         camera: { position: vec(camera.position), up: axis(0, 1), drive: app.world.rig.drive !== null, controls: app.world.rig.controls.enabled },
+        anim: { rig: walk.character.parts !== null, shoeTris: walk.character.parts ? [...walk.character.parts.shoeTris] : null, phase: walk.character.gait.phase, amp: walk.character.gait.amp },
       };
     },
     obstacles: () => {
@@ -107,6 +117,12 @@ export function installWalkDebug(app: App, walk: WalkMode): void {
       if (!walk.planet) return false;
       walk.teleport(new THREE.Vector3(...dir), new THREE.Vector3(...heading));
       return true;
+    },
+    feet: () => {
+      const [l, r] = walk.character.gait.feet;
+      const foot = (f: typeof l): FootSample => ({ planted: f.planted, pos: vec(f.pos), lift: f.lift });
+      const g = walk.character.gait;
+      return { left: foot(l), right: foot(r), phase: g.phase, amp: g.amp, bob: g.bob, squash: g.squash };
     },
     trace: (on) => {
       const done = samples ?? [];

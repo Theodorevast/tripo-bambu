@@ -2,16 +2,12 @@ import * as THREE from 'three/webgpu';
 import { tribooUrl } from '../assets/brand';
 import type { ModelLibrary } from '../assets/models';
 import { easeOutBack } from '../scenes/stager';
-import { CHAR_HEIGHT, CHAR_RADIUS, WALK } from './params';
-import { damp } from './sphere';
+import { Gait } from './gait';
+import { CHAR_HEIGHT, CHAR_RADIUS, WALK_ANIM } from './params';
+import { buildTribooRig, type TribooRig } from './rig';
+import { signedAngle } from './sphere';
 import type { Walker } from './walker';
 
-// 整体动作的幅度（翠宝没有骨骼，只动整个身体）
-const BOB = 0.045 * CHAR_HEIGHT; // 每一步往上颠多高
-const SWAY = 0.11; // 左右摇（弧度）
-const LEAN = 0.08; // 走路时身体前倾（弧度）
-const BREATH_SECONDS = 3.4; // 站着时一次呼吸
-const BREATH = 0.022; // 呼吸时身体竖着伸缩的比例
 const APPEAR_SECONDS = 0.35; // 出场：从小长大，带一点回弹（和作品上场一样）
 const LEAVE_SECONDS = 0.22;
 
@@ -42,33 +38,79 @@ export async function loadCharacter(library: ModelLibrary): Promise<{ object: TH
   return { object: capsuleCharacter(), triboo: false };
 }
 
+// 系统的「减少动态效果」：开页时问一次，之后听变化（每帧不调 matchMedia）
+let reduced = false;
+let watching = false;
+function reducedMotion(): boolean {
+  if (!watching && typeof matchMedia === 'function') {
+    watching = true;
+    const q = matchMedia('(prefers-reduced-motion: reduce)');
+    reduced = q.matches;
+    q.addEventListener?.('change', (e) => { reduced = e.matches; });
+  }
+  return reduced;
+}
+
 const _x = new THREE.Vector3();
 const _m = new THREE.Matrix4();
+const _d = new THREE.Vector3();
+const _hip = new THREE.Vector3();
+const _ankle = new THREE.Vector3();
+const _e = new THREE.Euler();
+const _q = new THREE.Quaternion();
+const DOWN = new THREE.Vector3(0, -1, 0);
 
-// 角色的 3D 外形和整体动作：走路时上下颠、左右轻摇、身体前倾，站着时轻轻呼吸；转身跟着 Walker 的朝向
+// 角色的 3D 外形和动作。翠宝的 GLB 拆成部件（rig.ts）：脚按步态一步一步踩（着地时钉在地上，不打滑），腿跟着脚，
+// 手臂和同侧的腿反着摆，身体颠、压扁拉长、重心左右移、肩胯反向转，加速、转弯时前倾、往里倾（gait.ts 算，这里摆）。
+// 胶囊体占位没有部件：只整体颠、倾、伸缩。转身跟着 Walker 的朝向
 export class CharacterView {
   readonly root = new THREE.Group(); // 脚底贴地：+Y 对着球面法线，+Z 对着朝向
-  private readonly sway = new THREE.Group(); // 颠、摇、前倾，绕脚底转
-  private readonly breath = new THREE.Group(); // 呼吸：竖着伸缩
-  private walkWeight = 0; // 0 站着 … 1 全速走
-  private time = 0;
+  readonly gait = new Gait();
+  depth = 0; // 脚下的水深（米）：walkMode 每帧设，涉水时步子慢、脚抬高
+  private readonly holder = new THREE.Group(); // 模型（翠宝的部件，或者胶囊体）挂在这里：预编译它
+  private readonly whole = new THREE.Group(); // 胶囊体：整体的颠、倾、伸缩
+  private rig: TribooRig | null = null;
   private appear = 0; // 出场进度 0..1
   private leaving = false;
+  private loaded = false;
 
   constructor() {
     this.root.name = 'walker';
-    this.root.add(this.sway);
-    this.sway.add(this.breath);
+    this.root.add(this.holder);
     this.root.visible = false;
   }
 
   get hasModel(): boolean {
-    return this.breath.children.length > 0;
+    return this.loaded;
+  }
+
+  // 预编译用的模型根节点（一直可见；root 没出场时是藏着的）
+  get model(): THREE.Object3D {
+    return this.holder;
+  }
+
+  // 翠宝的部件（自查脚本看拆得对不对）；胶囊体时 null
+  get parts(): TribooRig | null {
+    return this.rig;
   }
 
   setModel(object: THREE.Object3D): void {
-    this.breath.clear();
-    this.breath.add(object);
+    this.holder.clear();
+    this.whole.clear();
+    this.rig = object.parent ? null : buildTribooRig(object);
+    const rig = this.rig;
+    if (rig) {
+      this.holder.add(rig.root);
+      // 脚的站姿（角色本地坐标）：模型空间 → rig.root 的位置、缩放
+      const s = rig.root.scale.x;
+      for (let i = 0; i < 2; i++) this.gait.rest[i].copy(rig.footRest[i]).multiplyScalar(s).add(rig.root.position).setY(0);
+      this.gait.toe = rig.toe * s;
+      this.gait.heel = rig.heel * s;
+    } else {
+      this.whole.add(object);
+      this.holder.add(this.whole);
+    }
+    this.loaded = true;
   }
 
   // 挂到星球上，从小长大地出场
@@ -92,10 +134,14 @@ export class CharacterView {
     return !this.root.visible;
   }
 
-  // 每帧：摆到 Walker 的位置和朝向上，再叠上整体动作
+  // 两只脚立刻站回站姿（进入漫游、瞬移之后）
+  resetGait(walker: Walker): void {
+    this.gait.reset(walker);
+  }
+
+  // 每帧：摆到 Walker 的位置和朝向上，再按步态摆各个部件
   pose(walker: Walker, dt: number): void {
     if (!this.root.visible) return;
-    this.time += dt;
     // 出场、退场
     if (this.leaving) {
       this.appear = Math.max(0, this.appear - dt / LEAVE_SECONDS);
@@ -113,15 +159,65 @@ export class CharacterView {
     walker.positionInto(this.root.position);
     _x.crossVectors(walker.dir, walker.facing);
     this.root.quaternion.setFromRotationMatrix(_m.makeBasis(_x, walker.dir, walker.facing));
-    // 走路的分量跟着速度平滑过渡，起步和停下时动作不跳
-    this.walkWeight += (Math.min(1, walker.speed / WALK.speed) - this.walkWeight) * damp(8, dt);
-    const w = this.walkWeight;
-    // 每走一步（stride）是半个正弦周期：|sin| 每步颠一下，sin 让身体一步往左一步往右
-    const phase = (walker.distance / WALK.stride) * Math.PI;
-    this.sway.position.y = Math.abs(Math.sin(phase)) * BOB * w;
-    this.sway.rotation.set(LEAN * w, 0, Math.sin(phase) * SWAY * w);
-    // 呼吸：站着时竖着伸缩、横向略收，走起来就淡掉
-    const b = Math.sin((this.time / BREATH_SECONDS) * Math.PI * 2) * BREATH * (1 - w);
-    this.breath.scale.set(1 - b * 0.5, 1 + b, 1 - b * 0.5);
+    const motion = reducedMotion() ? WALK_ANIM.reduced : 1;
+    this.gait.update(walker, dt, this.depth, motion);
+    if (this.rig) this.poseRig(this.rig, walker);
+    else this.poseWhole();
+  }
+
+  // 翠宝的部件。gait 的量是角色本地坐标（米），部件在模型空间：除以 rig.root 的缩放
+  private poseRig(rig: TribooRig, walker: Walker): void {
+    const g = this.gait;
+    const k = 1 / rig.root.scale.x;
+    const o = rig.root.position;
+    // 身体：平移（颠、重心左右移）+ 前倾、侧歪、肩膀转；压扁拉长、呼吸
+    rig.body.position.set(rig.bodyPivot.x + g.shift * k, rig.bodyPivot.y + g.bob * k, rig.bodyPivot.z);
+    rig.body.quaternion.setFromEuler(_e.set(g.pitch, g.twist, -g.roll, 'YXZ'));
+    const sy = (1 + g.squash) * (1 + g.breath);
+    const sxz = 1 / Math.sqrt(Math.max(0.5, sy));
+    rig.squash.scale.set(sxz, sy, sxz);
+    // 手臂：绕肩前后摆（绕 X 转正的是往后）、往外张（左臂绕 Z 正转往外）；手腕再甩一点
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1;
+      rig.shoulders[i].rotation.set(-g.arm[i], 0, side * g.armOut[i]);
+      rig.wrists[i].rotation.set(-g.hand[i], 0, 0);
+    }
+    // 胯（腿的转轴）跟着身体平移、前倾、侧歪，再反着肩膀转一点
+    _q.setFromEuler(_e.set(g.pitch, g.hipTwist, -g.roll, 'YXZ'));
+    const up = walker.dir;
+    const fwd = walker.facing;
+    for (let i = 0; i < 2; i++) {
+      const foot = g.feet[i];
+      // 脚：星球上的位置 → 角色本地（不除 root 的缩放：出场长大时脚跟着一起缩放）→ 模型空间
+      _d.copy(foot.pos).sub(this.root.position);
+      const fx = (_d.dot(_x) - o.x) * k;
+      const fy = (_d.dot(up) - o.y) * k;
+      const fz = (_d.dot(fwd) - o.z) * k;
+      const group = rig.feet[i];
+      group.position.set(fx, fy, fz);
+      const yaw = signedAngle(fwd, foot.fwd, up);
+      group.quaternion.setFromEuler(_e.set(-foot.pitch, yaw, 0, 'YXZ'));
+      // 腿：从胯指着脚踝，按距离伸缩（粗细反着变一点）
+      _hip.copy(rig.hipRest[i]).sub(rig.bodyPivot).applyQuaternion(_q).add(rig.body.position);
+      _ankle.copy(rig.ankle[i]).applyQuaternion(group.quaternion).add(group.position);
+      _d.copy(_ankle).sub(_hip);
+      const len = _d.length();
+      const leg = rig.legs[i];
+      leg.position.copy(_hip);
+      if (len > 1e-6) leg.quaternion.setFromUnitVectors(DOWN, _d.divideScalar(len));
+      const stretch = Math.min(1.7, Math.max(0.55, len / rig.legLength[i]));
+      const thin = 1 / Math.sqrt(stretch);
+      leg.scale.set(thin, stretch, thin);
+    }
+  }
+
+  // 胶囊体：整体颠、前倾、侧歪、伸缩
+  private poseWhole(): void {
+    const g = this.gait;
+    this.whole.position.set(g.shift, g.bob, 0);
+    this.whole.quaternion.setFromEuler(_e.set(g.pitch, 0, -g.roll, 'YXZ'));
+    const sy = (1 + g.squash) * (1 + g.breath);
+    const sxz = 1 / Math.sqrt(Math.max(0.5, sy));
+    this.whole.scale.set(sxz, sy, sxz);
   }
 }
