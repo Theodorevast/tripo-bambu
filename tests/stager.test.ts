@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { describe, expect, it, vi } from 'vitest';
-import { APPEAR_SECONDS, easeOutBack, Stager } from '../src/scenes/stager';
+import { APPEAR_SECONDS, easeOutBack, Stager, textureBytes, UPLOAD_BUDGET } from '../src/scenes/stager';
 
 // 假渲染器：只记下调用顺序（真的要 WebGPU / WebGL2）。compileAsync 时顺便记下每个网格当时的视锥剔除开关
 function fakeRenderer() {
@@ -26,7 +26,8 @@ async function frames(stager: Stager, n: number, dt = 1 / 60): Promise<void> {
   }
 }
 
-const tex = (name: string) => Object.assign(new THREE.Texture(), { name });
+// 默认 2048²（一张就用满一帧的上传预算）
+const tex = (name: string, size = 2048) => Object.assign(new THREE.Texture({ width: size, height: size } as unknown as HTMLImageElement), { name });
 
 function makeModel(...maps: THREE.Texture[]) {
   const material = new THREE.MeshStandardMaterial({ map: maps[0] ?? null, normalMap: maps[1] ?? null });
@@ -43,7 +44,7 @@ function setup() {
 }
 
 describe('Stager：新模型先准备好再挂上', () => {
-  it('贴图每帧最多传一张，传完再编译（最终外观和淡入用的半透明外观各一次）；编译时关掉视锥剔除，编完恢复', async () => {
+  it('贴图逐帧上传（2048² 的一帧一张），传完再编译（最终外观和淡入用的半透明外观各一次）；编译时关掉视锥剔除，编完恢复', async () => {
     const { stager, calls, culledWhileCompiling } = setup();
     const m = makeModel(tex('a'), tex('b'));
     let entrance: unknown = undefined;
@@ -60,6 +61,22 @@ describe('Stager：新模型先准备好再挂上', () => {
     await frames(stager, 1);
     expect(entrance).not.toBeNull();
     expect(entrance).toBeDefined();
+  });
+
+  it('每帧的上传预算按字节算（一张 2048² 那么多）：小贴图一帧传几张，超了就等下一帧（F2：冰魔像 54 张小贴图原来要传 54 帧）', async () => {
+    const { stager, calls } = setup();
+    // 一个模型用 6 张 1024²（4 MB）：一帧最多 4 张（16 MB），第二帧传剩下的 2 张
+    const maps = Array.from({ length: 6 }, (_, i) => tex(`s${i}`, 1024));
+    const object = new THREE.Group();
+    for (let i = 0; i < 6; i += 2) object.add(makeModel(maps[i], maps[i + 1]).object);
+    expect(UPLOAD_BUDGET).toBe(2048 * 2048 * 4);
+    expect(textureBytes(maps[0])).toBe(1024 * 1024 * 4);
+    void stager.prepare(object);
+    await flush();
+    await frames(stager, 1);
+    expect(calls.filter((c) => c.startsWith('upload'))).toHaveLength(4);
+    await frames(stager, 1);
+    expect(calls.filter((c) => c.startsWith('upload'))).toHaveLength(6);
   });
 
   it('同一张贴图只传一次：第二个用到它的模型不再等帧上传', async () => {

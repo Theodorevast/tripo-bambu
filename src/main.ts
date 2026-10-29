@@ -48,13 +48,8 @@ app.planetLayer = {
     editor.restoreTempWorks(team); // 这次页面里摆过的临时作品不在存档里，回到自己的星球时重新摆上
   },
   leave: () => { walk.exit(true); editor.deactivate(); planetScreen.leave(); },
-  // 转场一开始先下载、解码摆着的作品的模型（ModelLibrary 按地址缓存，云层全遮住时 enter 再摆就是现成的）
-  prefetch: (team) => {
-    for (const p of team.planet.placements) {
-      const work = team.works.find((w) => w.id === p.workId);
-      if (work?.file) void planetScreen.view.library.load(work);
-    }
-  },
+  // 转场一开始先下载、解码摆着的作品的模型，解码完马上开始准备（贴图、着色器）；云层全遮住时 enter 摆展台，直接接过准备好的（F2）
+  prefetch: (team) => planetScreen.view.prepareAhead(team),
 };
 // Members / Museum 打开时先退出编辑：看不见星球时 Delete、Q / E 不能再改它，拖到一半的位置也先存好
 let openSheet: Sheet | null = null;
