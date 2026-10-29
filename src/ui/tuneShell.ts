@@ -239,7 +239,7 @@ export class TuneShell {
     }
     // 新的一页从切换的方向滑进来；标签上的图标蹦一下；头部的组名换上来
     animate(next.page, [{ opacity: 0, transform: `translateY(${dir * 16}px)` }, { opacity: 1, transform: 'none' }], { duration: 460, easing: curve('spring') });
-    animate(next.tab.querySelector('.icon'), [{ transform: 'scale(0.7) rotate(-14deg)' }, { transform: 'scale(1.06)' }], { duration: 560, easing: curve('bounce') });
+    animate(next.tab.querySelector('.icon'), [{ opacity: 0.4 }, { opacity: 1 }], { duration: 480, easing: curve('bounce') }); // 第二版：图标只是亮起来（不蹦）
     animate(this.sub, [{ opacity: 0, transform: 'translateY(5px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: EASE_OUT });
   }
 
@@ -363,8 +363,8 @@ export class TuneShell {
     const grow = reduce
       ? animate(show, [{ opacity: 0 }, { opacity: 1 }], { duration: 160 })
       : animate(show, on
-        ? [{ opacity: 0, transform: 'scale(0.2) rotate(-80deg)' }, { opacity: 1, transform: 'none' }]
-        : [{ opacity: 0, transform: 'scale(0.18)' }, { opacity: 1, transform: 'none' }], { duration: on ? 620 : 600, easing: curve(on ? 'bounce' : 'spring'), delay: on ? 90 : 0, fill: 'backwards' });
+        ? [{ opacity: 0, transform: 'scale(0.92)' }, { opacity: 1, transform: 'none' }]
+        : [{ opacity: 0, transform: 'scale(0.92)' }, { opacity: 1, transform: 'none' }], { duration: on ? 520 : 500, easing: curve(on ? 'bounce' : 'spring'), delay: on ? 90 : 0, fill: 'backwards' });
     const shrink = animate(hide, reduce ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: on ? 'scale(0.2)' : 'scale(0.4)' }], { duration: on ? 230 : 150, easing: EASE_IN, fill: 'forwards' });
     this.toggling = [grow, shrink].filter((a): a is Animation => !!a);
     void finished([shrink]).then(() => {
@@ -488,7 +488,7 @@ export class TuneShell {
     this.copyLabel.textContent = ok ? 'Copied!' : 'Saved to the console';
     this.status.textContent = ok ? 'Parameters copied to the clipboard' : 'Could not copy. The parameters are in the browser console.';
     if (!reduce) {
-      animate(this.copyIcon, [{ transform: 'scale(0) rotate(-60deg)' }, { transform: 'none' }], { duration: 620, easing: curve('bounce') });
+      animate(this.copyIcon, [{ opacity: 0, transform: 'scale(0.85)' }, { opacity: 1, transform: 'none' }], { duration: 480, easing: curve('bounce') });
       animate(this.copyLabel, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: EASE_OUT });
       if (ok) this.confetti();
       else animate(this.copyButton, [{ transform: 'none' }, { transform: 'translateX(-7px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(2px)' }, { transform: 'none' }], { duration: 480, easing: 'ease-out' });

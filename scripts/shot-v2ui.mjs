@@ -1,7 +1,7 @@
 // 第二版界面（v2-ui）的样张：node scripts/shot-v2ui.mjs [只截哪几张，逗号分开]
 // 两种尺寸各一套（1440×900、390×844；SIZES=1440x900 只截一种）：启动画面三个阶段、首页（标题卡片和名牌）、领券窗口、
 // 造星窗口（第一步、第二步）、星球页顶栏、Members（正面、翻到背面）、Museum、查看器、编辑模式、漫游。
-// 输出到 .superpowers/sdd/2026-10-30-v2/ui-media/<名字>-<宽>.png（OUT 可改）。依赖缓存默认 .tmp/vite-v2ui（VITE_CACHE_DIR 可改）
+// 输出到 .superpowers/sdd/2026-10-30-v2/ui-media/<名字>-<宽>.jpg（JPEG 质量 90，一套六十来张十几 MB；OUT 可改）。依赖缓存默认 .tmp/vite-v2ui（VITE_CACHE_DIR 可改）
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, startServer, watchErrors } from './lib/browser.mjs';
@@ -28,8 +28,8 @@ for (const [W, H] of SIZES) {
   const shot = async (name) => {
     if (!want(name)) return;
     await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {});
-    const file = join(OUT, `${name}-${W}.png`);
-    await p.screenshot({ path: file });
+    const file = join(OUT, `${name}-${W}.jpg`);
+    await p.screenshot({ path: file, type: 'jpeg', quality: 90 });
     log.push(file);
   };
   const step = async (name, fn) => {
@@ -209,8 +209,8 @@ for (const [W, H] of SIZES) {
     await t.goto(`${base}/?nolocal&tune#/t/lumen-guild`);
     await until(t, '调参面板', () => window.__ready === true && document.querySelector('.tune-pane')?.hidden === false && !!document.querySelector('#app')?.dataset.planetReady, null, 90000);
     await t.waitForTimeout(1500);
-    const file = join(OUT, `tune-${W}.png`);
-    await t.screenshot({ path: file });
+    const file = join(OUT, `tune-${W}.jpg`);
+    await t.screenshot({ path: file, type: 'jpeg', quality: 90 });
     log.push(file);
     await t.close();
   });
@@ -230,8 +230,8 @@ for (const [W, H] of SIZES) {
     for (const [phase, wait] of [['charge', 380], ['burst', 140], ['settle', 260]]) {
       await l.waitForFunction((x) => window.__create.state().launch.phase === x, phase, { timeout: 30000, polling: 'raf' });
       await l.waitForTimeout(wait);
-      const file = join(OUT, `launch-${phase}-${W}.png`);
-      await l.screenshot({ path: file });
+      const file = join(OUT, `launch-${phase}-${W}.jpg`);
+      await l.screenshot({ path: file, type: 'jpeg', quality: 90 });
       log.push(file);
     }
     await l.close();
@@ -247,11 +247,11 @@ for (const [W, H] of SIZES) {
     // Tab 到「Visit your planet」截一张，再 Tab 到第一张名牌截一张
     for (let i = 0; i < 12 && !(await f.evaluate(() => document.activeElement?.classList.contains('tb-visit'))); i++) await f.keyboard.press('Tab');
     await f.waitForTimeout(400);
-    await f.screenshot({ path: join(OUT, `focus-visit-${W}.png`) });
+    await f.screenshot({ path: join(OUT, `focus-visit-${W}.jpg`), type: 'jpeg', quality: 90 });
     for (let i = 0; i < 12 && !(await f.evaluate(() => document.activeElement?.classList.contains('planet-tag'))); i++) await f.keyboard.press('Tab');
     await f.waitForTimeout(700);
-    await f.screenshot({ path: join(OUT, `focus-tag-${W}.png`) });
-    log.push(join(OUT, `focus-visit-${W}.png`), join(OUT, `focus-tag-${W}.png`));
+    await f.screenshot({ path: join(OUT, `focus-tag-${W}.jpg`), type: 'jpeg', quality: 90 });
+    log.push(join(OUT, `focus-visit-${W}.jpg`), join(OUT, `focus-tag-${W}.jpg`));
     await f.close();
   });
   await ctx.close();
