@@ -378,6 +378,13 @@ export class MainPost {
     if (!this.on) return;
     const r = this.renderer;
     const saved = r.getRenderTarget();
+    // 先按渲染器现在的色调映射、输出色彩空间重建最后一步（F2）：构造时取到的是 atmosphere 设 AgX 之前的值，
+    // 不重建的话这里编好的是旧的那一份，开场第一帧 render() 发现不一样再重建，WebGL2 在那一帧同步链接（实测 75 ms）
+    if (r.toneMapping !== this.toneMapping || r.outputColorSpace !== this.colorSpace) {
+      this.toneMapping = r.toneMapping;
+      this.colorSpace = r.outputColorSpace;
+      this.build();
+    }
     try {
       this.resize();
       r.initRenderTarget(this.target);

@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { setModelAnisotropy } from '../assets/models';
+import { ModelLibrary, setModelAnisotropy } from '../assets/models';
 import type { Team } from '../data/types';
 import { createAtmosphere, seaCeiling, targetUp, type Atmosphere, type AtmospherePreset } from '../nature/atmosphere';
 import { createLife, type Life, type LifePlanet } from '../nature/life';
@@ -97,6 +97,8 @@ export class World {
   readonly director: Director; // 转场：云层、镜头按分镜表飞、作品依次出场（director.ts）
   readonly planets = new Map<string, PlanetEntry>();
   readonly frameHooks = new Set<(dt: number) => void>();
+  // 主画面共用的模型库（F2）：作品、开场探头的翠宝、站桩和漫游的翠宝都从这里拿，同一个 GLB 只下载、解析一次（原来翠宝要两次）；一次只解析一件
+  readonly models = new ModelLibrary(true);
   readonly renderHooks = new Set<() => void>(); // 画完这一帧之后调（读这一帧的绘制统计：renderer.info 在下一帧开始时清零）
   readonly atmosphere: Atmosphere; // 天空、云海、太阳和天光（nature/atmosphere.ts）；色调映射和曝光也归它
   readonly life: Life; // 生机层：脚步扬尘、踩踏图、蝴蝶、飘落物、萤火虫、雨（nature/life.ts），只在聚焦的星球上

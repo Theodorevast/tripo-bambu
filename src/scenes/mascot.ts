@@ -95,10 +95,11 @@ export function createStandIn(): Mascot {
   return { object: root, height: 0.42 + BODY_R * 2 };
 }
 
-// 用品牌的 GLB（和作品同一套加载：meshopt 解码、各向异性；缩放、居中由 ModelLibrary 做），加载失败就用替身，不报错
-export async function loadMascot(): Promise<Mascot> {
+// 用品牌的 GLB（和作品同一套加载：meshopt 解码、各向异性；缩放、居中由 ModelLibrary 做），加载失败就用替身，不报错。
+// library：从哪个模型库拿（给 World 共用的那个，翠宝的 GLB 只下载、解析一次；不给就自己建一个）
+export async function loadMascot(library: ModelLibrary = new ModelLibrary()): Promise<Mascot> {
   try {
-    const model = await new ModelLibrary().load({ id: 'peek-triboo', file: tribooUrl() });
+    const model = await library.load({ id: 'peek-triboo', file: tribooUrl() });
     if (!model.failed) return { object: model.object, height: model.height };
   } catch (err) {
     console.warn('Triboo for the intro failed, using the stand-in', err);

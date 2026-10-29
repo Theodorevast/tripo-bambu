@@ -98,7 +98,8 @@ const _t2 = new THREE.Vector3();
 // 聚焦星球上的作品：放展台和拾取盒，模型加载完再挂上；地形变了重新贴地
 export class PlanetView {
   static active: PlanetView | null = null; // 页面里正在用的那一个（?tune 的 Works & gardens 组找它）
-  readonly library = new ModelLibrary(true); // 一次只解析一件（F2：几件同时解析会让转场开头掉帧）
+  // 主画面共用的模型库（World.models：一次只解析一件，翠宝和作品同一个缓存）；单元测试的假 World 没有，就自己建一个
+  readonly library: ModelLibrary;
   readonly placed = new Map<string, PlacedWork>();
   readonly extraWorks = new Map<string, Work>(); // 拖进来的临时作品
   readonly gardens: Gardens;
@@ -126,6 +127,7 @@ export class PlanetView {
 
   constructor(world: World) {
     this.world = world;
+    this.library = world.models ?? new ModelLibrary(true);
     PlanetView.active = this;
     // 指着星球或名牌（首页的悬停都汇到 world.hovered）停一会儿，就先下载、解析那颗星球的作品（F2）：
     // 点下去开始转场时模型已经在缓存里，转场开头不用再解析。只下载、解析，不编译（不一定会点进去）

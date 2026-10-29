@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { PRESETS } from '../planet/presets';
+import type { ModelLibrary } from '../assets/models';
 import { easeInBack, easeOutBack, smooth, span } from './ease';
 import { loadMascot, type Mascot } from './mascot';
 import { PEEK } from './shots';
@@ -67,8 +68,9 @@ export class TribooPeek {
   private playing = false;
 
   // precompile：模型挂上场景之前把贴图、着色器准备好（World 的 Stager）
-  constructor(precompile: (object: THREE.Object3D) => Promise<void>) {
-    this.ready = loadMascot()
+  // library：从哪个模型库拿翠宝（World 共用的那个：和站桩、漫游的翠宝同一份 GLB，只下载、解析一次）
+  constructor(precompile: (object: THREE.Object3D) => Promise<void>, library?: ModelLibrary) {
+    this.ready = loadMascot(library)
       .then(async (m) => {
         m.object.traverse((o) => {
           o.castShadow = false;
