@@ -16,7 +16,8 @@ import { fitHomeCamera, HOME_FIT, homeLayout, homeShape, type HomeShape, type Ho
 import { PlanetMotion } from './homeMotion';
 import { MainPost } from './post';
 import { homeFraming, INTRO, planetFraming, SHOTS } from './shots';
-import { compileShadow, compileUnculled } from './stager';
+import { compileShadowExact } from './shadowWarm';
+import { compileUnculled } from './stager';
 
 export interface PlanetEntry {
   team: Team;
@@ -344,9 +345,10 @@ export class World {
     this.life.prewarm(true);
     try {
       await Promise.all(this.scene.children.map((o) => compileUnculled(this.renderer, o, this.rig.camera, this.scene)));
-      // 先画一帧（阴影贴图这时才建出来），再在后台编石头和展台投影那一遍的管线
+      // 先画一帧（阴影贴图这时才建出来），再在后台编石头投影那一遍的管线：按真正画阴影时的状态编（shadowWarm.ts）。
+      // 原来的 compileShadow 编出来的剔除方向不对，第一次进星球时圆石（rock-round-2）的投影管线在出帧时同步建（F2 实测每次进星球一条）
       this.primeShadows();
-      await compileShadow(this.renderer, rocks.group, SHADOW.enabled ? this.atmosphere.sun : null, this.scene);
+      await compileShadowExact(this.renderer, rocks.group, SHADOW.enabled ? this.atmosphere.sun : null, this.scene);
       await this.post.compile();
     } finally {
       this.scene.remove(rocks.group, grass);

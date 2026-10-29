@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { vec4 } from 'three/tsl';
 import { modelTextures } from '../assets/models';
-import { compileShadowExact } from './shadowWarm';
+import { compileShadowExact, compileSides } from './shadowWarm';
 
 // 新模型上场。实测（30 万面的真实模型，进入星球时 4 件一起到）卡在挂上场景后的第一帧：
 // WebGL2 在这一帧里同步链接着色器、上传贴图，一帧 100–200 ms；WebGPU 主线程只忙 60 ms，但 GPU 进程同步建管线，画面停约 200 ms。
@@ -54,6 +54,9 @@ function makeSwaps(object: THREE.Object3D): Swap[] {
       const fade = m.clone();
       fade.transparent = true;
       fade.opacity = 0;
+      // 一遍画完（F2）：本来双面的材质打开 transparent 以后，three r186 会拆成背面、正面两遍画（side 临时改），预编译编到的是双面那一份，
+      // 淡入第一帧在出帧时同步建两条管线。淡入只有 0.35 秒，和淡完以后的不透明原材质一样一遍画完就行；投影那一遍照样拆，由 shadowWarm.ts 备两份替身
+      fade.forceSinglePass = true;
       return fade;
     });
     swaps.push({ mesh, original, fades, opacity: list.map((m) => m.opacity) });
@@ -202,7 +205,8 @@ export class Stager implements Stage {
       this.renderer.initTexture(texture);
       this.uploaded.add(texture);
     }
-    await compileUnculled(this.renderer, object, this.camera, this.scene);
+    // 主画面那一遍：模型自己「半透明 + 双面」的材质（头发片那种）按背面、正面各编一遍（shadowWarm.ts 的 compileSides）；淡入用的克隆一遍画完，不拆
+    await compileSides(this.renderer, object, this.camera, this.scene);
     // 投影那一遍按 three r186 真正画的时候的状态预编译（shadowWarm.ts）；compileShadow 建出来的是排队时的状态，管线对不上，第一次画还要现建
     await compileShadowExact(this.renderer, object, this.shadowLight?.() ?? null, this.scene);
     return alive();
