@@ -90,10 +90,10 @@ export interface AtmospherePlanetOptions {
 // 天上的细云条和远处的积云淡掉，天空只剩一层柔和的渐变。步进次数跟着少（云面平了，少走几步也找得准），GPU 也省一点
 // 首页云海的暖奶油色（线性、曝光前，和 PRESETS 的云同一个空间）：亮面、中间调、背光、缝隙差得不多，整片是一层柔和的奶油
 const CALM_CREAM = {
-  lit: new THREE.Vector3(1.22, 1.0, 0.68),
-  mid: new THREE.Vector3(0.86, 0.68, 0.5),
-  shade: new THREE.Vector3(0.66, 0.52, 0.42),
-  deep: new THREE.Vector3(0.56, 0.44, 0.36),
+  lit: new THREE.Vector3(1.32, 1.04, 0.64),
+  mid: new THREE.Vector3(0.9, 0.67, 0.44),
+  shade: new THREE.Vector3(0.62, 0.45, 0.34),
+  deep: new THREE.Vector3(0.48, 0.34, 0.28),
 };
 
 export const CALM = {
@@ -107,7 +107,7 @@ export const CALM = {
   steps: 0.4, // 步进次数少多少
   horizon: 1.6, // 地平线附近融进雾色的范围宽多少（镜头低的时候，远处的云海和天空之间没有一条硬边）
   cream: 0.7, // 云的颜色往一套暖奶油色（CALM_CREAM）靠多少：没有粉紫的斑驳，首页的星尘跳得出来
-  dim: 0.24, // 云海、地平线的雾色暗多少（金色的星尘叠在上面才「发光」）
+  dim: 0.2, // 云海、地平线的雾色暗多少（金色的星尘叠在上面才「发光」）
 };
 
 export interface Atmosphere {

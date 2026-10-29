@@ -52,6 +52,8 @@ export function addHomeTune(pane: HomeTuneFolder, world: World): void {
     ['buildingDim', 0, 0.8, 0.01, 'building faded'],
     ['dimFalloff', 0, 0.8, 0.01, 'fade falloff'],
     ['tallStretch', 1, 2.5, 0.01, 'phone: stretch toward camera'],
+    ['facing', 0, 180, 1, 'default angle of long axis°'],
+    ['tallFacing', 0, 180, 1, 'phone: default angle°'],
   ]);
   spiral.on('change', apply);
   const dust = home.addFolder({ title: 'Stardust & wisps', expanded: false });

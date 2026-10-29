@@ -80,7 +80,7 @@ export const EVENING_AT_SUNSET = 0.6;
 // 饱和度掉一半），云海的空气透视也跟着它，压低以后远处云海的明暗对比也更接近参考图
 // galaxySeaDrop：星系视图里云海压到所有星球下面（× 半径）；galaxyFog：星系视图里雾再乘的倍数（镜头离星球几百米）；
 // galaxyCalm：首页（星系视图）把云海放安静多少 0..1（nature/atmosphere.ts 的 CALM，H2）
-export const SKY = { fog: 0.4, galaxySeaDrop: 3.6, galaxyFog: 0.5, galaxyCalm: 1 };
+export const SKY = { fog: 0.4, galaxySeaDrop: 3.6, galaxyFog: 0.32, galaxyCalm: 1 };
 const GALAXY_CENTER = new THREE.Vector3(0, 0, 0); // 星系布局的中心（homeLayout.ts：第一排正中）
 const DIM_RATE = 3; // 首页后排的星球淡下去、星球视图里淡回来的速率（每秒逼近）
 const GLIDE_SECONDS = 0.9; // 首页换版式（加了一颗星球）时星球挪过去、镜头飞到新取景的时长

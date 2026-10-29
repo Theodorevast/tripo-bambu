@@ -13,7 +13,7 @@ export type HomeShape = 'wide' | 'tall';
 export const HOME_SPIRAL = {
   arms: 2, // 几条螺旋臂
   turns: 0.85, // 螺旋臂从里到外绕多少圈（星球按角度大致均匀地铺满这一段；多了接着往外排）
-  inner: 3.1, // 第一颗星球离中心多远（× 半径；再近也要让开中间的你的星球）
+  inner: 3.5, // 第一颗星球离中心多远（× 半径；再近也要让开中间的你的星球）
   outer: 4.2, // 螺旋臂外端和里端的半径比（越大越「张开」）
   gap: 0.6, // 同一条臂上相邻两颗星球之间的空隙（× 两颗半径之和）
   ringGap: 0.5, // 建好的和建设中的之间多空出来一点（× 半径）：里圈、外圈分得开
@@ -27,6 +27,8 @@ export const HOME_SPIRAL = {
   buildingDim: 0.14, // 建设中的往天色里淡多少（最里那颗）
   dimFalloff: 0.22, // 越往外再淡多少
   tallStretch: 1.45, // 手机竖屏：星系沿镜头的纵深方向拉长多少（长的方向对着竖屏）
+  facing: 90, // 默认角度下，星系长的方向和画面横向差多少度（90 = 长的方向朝着镜头：两条臂的打旋看得最清楚）
+  tallFacing: 90, // 手机竖屏（长的方向朝着镜头、再拉长，画面上竖着）
 };
 
 export type HomeSpiral = typeof HOME_SPIRAL;
@@ -196,7 +198,7 @@ export function homeLayout(teams: HomeTeam[], youId: string | null, shape: HomeS
     sxz += q.x * q.z;
   }
   const axis = placed.length > 2 ? 0.5 * Math.atan2(2 * sxz, sxx - szz) : 0;
-  const rot = (shape === 'tall' ? Math.PI / 2 : 0) - axis;
+  const rot = THREE.MathUtils.degToRad(shape === 'tall' ? p.tallFacing : p.facing) - axis;
   if (meta) meta.rotation = rot;
   const c = Math.cos(rot);
   const sn = Math.sin(rot);
