@@ -6,6 +6,7 @@ import { createHandler, createMemoryStore, ipKey, readConfig, type TripoEnv, typ
 import { loadEnvFiles, modeBanner } from '../server/tripo/node-adapter.mjs';
 import tripoProxy from '../server/tripo/vite-plugin.mjs';
 import worker from '../server/tripo/worker.mjs';
+import { fakeLimiterNamespace } from './fakeRateLimiter';
 import { makeEnvDir } from './tripoEnvDir.mjs';
 
 const KEY = 'tsk_unit_test_SECRET_9f8e7d6c5b4a';
@@ -423,6 +424,17 @@ describe('下载只放行 Tripo 的结果，不能当通用代理', () => {
     expect(calls.find((c) => c.url.includes('cdn.tripo3d.com'))?.headers.get('accept-encoding')).toBe('identity');
   });
 
+  it('结果文件超过 TRIPO_MAX_DOWNLOAD_MB：带长度的直接拒；不带长度的边传边数，超了就断（整个文件不进内存）', async () => {
+    const env = { ...REAL, TRIPO_MAX_DOWNLOAD_MB: '0' };
+    const url = 'https://openapi.cdn.tripo3d.com/out/model.glb';
+    upstreamWith(url, { 'GET openapi.cdn.tripo3d.com/out/model.glb': () => new Response(glb, { headers: { 'content-length': String(glb.length) } }) });
+    expect((await download(env)).status).toBe(502);
+    upstreamWith(url, { 'GET openapi.cdn.tripo3d.com/out/model.glb': () => new Response(glb, { headers: { 'content-encoding': 'gzip' } }) });
+    const res = await make()(get(`/api/tripo/download/${UUID}`), env, { ip: '203.0.113.7' });
+    expect(res.status).toBe(200);
+    await expect(res.arrayBuffer()).rejects.toThrow();
+  });
+
   it.each([
     ['别的主机', 'https://evil.example.com/model.glb'],
     ['后缀伪装', 'https://openapi.cdn.tripo3d.com.evil.example/model.glb'],
@@ -692,9 +704,11 @@ describe('Cloudflare Worker 外壳（worker.mjs）', () => {
 
   it('真实模式下每个实例第一次处理接口请求时提示一次会消耗额度，不带密钥', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const res = await worker.fetch(wreq('/api/tripo/health'), { TRIPO_API_KEY: KEY });
+    // 真实模式必须有 Durable Objects 的限流绑定（没有会拒绝，见 rateLimiter.test.ts）
+    const env = { TRIPO_API_KEY: KEY, RATE_LIMITER: fakeLimiterNamespace() };
+    const res = await worker.fetch(wreq('/api/tripo/health'), env);
     expect(await res.json()).toEqual({ ok: true, mock: false });
-    await worker.fetch(wreq('/api/tripo/health'), { TRIPO_API_KEY: KEY });
+    await worker.fetch(wreq('/api/tripo/health'), env);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain('真实模式');
     expect(String(warn.mock.calls[0][0])).not.toContain(KEY);
