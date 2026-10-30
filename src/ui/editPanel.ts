@@ -3,6 +3,7 @@ import type { PlanetRecipe, PresetId, Work } from '../data/types';
 import { PRESET_IDS, PRESETS } from '../planet/presets';
 import type { PlacedWork } from '../scenes/planetView';
 import { el, initials } from './dom';
+import { icon } from './icons';
 
 export interface EditPanelActions {
   pick(work: Work): void; // 点作品栏里的作品
@@ -12,6 +13,8 @@ export interface EditPanelActions {
   appearance(patch: Partial<Pick<PlanetRecipe, 'preset' | 'ring' | 'atmosphere'>>): void;
   reroll(): void;
   reset(): void;
+  upload?(): void; // 作品栏的「Upload」：打开上传窗口（src/ui/genaiDialog.ts）
+  create?(): void; // 作品栏的「Create with Tripo」：打开同一个窗口的生成标签
 }
 
 // 屏幕上的矩形：视口坐标，CSS 像素
@@ -64,7 +67,13 @@ export class EditPanel {
     this.act = act;
     this.root = root;
     this.trayRow.append(this.trayItems, this.dropZone);
-    this.tray.append(el('div', { className: 'mono tray-head', textContent: "Your team's works · pick one, then click the planet" }), this.trayRow);
+    // 作品栏头上：说明，右边两个按钮（上传自己的模型、用 Tripo 生成）。没接上动作时不显示按钮
+    const head = el('div', { className: 'tray-head' }, el('span', { className: 'mono', textContent: "Your team's works · pick one, then click the planet" }));
+    const extras: HTMLButtonElement[] = [];
+    if (act.upload) extras.push(el('button', { className: 'tray-add', type: 'button', onclick: () => act.upload?.() }, icon('upload'), 'Upload'));
+    if (act.create) extras.push(el('button', { className: 'tray-add tray-tripo', type: 'button', onclick: () => act.create?.() }, icon('sparkle'), 'Create with Tripo'));
+    if (extras.length) head.append(el('div', { className: 'tray-actions' }, ...extras));
+    this.tray.append(head, this.trayRow);
     // 拖滑块时 input 一直来：只预览；松手的 change 才保存
     this.rotateInput.addEventListener('input', () => act.rotate(Number(this.rotateInput.value), false));
     this.rotateInput.addEventListener('change', () => act.rotate(Number(this.rotateInput.value), true));
@@ -119,6 +128,7 @@ export class EditPanel {
       b.append(el('span', { className: 'ti-name', textContent: w.title }));
       if (placed.has(w.id)) b.append(el('span', { className: 'ti-check', textContent: '✓' }));
       if (w.id.startsWith('tmp-')) b.append(el('span', { className: 'ti-temp mono', textContent: 'temp' }));
+      else if (w.source === 'tripo') b.append(el('span', { className: 'ti-tripo mono', textContent: 'Tripo' }));
       b.setAttribute('aria-pressed', String(w.id === placingId));
       return b;
     }));

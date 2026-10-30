@@ -18,8 +18,9 @@ export function modelUrl(file: string): string {
   return /^(blob:|https?:|data:)/.test(file) ? file : `${import.meta.env.BASE_URL}models/${file}`;
 }
 
+// 用户作品的缩略图是 blob:（IndexedDB 里的图片注册成的地址），和完整网址一样原样用
 export function thumbUrl(file: string): string {
-  return `${import.meta.env.BASE_URL}thumbs/${file}`;
+  return /^(blob:|https?:|data:)/.test(file) ? file : `${import.meta.env.BASE_URL}thumbs/${file}`;
 }
 
 // 贴图的各向异性过滤：斜着看的表面（侧面、顶面、地面）不糊。三个渲染器（主画面、Museum 卡片、查看器）共用一个值：
@@ -107,6 +108,12 @@ export class ModelLibrary {
     this.parsing = run.catch(() => {});
     return run;
   }
+}
+
+// 上传、生成窗口的预览（works/modelStage.ts）自己解析 GLB，归一化和这里一样
+export function normalizeModel(source: THREE.Object3D): LoadedModel {
+  applyAnisotropy(source, anisotropy);
+  return normalize(source, false);
 }
 
 // 套两层：inner 负责缩放和居中，外层留给调用方随便摆

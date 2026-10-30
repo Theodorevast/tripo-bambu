@@ -28,6 +28,11 @@ const PATHS = {
   orbit: '<path d="M20.2 9.5A8.5 8.5 0 0 0 5 7.2"/><path d="M3.8 14.5A8.5 8.5 0 0 0 19 16.8"/><path d="M4.6 3.6v3.8h3.8M19.4 20.4v-3.8h-3.8"/>',
   mouse: '<rect x="7" y="3.5" width="10" height="17" rx="5"/><path d="M12 7.3v3"/>',
   arrow: '<path d="M5 12h13.5M13 6.5l5.5 5.5-5.5 5.5"/>',
+  // 上传、Tripo 生成窗口（ui/genaiDialog.ts）用的几个
+  upload: '<path d="M4.5 15.5v2.2a2.3 2.3 0 0 0 2.3 2.3h10.4a2.3 2.3 0 0 0 2.3-2.3v-2.2" fill="none"/><path d="M12 15V4.5M7.5 8.8L12 4.3l4.5 4.5"/>',
+  quote: '<path d="M4 6.5h16v9.2H11l-4.6 3.8v-3.8H4z" fill="currentColor" fill-opacity=".22"/><path d="M4 6.5h16v9.2H11l-4.6 3.8v-3.8H4z"/><path d="M8 10.2h8M8 13h5"/>',
+  views: '<rect x="3.5" y="3.5" width="7.4" height="7.4" rx="2" fill="currentColor" fill-opacity=".22"/><rect x="3.5" y="3.5" width="7.4" height="7.4" rx="2"/><rect x="13.1" y="3.5" width="7.4" height="7.4" rx="2"/><rect x="3.5" y="13.1" width="7.4" height="7.4" rx="2"/><rect x="13.1" y="13.1" width="7.4" height="7.4" rx="2"/>',
+  alert: '<path d="M12 3.6l9 15.6H3z" fill="currentColor" fill-opacity=".18"/><path d="M12 3.6l9 15.6H3z"/><path d="M12 9.6v4.4"/><circle cx="12" cy="16.9" r="1.1" fill="currentColor" stroke="none"/>',
 } as const;
 
 export type IconName = keyof typeof PATHS;
