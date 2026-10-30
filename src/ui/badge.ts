@@ -13,6 +13,14 @@ const MARK = '<svg viewBox="-1.04 -1.04 2.08 2.08" aria-hidden="true" focusable=
   + '<path class="mw-t" d="M-0.1 -0.36 L0.46 -0.36 M0.05 -0.36 L-0.12 -0.05"/>'
   + '</svg>';
 
+// 小翠宝标志（同一个 SVG）：Museum 卡片、查看器上「Made with Tripo」的小贴纸也用它
+export function tripoMark(className = 'mw-mark'): HTMLSpanElement {
+  const span = el('span', { className });
+  span.setAttribute('aria-hidden', 'true');
+  span.innerHTML = MARK;
+  return span;
+}
+
 export function installBadge(root: HTMLElement): HTMLAnchorElement {
   const link = el('a', { className: 'made-with', href: TRIPO_URL, target: '_blank', rel: 'noopener noreferrer', title: 'tripo3d.ai (opens in a new tab)' });
   link.setAttribute('aria-label', 'Made with Tripo (opens tripo3d.ai in a new tab)');

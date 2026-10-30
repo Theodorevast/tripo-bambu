@@ -13,7 +13,7 @@ import { el } from './dom';
 import { activeElement, animate, bindTilt, curve, EASE_IN, EASE_OUT, finished, focusQuietly, Presence, reducedMotion, setLaunchOrigin } from './motion';
 import { plural, sheetHead } from './sheet';
 import { toast } from './toast';
-import { authorLine, failedNote, workNumber } from './workCard';
+import { authorLine, failedNote, tripoNote, workNumber } from './workCard';
 
 // Task 2 的检查不通过时改成 false：卡片改用静态缩略图，查看器不受影响
 export const LIVE_CARD_PREVIEWS = true;
@@ -289,8 +289,11 @@ export class MuseumPage implements Sheet {
     const plate = el('div', { className: 'mc-plate' },
       el('div', { className: 'mc-title display', textContent: work.title }),
       el('div', { className: 'mc-by', textContent: authorLine(work, team) }),
-      el('div', { className: 'mono', textContent: workNumber(work, team) }),
     );
+    // 用 Tripo 生成的作品：展签上加「Made with Tripo」贴纸和提示词（文字生成的）
+    const note = tripoNote(work, 'tripo-note mc-tripo');
+    if (note) plate.append(note);
+    plate.append(el('div', { className: 'mono', textContent: workNumber(work, team) }));
     const layer = el('div', { className: 'mc-tilt' }, el('div', { className: 'mc-frame' }, preview, el('i', { className: 'mc-shine' })), plate);
     const select = (): void => {
       setLaunchOrigin(preview);
@@ -309,7 +312,7 @@ export class MuseumPage implements Sheet {
       },
     }, layer);
     node.setAttribute('role', 'button');
-    node.setAttribute('aria-label', `${work.title}, ${authorLine(work, team)}. Open in the viewer`);
+    node.setAttribute('aria-label', `${work.title}, ${authorLine(work, team)}${work.source === 'tripo' ? ', made with Tripo' : ''}. Open in the viewer`);
     node.style.setProperty?.('--i', String(i));
     const card: Card = { node, preview, work, hovered: false };
     const hover = (on: boolean) => () => { card.hovered = on; };
