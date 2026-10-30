@@ -20,12 +20,14 @@ export type GenErrorCode = TripoErrorCode | 'network' | 'unavailable' | 'import_
 export interface GenError {
   code: GenErrorCode;
   message: string; // 给人看的英文句子（messages.ts 的 describeError）
+  retryAfter?: number; // 429（rate_limited、daily_cap）：中转说多少秒以后再试
+  detail?: string; // 中转、Tripo 的原话（多半是中文）、导入管线的报错：只给控制台、日志看，不显示给用户
 }
 
 // 上传图片后拿到的引用
 export interface ImageRef {
   token: string;
-  type: string; // 文件类型：jpg / png / webp
+  type?: string; // 文件类型：png / jpg（中转回了才有；没有时中转按 token 自己判断）
 }
 
 export interface GenOptions {
@@ -62,7 +64,8 @@ export interface TripoApi {
 
 // —— 本地的生成任务（jobs.ts）——
 // 状态机：uploading（只有图片模式）→ submitting → queued → running → downloading → importing → done；
-// 任何一步出错 → failed；用户取消 → cancelled（只停止轮询，中转没有取消接口）
+// 提交时出错、任务找不到（not_found）、Tripo 说任务失败、导入失败 → failed；轮询、下载时 Tripo 忙、连不上不算失败（stalled，接着重试）；
+// 用户取消 → cancelled（只停止轮询，中转没有取消接口）
 export type JobPhase = 'uploading' | 'submitting' | 'queued' | 'running' | 'downloading' | 'importing' | 'done' | 'failed' | 'cancelled';
 
 export const ACTIVE_PHASES: readonly JobPhase[] = ['uploading', 'submitting', 'queued', 'running', 'downloading', 'importing'];
@@ -83,6 +86,7 @@ export interface GenJob {
   error?: GenError;
   workId?: string; // done 以后：加进去的作品 id
   seen?: boolean; // 用户看过结果（点过完成提示，或者在窗口里打开过）
+  stalled?: boolean; // 轮询、下载暂时出错正在重试（Tripo 忙、连不上）：不存档，刷新以后重新判断
 }
 
 // 提交一个生成任务
