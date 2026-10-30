@@ -52,7 +52,8 @@ export class ImportError extends Error {
 }
 
 // Worker 和主线程之间的消息
-export type ImportRequest = { id: number; bytes: ArrayBuffer; name: string; options: ImportOptions };
+// 交给 Worker 的是 Blob（结构化克隆只传引用，不拷贝数据）：几十 MB 的文件在 Worker 里读，主线程不用分配、拷贝那块内存
+export type ImportRequest = { id: number; file: Blob; name: string; options: ImportOptions };
 export type ImportReply =
   | { id: number; type: 'progress'; progress: ImportProgress }
   | { id: number; type: 'done'; result: ImportResult }
