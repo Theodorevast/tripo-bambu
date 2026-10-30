@@ -5,6 +5,7 @@
 //
 // 接口约定（前端按这个调）：
 //   GET  /api/tripo/health        → { ok, mock }
+//   GET  /api/tripo/models        → { ok, defaultModel, defaultTexture, models }（模型选择器：说明、贴图档、预计耗时、积分）
 //   GET  /api/tripo/balance       → { ok, balance, frozen }
 //   POST /api/tripo/upload        multipart，字段 file，一张 PNG / JPEG → { ok, token, type }
 //   POST /api/tripo/task          JSON { mode: 'text' | 'image' | 'multiview', ... } → { ok, taskId }
