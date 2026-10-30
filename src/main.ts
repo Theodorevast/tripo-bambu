@@ -24,25 +24,39 @@ import { installCreatePlanet } from './ui/createPlanet';
 import { installCloudTriboo } from './scenes/homeCloudTriboo';
 import { installHomeTribooTune } from './scenes/homeTribooTune';
 import { installWorldV2 } from './scenes/worldV2';
+import { openUserWorks } from './works/userWorks';
+import { PlanetStoreWithUserWorks, UserWorksRegistry } from './works/userWorksTeams';
+import { installGenAI } from './genai/install';
 // 第二版的界面主题（午夜天文台：深色半透明面板、香槟金细线、衬线字）：放在所有 import 的最后，
-// 盖过 styles.css 和各模块自带的 CSS（cobrand、badge、coupons、createPlanet、walk）；旧的 CSS 文件不动
+// 盖过 styles.css 和各模块自带的 CSS（cobrand、badge、coupons、createPlanet、walk、genai）；旧的 CSS 文件不动
 import './ui/theme-v2.css';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 // 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后淡出；界面用到的几种字体从这里开始在后台预加载
 const boot = startBoot();
+// 用户自己的作品（上传的、用 Tripo 生成的，存在 IndexedDB，src/works/）：先把 GLB 和缩略图注册成 blob URL，再读团队、加载星球。
+// 和建 3D 世界同时进行；读不出来时当作没有，照常启动
+const userWorksReady = openUserWorks().then(async (s) => {
+  const registry = new UserWorksRegistry(s);
+  await registry.load();
+  return registry;
+});
 // 本机有私有的真实模型时（开发环境，.tmp/local-models/），「你的星球」上的占位作品换成它们（assets/localWorks.ts）
 const seed = await applyLocalWorks(seedJson as unknown as Seed);
-const store = new LocalStore(seed, browserStorage());
 await boot.phase('sky');
 // 建不起来（没有 WebGPU 也没有 WebGL2，或者别的错）：停在启动画面上提示，后面的不再执行
 const world = await World.create(document.querySelector<HTMLCanvasElement>('#stage')!).catch(boot.fail);
+const userWorks = await userWorksReady;
+// 读团队时并进用户作品；Reset demo 时一起清掉（works/userWorksTeams.ts）
+const store = new PlanetStoreWithUserWorks(new LocalStore(seed, browserStorage()), userWorks);
 installWater(world); // 水面每帧取雨量、角色涉水放波纹
 const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, store, seed.you, await store.listTeams());
 const home = installHome(app); // 首页（H2）：你的星球放前排正中、名牌写 You、「Visit your planet」
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
 const walk = new WalkMode(app, planetScreen);
+// 作品栏的「Upload」「Create with Tripo」、生成任务（刷新前没做完的接着轮询）、完成提示（src/genai/）。「Add to planet」进入摆放前先退出漫游
+installGenAI(app, editor, userWorks, store, { beforePlace: () => walk.exit(true) });
 const coupons = installCoupons(app, planetScreen, walk, editor); // 点翠宝吐优惠券（fun/coupons.ts）：站桩和漫游的翠宝能点，模型、着色器在后台预热
 installHomeTriboo(app, coupons, home); // 首页右下角躲着的翠宝（H2）：点它吐一张券，展开成领券窗口
 installCloudTriboo(world); // 首页翠宝元素①：云海上空一朵翠宝形状的云（scenes/homeCloudTriboo.ts；开场预热之前装上，一起编译）

@@ -27,10 +27,15 @@ export interface Work {
   id: string;
   title: string;
   authorId: string; // 指向 Member.id
-  file: string; // public/models/ 下的文件名；空字符串 = 占位模型；blob: 开头 = 拖进来的临时作品
-  thumb: string; // public/thumbs/ 下的文件名；空字符串 = 纯色块
+  file: string; // public/models/ 下的文件名；空字符串 = 占位模型；blob: 开头 = 拖进来的临时作品，或用户作品（存在 IndexedDB 里，启动时注册成 blob URL）
+  thumb: string; // public/thumbs/ 下的文件名；空字符串 = 纯色块；blob: 开头 = 用户作品的缩略图
   tris: number;
   description?: string;
+  // —— 用户作品（上传的、用 Tripo 生成的，src/works/）才有下面这几个；种子里的作品没有 ——
+  source?: 'upload' | 'tripo';
+  prompt?: string; // Tripo 文字生成的提示词（Museum 卡片上显示）
+  mode?: 'text' | 'image' | 'multiview'; // Tripo 生成方式
+  authorHandle?: string; // 作者的 @handle（不带 @）：作者不在这个团队的成员里时（演示里每颗星球都能加作品）用它显示作者
 }
 
 export interface Team {
