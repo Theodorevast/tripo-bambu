@@ -3,9 +3,10 @@ import type { App } from '../app';
 import type { Work } from '../data/types';
 import { TripoError } from '../genai/api';
 import { ImagePrepError, PICK_MAX_BYTES, prepareUploadImage } from '../genai/images';
+import { creditsOf, etaOf, formatEta, leftText, remainingSec, smoothRemaining } from '../genai/eta';
 import type { GenJobs } from '../genai/jobs';
 import { describeError, phaseLabel, STALLED_HINT, titleFromFile, titleFromPrompt } from '../genai/messages';
-import { ACTIVE_PHASES, type GenError, type GenJob, type GenMode, type GenOptions, type JobEvent, type TripoApi } from '../genai/types';
+import { ACTIVE_PHASES, type GenError, type GenJob, type GenMode, type GenOptions, type JobEvent, type ModelInfo, type ModelList, type TextureChoice, type TripoApi } from '../genai/types';
 import { checkImportFile } from '../works/importCheck';
 import { importModelFile } from '../works/importClient';
 import { IMPORT_LIMITS, ImportError, type ImportProgress, type ImportResult } from '../works/importTypes';
@@ -58,6 +59,14 @@ const STAGE_TEXT: Record<ImportProgress['stage'], string> = {
   done: 'Almost there…',
 };
 
+// 贴图档：三种生成方式共用一个选择；模型不支持 fast 时那一格灰掉（选着 fast 的就按 standard 算）
+const TEXTURES: Array<{ id: TextureChoice; label: string; hint: string }> = [
+  { id: 'none', label: 'None', hint: 'Plain grey clay: the quickest and cheapest' },
+  { id: 'fast', label: 'Fast', hint: 'Quicker: a lighter texture without PBR material maps, same price as Standard' },
+  { id: 'standard', label: 'Standard', hint: 'Full colours, details and realistic materials' },
+];
+const TEXTURE_NOTE: Record<TextureChoice, string> = { none: 'no texture', fast: 'fast texture', standard: 'standard texture' };
+
 const nf = new Intl.NumberFormat('en-US');
 const mb = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 10 * 1048576 ? 1 : 0)} MB`;
 
@@ -76,9 +85,20 @@ interface Upload {
 // 右边舞台要显示什么
 type Side =
   | { kind: 'empty'; text: string }
-  | { kind: 'busy'; label: string; ratio: number | null; cancel?: () => void }
+  // job：生成任务的（倒计时按它算）；preview：Tripo 渲染的预览图（任务成功后、模型还在下载导入时先放在舞台上）；note：用的模型
+  | { kind: 'busy'; label: string; ratio: number | null; cancel?: () => void; job?: GenJob; preview?: string; note?: string }
   | { kind: 'error'; message: string; action?: { label: string; run: () => void } }
-  | { kind: 'model'; key: string; load: () => Promise<ArrayBuffer | Uint8Array | Blob>; title: string; onTitle: (t: string) => void; facts: string[]; work: Work | null; adding: boolean; add: () => void };
+  | { kind: 'model'; key: string; load: () => Promise<ArrayBuffer | Uint8Array | Blob>; title: string; onTitle: (t: string) => void; facts: string[]; work: Work | null; adding: boolean; add: () => void; preview?: string };
+
+// 一页里的模型选择器：模型一行一个（单选），贴图档三格，Generate 旁边这一次的预计
+interface Picker {
+  field: HTMLElement;
+  models: HTMLElement;
+  status: HTMLElement;
+  rows: Map<string, { input: HTMLInputElement; eta: HTMLElement; credits: HTMLElement }>;
+  textures: Map<TextureChoice, HTMLInputElement>;
+  summary: HTMLElement;
+}
 
 export interface DialogDeps {
   app: App;
@@ -105,6 +125,7 @@ export class AddWorkDialog {
   private readonly stageEmpty = el('div', { className: 'ga-stage-empty' });
   private readonly stageBusy = el('div', { className: 'ga-stage-busy' });
   private readonly stageError = el('div', { className: 'ga-stage-error' });
+  private readonly previewImg = el('img', { className: 'ga-preview', alt: '', decoding: 'async' });
   private readonly result = el('div', { className: 'ga-result' });
   private readonly nameInput = el('input', { className: 'ga-input ga-name', id: 'ga-name', type: 'text', maxLength: 60, autocomplete: 'off', spellcheck: false });
   private readonly facts = el('ul', { className: 'ga-facts' });
@@ -132,10 +153,19 @@ export class AddWorkDialog {
   private readonly viewSlots: HTMLElement[] = [];
   private views: Array<{ file: File; url: string } | null> = [null, null, null, null];
   private pickingView = 0;
-  // 选项（三种生成方式共用）：只有「贴图」一个开关（Tripo v3 开 PBR 时强制带贴图，关掉贴图时中转把 PBR 一起关掉）。
-  // 模型版本不露出来，用中转的默认（v3.1）
-  private readonly options: Required<Pick<GenOptions, 'texture'>> = { texture: true };
-  private readonly optionInputs: HTMLInputElement[] = [];
+  // 选项：贴图档 none 时发 texture: false（中转把 PBR 一起关掉：Tripo v3 开 PBR 时强制带贴图）；fast 时加 textureQuality: fast。
+  // 模型和贴图档（三种生成方式共用一个选择，每一页各画一份）：模型列表、预计耗时、积分都从中转的 GET /models 来。
+  // 列表还没到（或者拿不到）时不传 modelVersion，用中转的默认
+  private models: ModelList | null = null;
+  private modelsState: 'loading' | 'ready' | 'failed' = 'loading';
+  private modelId: string | null = null;
+  private textureChoice: TextureChoice = 'standard';
+  private texturePicked = false; // 用户自己选过贴图档
+  private readonly pickers = new Map<GenMode, Picker>();
+  // 倒计时：窗口开着、右边是生成中的任务时每秒刷新一次那一行字（只改文字，不重画）
+  private etaTimer: ReturnType<typeof setInterval> | null = null;
+  private etaNode: HTMLElement | null = null;
+  private etaShown: { jobId: string; sec: number; at: number } | null = null;
   private readonly generateButtons = new Map<GenMode, HTMLButtonElement>();
   private preparing: GenMode | null = null; // 正在整理图片（转格式、缩小），Generate 先按不了
   private readonly offline = new Map<GenMode, HTMLElement>();
@@ -199,6 +229,7 @@ export class AddWorkDialog {
     if (!this.open_) return;
     this.open_ = false;
     removeEventListener('keydown', this.onKey);
+    this.syncEtaTimer();
     // 预览的模型拿掉（GPU 上不攒着），下次打开时重新载入；正在处理的上传、生成照常继续
     this.stage.clear();
     this.stageKey = null;
@@ -253,7 +284,9 @@ export class AddWorkDialog {
       p.tabIndex = -1;
     }
     // 右边：舞台（模型预览 / 进度 / 出错）+ 结果（名字、面数、Add to planet）
-    this.stageBox.append(el('div', { className: 'ga-spot' }), this.stageCanvas, this.stageEmpty, this.stageBusy, this.stageError);
+    // 预览图加载失败（链接过期之类）就收起来，不留一个破图标
+    this.previewImg.addEventListener('error', () => { delete this.stageBox.dataset.preview; });
+    this.stageBox.append(el('div', { className: 'ga-spot' }), this.previewImg, this.stageCanvas, this.stageEmpty, this.stageBusy, this.stageError);
     this.nameInput.addEventListener('input', () => { if (this.side?.kind === 'model') this.side.onTitle(this.nameInput.value); });
     this.nameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.isComposing) {
@@ -418,18 +451,27 @@ export class AddWorkDialog {
     );
   }
 
-  // 三种生成方式共用的：贴图开关，Tripo 不可用时的提示，Generate 按钮
+  // 三种生成方式共用的：模型（每个写着长处、大概多久、多少积分）、贴图档，Tripo 不可用时的提示，Generate 按钮和这一次的预计
   private genControls(mode: GenMode): HTMLElement[] {
-    const toggle = (key: 'texture', label: string, hint: string) => {
-      const input = el('input', { type: 'checkbox', className: 'ga-switch-input', checked: this.options[key] });
-      input.dataset.option = key;
-      input.addEventListener('change', () => {
-        this.options[key] = input.checked;
-        for (const other of this.optionInputs) if (other.dataset.option === key) other.checked = input.checked;
-      });
-      this.optionInputs.push(input);
-      return el('label', { className: 'ga-switch', title: hint }, input, el('span', { className: 'ga-switch-track' }, el('i')), el('span', { textContent: label }));
-    };
+    const models = el('div', { className: 'ga-models', role: 'radiogroup' });
+    models.setAttribute('aria-labelledby', `ga-models-${mode}`);
+    const status = el('p', { className: 'ga-models-status', textContent: 'Loading models…' });
+    const field = el('div', { className: 'ga-field ga-model-field' },
+      el('span', { className: 'ga-label', id: `ga-models-${mode}` }, 'Model', el('span', { className: 'ga-label-note', textContent: 'times are estimates' })),
+      models,
+      status,
+    );
+    const seg = el('div', { className: 'ga-seg', role: 'radiogroup' });
+    seg.setAttribute('aria-labelledby', `ga-tex-${mode}`);
+    const textures = new Map<TextureChoice, HTMLInputElement>();
+    for (const t of TEXTURES) {
+      const input = el('input', { type: 'radio', className: 'ga-seg-input', name: `ga-tex-${mode}`, value: t.id });
+      input.addEventListener('change', () => { if (input.checked) this.pickTexture(t.id); });
+      textures.set(t.id, input);
+      seg.append(el('label', { className: 'ga-seg-item', title: t.hint, dataset: { texture: t.id } }, input, el('span', { textContent: t.label })));
+    }
+    const summary = el('span', { className: 'ga-cost' });
+    this.pickers.set(mode, { field, models, status, rows: new Map(), textures, summary });
     const offline = el('p', { className: 'ga-offline', role: 'status' });
     offline.hidden = true;
     this.offline.set(mode, offline);
@@ -437,12 +479,104 @@ export class AddWorkDialog {
     go.addEventListener('click', () => void this.generate(mode));
     this.generateButtons.set(mode, go);
     const hint = mode === 'multiview' ? el('p', { className: 'ga-hint ga-views-hint', textContent: 'Add the front view and at least one more side.' }) : null;
+    this.syncPicker(mode);
     return [
       ...(hint ? [hint] : []),
-      el('div', { className: 'ga-options' }, toggle('texture', 'Texture', 'Paint colours, details and realistic materials onto the model. Off: plain grey clay')),
+      el('div', { className: 'ga-options' }, field, el('div', { className: 'ga-field ga-texture-field' }, el('span', { className: 'ga-label', id: `ga-tex-${mode}` }, 'Texture'), seg)),
       offline,
-      el('div', { className: 'ga-go' }, go, el('span', { className: 'ga-cost', textContent: 'Uses credits from the demo’s Tripo account' })),
+      el('div', { className: 'ga-go' }, go, summary),
     ];
+  }
+
+  // —— 模型选择器 ——
+
+  // 现在选中的模型：用户选过的，没有就是中转的默认；列表还没到时 undefined
+  private currentModel(): ModelInfo | undefined {
+    const list = this.models?.models ?? [];
+    return list.find((m) => m.id === this.modelId) ?? list.find((m) => m.id === this.models?.defaultModel) ?? list[0];
+  }
+
+  // 实际用的贴图档：选的是 fast 而这个模型没有 fast（或者模型列表没到）时按 standard
+  private textureFor(model: ModelInfo | undefined): TextureChoice {
+    const t = this.textureChoice;
+    if (t === 'fast' && !model?.textures.includes('fast')) return 'standard';
+    if (model && !model.textures.includes(t)) return model.textures.includes('standard') ? 'standard' : model.textures[0];
+    return t;
+  }
+
+  private pickModel(id: string): void {
+    this.modelId = id;
+    for (const mode of this.pickers.keys()) this.syncPicker(mode);
+  }
+
+  private pickTexture(t: TextureChoice): void {
+    this.textureChoice = t;
+    this.texturePicked = true;
+    for (const mode of this.pickers.keys()) this.syncPicker(mode);
+  }
+
+  // 模型列表到了（或者换了）：重新搭每一页的模型行。之后的切换只走 syncPicker（不重建节点，键盘焦点不丢）
+  private buildPickers(): void {
+    for (const [mode, p] of this.pickers) {
+      p.rows.clear();
+      const list = this.models?.models ?? [];
+      p.models.replaceChildren(...list.map((m) => {
+        const input = el('input', { type: 'radio', className: 'ga-model-input', name: `ga-model-${mode}`, value: m.id });
+        input.addEventListener('change', () => { if (input.checked) this.pickModel(m.id); });
+        const eta = el('span', { className: 'ga-model-eta' });
+        const credits = el('span', { className: 'ga-model-credits' });
+        p.rows.set(m.id, { input, eta, credits });
+        const name = el('span', { className: 'ga-model-name' }, el('b', { textContent: m.label }));
+        if (m.id === this.models?.defaultModel) name.append(el('em', { className: 'ga-model-tag', textContent: 'Recommended' }));
+        return el('label', { className: 'ga-model', dataset: { model: m.id } }, input, el('i', { className: 'ga-model-dot' }), name, el('span', { className: 'ga-model-blurb', textContent: m.blurb }), eta, credits);
+      }));
+      this.syncPicker(mode);
+    }
+  }
+
+  // 选中状态、每个模型这一页的预计耗时和积分（按现在的贴图档）、贴图档能不能选、Generate 旁边的一句
+  private syncPicker(mode: GenMode): void {
+    const p = this.pickers.get(mode);
+    if (!p) return;
+    const current = this.currentModel();
+    for (const [id, row] of p.rows) {
+      const m = this.models?.models.find((x) => x.id === id);
+      const tex = this.textureFor(m);
+      const eta = etaOf(m, mode, tex);
+      const credits = creditsOf(m, mode, tex);
+      row.input.checked = id === current?.id;
+      row.eta.textContent = eta ? formatEta(eta) : '';
+      row.eta.title = eta ? `${m?.measured ? 'Measured' : 'Estimated'} time with ${TEXTURE_NOTE[tex]}` : '';
+      row.credits.textContent = credits ? `${nf.format(credits)} credits` : '';
+    }
+    p.models.hidden = this.modelsState !== 'ready';
+    p.status.hidden = this.modelsState !== 'loading';
+    // 拿不到模型列表：整个模型那一栏收起来（用中转的默认版本照样能生成）
+    p.field.hidden = this.modelsState === 'failed';
+    const tex = this.textureFor(current);
+    for (const [id, input] of p.textures) {
+      const ok = id !== 'fast' || !!current?.textures.includes('fast');
+      input.disabled = !ok;
+      input.checked = id === tex;
+      const label = input.closest('label');
+      if (label) label.title = ok ? TEXTURES.find((t) => t.id === id)!.hint : `${current?.label ?? 'This model'} has no fast texture option`;
+    }
+    const eta = etaOf(current, mode, tex);
+    const credits = creditsOf(current, mode, tex);
+    p.summary.textContent = credits
+      ? `${eta ? `${formatEta(eta)} · ` : ''}${nf.format(credits)} credits from the demo’s Tripo account`
+      : 'Uses credits from the demo’s Tripo account';
+  }
+
+  // 这一次发给中转的选项、预计耗时
+  private genOptions(mode: GenMode): { options: GenOptions; etaSec?: number; modelLabel?: string } {
+    const model = this.currentModel();
+    const tex = this.textureFor(model);
+    const options: GenOptions = { texture: tex !== 'none' };
+    if (model) options.modelVersion = model.id;
+    if (tex === 'fast') options.textureQuality = 'fast';
+    const eta = etaOf(model, mode, tex);
+    return { options, ...(eta ? { etaSec: eta } : {}), ...(model ? { modelLabel: model.label } : {}) };
   }
 
   // —— 标签 ——
@@ -714,12 +848,13 @@ export class AddWorkDialog {
     const team = this.team();
     const button = this.generateButtons.get(mode);
     if (!team || !button || button.disabled) return;
-    const options: GenOptions = { texture: this.options.texture };
+    const { options, etaSec, modelLabel } = this.genOptions(mode);
+    const extra = { ...(etaSec ? { etaSec } : {}), ...(modelLabel ? { modelLabel } : {}) };
     let job: GenJob;
     if (mode === 'text') {
       const prompt = this.promptInput.value.trim();
       if (!prompt) return;
-      job = this.deps.jobs.submit({ mode: 'text', prompt, title: titleFromPrompt(prompt), teamId: team.id, options });
+      job = this.deps.jobs.submit({ mode: 'text', prompt, title: titleFromPrompt(prompt), teamId: team.id, options, ...extra });
     } else {
       // 图片先整理成中转收的格式（PNG / JPEG、≤ 10 MB）：转格式、缩小在这里做，几百毫秒
       const picked = mode === 'image' ? [this.image?.file ?? null] : this.views.map((v) => v?.file ?? null);
@@ -742,8 +877,8 @@ export class AddWorkDialog {
       const first = files[0]!;
       const title = titleFromFile(picked[0].name);
       job = mode === 'image'
-        ? this.deps.jobs.submit({ mode: 'image', image: first, title, teamId: team.id, options })
-        : this.deps.jobs.submit({ mode: 'multiview', views: files, title, teamId: team.id, options });
+        ? this.deps.jobs.submit({ mode: 'image', image: first, title, teamId: team.id, options, ...extra })
+        : this.deps.jobs.submit({ mode: 'multiview', views: files, title, teamId: team.id, options, ...extra });
     }
     this.selected[mode] = job.id;
     this.renderSide();
@@ -832,10 +967,21 @@ export class AddWorkDialog {
     }
     if (job.phase === 'cancelled') return { kind: 'error', message: 'Cancelled. Nothing was added to your works.', action: this.again(job) };
     if (job.phase !== 'done') {
-      const ratio = job.phase === 'running' ? job.progress / 100 : job.phase === 'downloading' || job.phase === 'importing' ? 1 : null;
+      let ratio = job.phase === 'running' ? job.progress / 100 : job.phase === 'downloading' || job.phase === 'importing' ? 1 : null;
+      let label = phaseLabel(job);
+      // 下载：收到多少（中转给了总长就有百分比）；导入：不确定要多久，进度条来回扫
+      const d = job.download;
+      if (job.phase === 'downloading' && d) {
+        label = d.total ? `Downloading… ${mb(d.loaded)} of ${mb(d.total)}` : `Downloading… ${mb(d.loaded)}`;
+        ratio = d.total ? d.loaded / d.total : null;
+      }
+      if (job.phase === 'importing') ratio = null;
       // 导入那一步已经在往作品里加了，不能取消（没有 Cancel 按钮）；轮询暂时出错、正在重试时进度下面加一句
       const cancel = this.deps.jobs.canCancel(job.id) ? () => { this.deps.jobs.cancel(job.id); this.renderSide(); this.renderJobs(); } : undefined;
-      return { kind: 'busy', label: job.stalled ? `${phaseLabel(job)} · ${STALLED_HINT}` : phaseLabel(job), ratio, cancel };
+      const tex: TextureChoice = job.options.texture === false ? 'none' : job.options.textureQuality === 'fast' ? 'fast' : 'standard';
+      const note = job.modelLabel ? `${job.modelLabel} · ${TEXTURE_NOTE[tex]}` : undefined;
+      const preview = (job.phase === 'downloading' || job.phase === 'importing') && job.previewUrl ? job.previewUrl : undefined;
+      return { kind: 'busy', label: job.stalled ? `${label} · ${STALLED_HINT}` : label, ratio, cancel, job, preview, note };
     }
     const work = job.workId ? this.deps.registry.work(job.workId) : undefined;
     const record = job.workId ? this.deps.registry.record(job.workId) : undefined;
@@ -843,7 +989,7 @@ export class AddWorkDialog {
     const title = this.jobTitles.get(job.id) ?? work.title;
     return {
       kind: 'model', key: `work-${work.id}`, load: async () => record.glb, title, onTitle: (t) => { this.jobTitles.set(job.id, t); }, facts: [`${nf.format(work.tris)} triangles · ${mb(record.bytes)}`],
-      work, adding: this.adding.has(job.id), add: () => void this.addJob(job),
+      work, adding: this.adding.has(job.id), add: () => void this.addJob(job), preview: job.previewUrl,
     };
   }
 
@@ -896,6 +1042,12 @@ export class AddWorkDialog {
     this.side = side;
     this.renderUploadSteps();
     const box = this.stageBox;
+    // 不是生成中：倒计时那一行没了，计时器停掉；预览图收起（busy 和载入模型时由 renderBusy 再放上）
+    if (side.kind !== 'busy') {
+      this.etaNode = null;
+      this.syncEtaTimer();
+      this.setPreview(undefined);
+    }
     if (side.kind !== 'model') {
       box.dataset.state = side.kind;
       this.result.hidden = true;
@@ -919,7 +1071,7 @@ export class AddWorkDialog {
       return;
     }
     if (side.kind === 'busy') {
-      this.renderBusy(side.label, side.ratio, side.cancel);
+      this.renderBusy(side.label, side.ratio, side.cancel, side);
       return;
     }
     // 模型：换了一件就重新载入（载入期间显示 Preparing preview…）
@@ -944,7 +1096,7 @@ export class AddWorkDialog {
       });
     }
     if (!this.stageReady) {
-      this.renderBusy('Preparing the preview…', null);
+      this.renderBusy('Preparing the preview…', null, undefined, { preview: side.preview });
     } else {
       box.dataset.state = 'model';
       this.stage.setVisible(this.open_);
@@ -959,8 +1111,48 @@ export class AddWorkDialog {
     this.addButton.replaceChildren(icon('planet'), side.adding ? 'Adding…' : 'Add to planet');
   }
 
-  private renderBusy(label: string, ratio: number | null, cancel?: () => void): void {
+  // 舞台上的 Tripo 预览图：任务成功以后、模型还在下载导入时先放上（同一张图不重新加载）；url 不给就收起
+  private setPreview(url?: string): void {
+    if (!url) {
+      delete this.stageBox.dataset.preview;
+      return;
+    }
+    if (this.previewImg.getAttribute('src') !== url) this.previewImg.src = url;
+    this.stageBox.dataset.preview = 'true';
+  }
+
+  // 倒计时：只在窗口开着、舞台上有那一行字时每秒走一次
+  private syncEtaTimer(): void {
+    const want = this.open_ && this.etaNode !== null;
+    if (want && this.etaTimer === null) this.etaTimer = setInterval(() => this.tickEta(), 1000);
+    if (!want && this.etaTimer !== null) {
+      clearInterval(this.etaTimer);
+      this.etaTimer = null;
+    }
+  }
+
+  // 按模型的预计耗时和 Tripo 的进度算还要多久（genai/eta.ts），平滑以后写进那一行
+  private tickEta(): void {
+    const node = this.etaNode;
+    const side = this.side;
+    if (!node?.isConnected || side?.kind !== 'busy' || !side.job) {
+      this.etaNode = null;
+      this.syncEtaTimer();
+      return;
+    }
+    const job = side.job;
+    const now = Date.now();
+    const raw = remainingSec(job, now);
+    const sec = raw === null ? null : smoothRemaining(this.etaShown?.jobId === job.id ? this.etaShown : null, raw, now);
+    if (sec !== null) this.etaShown = { jobId: job.id, sec, at: now };
+    const text = leftText(job, sec, now);
+    node.hidden = !text;
+    node.textContent = text ?? '';
+  }
+
+  private renderBusy(label: string, ratio: number | null, cancel?: () => void, extra: { job?: GenJob; preview?: string; note?: string } = {}): void {
     this.stageBox.dataset.state = 'busy';
+    this.setPreview(extra.preview);
     const pct = ratio === null ? null : Math.round(Math.max(0, Math.min(1, ratio)) * 100);
     const bar = el('div', { className: 'ga-bar', role: 'progressbar' });
     bar.setAttribute('aria-label', label);
@@ -972,14 +1164,43 @@ export class AddWorkDialog {
     } else bar.dataset.indeterminate = 'true';
     bar.append(el('i'));
     const nodes: Node[] = [el('span', { className: 'dots' }, el('i'), el('i'), el('i')), el('p', { className: 'ga-busy-label', textContent: label }), bar];
+    // 排队、生成中：下面一行「About 40 s left」（每秒刷新）和用的模型
+    const job = extra.job;
+    this.etaNode = null;
+    if (job && (job.phase === 'queued' || job.phase === 'running')) {
+      this.etaNode = el('p', { className: 'ga-eta', ariaHidden: 'true' });
+      nodes.push(this.etaNode);
+    }
+    if (extra.note) nodes.push(el('p', { className: 'ga-busy-note', textContent: extra.note }));
     if (cancel) nodes.push(el('button', { className: 'ga-cancel', type: 'button', textContent: 'Cancel', onclick: () => cancel() }));
     nodes.push(el('p', { className: 'ga-busy-hint', textContent: cancel ? 'You can close this window. Tripo keeps working, and we will let you know when it is ready.' : 'This runs in the background, so the planet stays smooth.' }));
     this.stageBusy.replaceChildren(...nodes);
+    if (this.etaNode) this.tickEta();
+    this.syncEtaTimer();
   }
 
   // —— Tripo 连不连得上、剩多少额度 ——
 
+  // 模型列表（每次打开窗口问一次就够：中转改了 TRIPO_MODEL_VERSIONS 要重新部署）。拿不到时收起模型那一栏，用中转的默认版本
+  private loadModels(): void {
+    if (this.modelsState === 'ready') return;
+    this.modelsState = 'loading';
+    this.deps.api.models().then((list) => {
+      this.models = list;
+      this.modelsState = 'ready';
+      if (this.modelId && !list.models.some((m) => m.id === this.modelId)) this.modelId = null;
+      // 贴图档的默认也听中转的（用户自己点过就不动）
+      if (!this.texturePicked) this.textureChoice = list.defaultTexture;
+      this.buildPickers();
+    }, (err: unknown) => {
+      console.warn('[genai] model list unavailable, using the default model', err);
+      this.modelsState = 'failed';
+      for (const mode of this.pickers.keys()) this.syncPicker(mode);
+    });
+  }
+
   private checkTripo(): void {
+    this.loadModels();
     if (this.tripo.checked && this.tripo.ok) {
       this.refreshBalance();
       return;
@@ -1071,6 +1292,11 @@ export class AddWorkDialog {
       balance: this.balance,
       upload: up ? { phase: up.phase, title: up.title, triangles: up.result?.triangles ?? null, trianglesBefore: up.result?.trianglesBefore ?? null, simplified: up.result?.simplified ?? null, error: up.error } : null,
       selected: { ...this.selected },
+      models: { state: this.modelsState, ids: this.models?.models.map((m) => m.id) ?? [], defaultModel: this.models?.defaultModel ?? null },
+      model: this.currentModel()?.id ?? null,
+      texture: this.textureFor(this.currentModel()),
+      preview: this.stageBox.dataset.preview === 'true',
+      eta: this.etaNode?.textContent ?? null,
     };
   }
 }

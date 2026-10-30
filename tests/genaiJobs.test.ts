@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StorageLike } from '../src/data/store';
 import { TripoError } from '../src/genai/api';
-import { GenJobs, JOBS_KEY, MAX_JOBS, MAX_PROMPT_CHARS, POLL_MAX_MS, POLL_MIN_MS, RETRY_AFTER_CAP_MS } from '../src/genai/jobs';
-import type { GenJob, ImageRef, JobEvent, JobPhase, TaskInfo, TaskRequest, TripoApi } from '../src/genai/types';
+import { GenJobs, JOBS_KEY, MAX_JOBS, MAX_PROMPT_CHARS, POLL_MAX_MS, POLL_MIN_MS, POLL_TAIL_MS, RETRY_AFTER_CAP_MS } from '../src/genai/jobs';
+import type { GenJob, GenSubmit, ImageRef, JobEvent, JobPhase, TaskInfo, TaskRequest, TripoApi } from '../src/genai/types';
 
 // 生成任务的状态机：假的中转（TripoApi）+ 手动计时器（一个个放出来），不碰网络、不等真时间
 
@@ -71,6 +71,8 @@ function fakeApi() {
   const api = {
     base: '/api/tripo',
     health: vi.fn(async () => ({ ok: true, mock: true })),
+    models: vi.fn(async () => ({ defaultModel: 'v3.1-20260211', defaultTexture: 'fast' as const, models: [] })),
+    resolve: (url: string) => url,
     balance: vi.fn(async () => ({ balance: 100, frozen: 0 })),
     upload: vi.fn(async (_file: Blob, _name: string): Promise<ImageRef> => ({ token: `tok-${++uploads}`, type: 'png' })),
     createTask: vi.fn(async (_req: TaskRequest) => ({ taskId: 'task-1' })),
@@ -80,7 +82,7 @@ function fakeApi() {
       if (next instanceof Error) throw next;
       return next;
     }),
-    download: vi.fn(async (_id: string): Promise<Blob> => GLB),
+    download: vi.fn(async (_id: string, _onProgress?: (p: { loaded: number; total?: number }) => void): Promise<Blob> => GLB),
   } satisfies TripoApi;
   return { api, statuses };
 }
@@ -101,7 +103,7 @@ function setup(opts: { api?: TripoApi; storage?: ReturnType<typeof memStorage>; 
   return { jobs, timers, storage, finish, events, phases, advance: (ms: number) => { clock += ms; } };
 }
 
-const text = (prompt: string, extra: Partial<{ title: string; teamId: string }> = {}) =>
+const text = (prompt: string, extra: Partial<{ title: string; teamId: string }> = {}): GenSubmit =>
   ({ mode: 'text' as const, prompt, title: extra.title ?? '', teamId: extra.teamId ?? 'lumen-guild', options: { texture: true } });
 
 afterEach(() => {
@@ -126,7 +128,7 @@ describe('GenJobs：提交和轮询', () => {
     expect(t.jobs.get(job.id)).toMatchObject({ phase: 'running', progress: 40 });
     await t.timers.tick(); // success → 下载 → 导入 → done
     expect(t.jobs.get(job.id)).toMatchObject({ phase: 'done', progress: 100, workId: 'u-1', taskId: 'task-1' });
-    expect(api.download).toHaveBeenCalledWith('task-1');
+    expect(api.download).toHaveBeenCalledWith('task-1', expect.any(Function));
     expect(t.finish).toHaveBeenCalledTimes(1);
     expect(t.finish.mock.calls[0][0]).toMatchObject({ id: job.id, prompt: 'a red fox, sitting!', teamId: 'lumen-guild', phase: 'importing' });
     expect(t.finish.mock.calls[0][1]).toBe(GLB);
@@ -197,6 +199,72 @@ describe('GenJobs：提交和轮询', () => {
       expect(d).toBeGreaterThanOrEqual(POLL_MIN_MS);
       expect(d).toBeLessThanOrEqual(POLL_MAX_MS);
     }
+  });
+
+  it('收尾：进度到 90% 以后每秒问一次；按预计耗时，过了 85% 也每秒问，超过 1.5 倍回到平时的退避', async () => {
+    const { api, statuses } = fakeApi();
+    statuses.push(running(50), running(90), running(95));
+    const t = setup({ api });
+    t.jobs.submit(text('a lamp'));
+    await flush();
+    for (let i = 0; i < 3; i++) await t.timers.tick();
+    // 2000（建好后第一次问）→ running 50 变了：2000 → running 90：收尾 1000 → 95：1000
+    expect(t.timers.delays).toEqual([2000, 2000, POLL_TAIL_MS, POLL_TAIL_MS]);
+
+    const b = fakeApi();
+    b.statuses.push(running(40));
+    const u = setup({ api: b.api });
+    u.jobs.submit({ ...text('a vase'), etaSec: 100 });
+    await flush();
+    await u.timers.tick(); // 刚建好：40% 变了 → 2 秒
+    u.advance(86_000); // 过了预计的 86%
+    await u.timers.tick();
+    u.advance(70_000); // 156%：超过 1.5 倍
+    await u.timers.tick();
+    expect(u.timers.delays).toEqual([2000, 2000, POLL_TAIL_MS, POLL_MIN_MS]);
+  });
+
+  it('记下预计耗时、模型名、开始时间、第一次 running 的时间、成功时的预览图（按中转地址解析），刷新以后还在；下载进度不存档', async () => {
+    const { api, statuses } = fakeApi();
+    let progressSeen = false;
+    api.resolve = (url: string) => `https://proxy.example${url}`;
+    api.download.mockImplementation(async (_id: string, onProgress?: (p: { loaded: number; total?: number }) => void) => {
+      onProgress?.({ loaded: 10, total: 40 });
+      progressSeen = true;
+      return GLB;
+    });
+    statuses.push(running(30), { status: 'success', progress: 100, modelUrl: '/api/tripo/download/task-1', previewUrl: '/api/tripo/preview/task-1' });
+    let release!: () => void;
+    const t = setup({ api, finish: () => new Promise((r) => { release = () => r({ workId: 'u-9' }); }) });
+    const job = t.jobs.submit({ ...text('a kite'), etaSec: 95, modelLabel: 'H3.1' });
+    expect(job).toMatchObject({ etaSec: 95, modelLabel: 'H3.1' });
+    await flush();
+    expect(t.jobs.get(job.id)?.startedAt).toBe(1_000_000);
+    t.advance(3000);
+    await t.timers.tick(); // running 30
+    expect(t.jobs.get(job.id)?.runningAt).toBe(1_003_000);
+    await t.timers.tick(); // success → 下载（报一次进度）→ 导入（finish 还没回）
+    expect(progressSeen).toBe(true);
+    expect(t.events.some((e) => e.job.download?.loaded === 10 && e.job.download.total === 40)).toBe(true);
+    expect(t.jobs.get(job.id)).toMatchObject({ phase: 'importing', previewUrl: 'https://proxy.example/api/tripo/preview/task-1' });
+    expect(t.jobs.get(job.id)?.download).toBeUndefined();
+    const saved = t.storage.data.get(JOBS_KEY) ?? '';
+    expect(saved).not.toContain('"download"');
+    const again = new GenJobs({ api, storage: t.storage, finish: async () => ({ workId: 'x' }) });
+    expect(again.get(job.id)).toMatchObject({ etaSec: 95, modelLabel: 'H3.1', startedAt: 1_000_000, runningAt: 1_003_000, previewUrl: 'https://proxy.example/api/tripo/preview/task-1' });
+    release();
+    await flush();
+    expect(t.jobs.get(job.id)?.phase).toBe('done');
+  });
+
+  it('存档里的预览图地址只认 / 开头的路径和 http(s)：javascript: 之类丢掉', () => {
+    const storage = memStorage();
+    const base = { mode: 'text', title: 'A', teamId: 't', options: {}, phase: 'importing', progress: 100, createdAt: 1, updatedAt: 1, taskId: 'task-1' };
+    storage.setItem(JOBS_KEY, JSON.stringify({ v: 1, jobs: [{ ...base, id: 'job-a', previewUrl: 'javascript:alert(1)' }, { ...base, id: 'job-b', previewUrl: '//evil.example/x.png' }, { ...base, id: 'job-c', previewUrl: '/api/tripo/preview/task-1' }] }));
+    const jobs = new GenJobs({ api: fakeApi().api, storage, finish: async () => ({ workId: 'x' }) });
+    expect(jobs.get('job-a')?.previewUrl).toBeUndefined();
+    expect(jobs.get('job-b')?.previewUrl).toBeUndefined();
+    expect(jobs.get('job-c')?.previewUrl).toBe('/api/tripo/preview/task-1');
   });
 
   it('进度不往回走；unknown 当作没变，接着问', async () => {
@@ -434,7 +502,7 @@ describe('GenJobs：出错', () => {
     expect(b.jobs.canRetry(job.id)).toBe(true);
     expect(b.jobs.retry(job.id)).toBe(true);
     await flush();
-    expect(second.api.download).toHaveBeenCalledWith('task-1');
+    expect(second.api.download).toHaveBeenCalledWith('task-1', expect.any(Function));
     expect(b.jobs.get(job.id)).toMatchObject({ phase: 'done', workId: 'u-1' });
   });
 });
@@ -539,7 +607,7 @@ describe('GenJobs：取消、刷新、清空', () => {
     b.jobs.resume();
     await flush();
     expect(second.api.getTask).not.toHaveBeenCalled();
-    expect(second.api.download).toHaveBeenCalledWith('task-1');
+    expect(second.api.download).toHaveBeenCalledWith('task-1', expect.any(Function));
     expect(b.jobs.get(job.id)).toMatchObject({ phase: 'done', workId: 'u-1' });
   });
 

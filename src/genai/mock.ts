@@ -153,9 +153,11 @@ function checkRef(v: unknown): { token: string } | null {
 
 function checkTask(body: unknown): Checked {
   if (!isRecord(body)) return { ok: false, message: 'Send the task as a JSON object.' };
-  const { mode, texture, pbr, modelVersion } = body;
+  const { mode, texture, pbr, modelVersion, textureQuality, faceLimit } = body;
   if ((texture !== undefined && typeof texture !== 'boolean') || (pbr !== undefined && typeof pbr !== 'boolean')) return { ok: false, message: 'texture and pbr must be true or false.' };
   if (modelVersion !== undefined && typeof modelVersion !== 'string') return { ok: false, message: 'modelVersion must be a string.' };
+  if (textureQuality !== undefined && textureQuality !== 'standard' && textureQuality !== 'fast') return { ok: false, message: 'textureQuality must be standard or fast.' };
+  if (faceLimit !== undefined && !Number.isInteger(faceLimit)) return { ok: false, message: 'faceLimit must be a whole number.' };
   if (mode === 'text') {
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     if (!prompt) return { ok: false, message: 'Describe the model you want.' };
@@ -341,10 +343,18 @@ export function createMockFetch(opts: MockOptions): typeof fetch {
     return new Response(blob, { status: 200, headers: { 'content-type': 'model/gltf-binary' } });
   }
 
+  // 模型列表和服务端中转用同一份目录（server/tripo/handler.mjs 的 MODEL_CATALOG、ETA_SEC），按默认放行的版本列：
+  // 动态加载，只有模拟模式下问到模型列表时才拉这一块，平时不进页面的包
+  async function models(): Promise<Response> {
+    const { modelsInfo, readConfig } = await import('../../server/tripo/handler.mjs');
+    return json(200, { ok: true, ...modelsInfo(readConfig({})) });
+  }
+
   async function route(method: string, parts: string[], input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const [head, id, ...rest] = parts;
     const allow = (m: string, run: () => Response | Promise<Response>): Response | Promise<Response> => (method === m ? run() : fail(405, 'bad_request', `Use ${m} for this endpoint.`));
     if (head === 'health' && !id) return allow('GET', () => json(200, { ok: true, mock: true }));
+    if (head === 'models' && !id) return allow('GET', models);
     if (head === 'balance' && !id) return allow('GET', () => json(200, { ok: true, ...totals(load(), now()) }));
     if (head === 'upload' && !id) return allow('POST', () => upload(input, init));
     if (head === 'task' && !id) return allow('POST', () => createTask(input, init));
