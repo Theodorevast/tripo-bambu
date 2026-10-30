@@ -1,14 +1,48 @@
 // Node 外壳共用的部分（vite-plugin.mjs、node-server.mjs）：Node 的 req/res 和 Web 标准的 Request/Response 互转、
 // 取客户端 IP、模拟模式下从本地读模型和预览图。只用 Node 自带模块。
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { isTripoPath } from './handler.mjs';
+import { parseEnv } from 'node:util';
+import { isTripoPath, readConfig } from './handler.mjs';
 
 // 模拟模式默认用的模型：public/models/ 里最小的几个之一
 export const DEFAULT_MOCK_MODEL = 'models/tufted-armchair.glb';
+
+// 读 env 文件（和 Vite 同一个顺序，后面的盖前面的：.env < .env.local < .env.[mode] < .env.[mode].local），
+// 最后用进程环境变量整个盖上去：进程环境变量优先级最高。命令行上的 TRIPO_MOCK=1 一定生效，.env.local 里有密钥也照样走模拟
+export function loadEnvFiles({ dir, mode, processEnv = process.env } = {}) {
+  const names = ['.env', '.env.local', ...(mode ? [`.env.${mode}`, `.env.${mode}.local`] : [])];
+  const merged = {};
+  if (dir) {
+    for (const name of names) {
+      let text;
+      try {
+        text = readFileSync(resolve(dir, name), 'utf8');
+      } catch {
+        continue;
+      }
+      Object.assign(merged, parseEnv(text));
+    }
+  }
+  for (const [k, v] of Object.entries(processEnv ?? {})) {
+    if (v !== undefined) merged[k] = v;
+  }
+  return merged;
+}
+
+// 启动时打一行：真实模式要醒目（会花额度）。只说有没有密钥，绝不打出密钥或它的任何一部分
+export function modeBanner(env) {
+  const cfg = readConfig(env);
+  if (cfg.mock) {
+    const why = cfg.key ? 'TRIPO_MOCK=1' : '没有 TRIPO_API_KEY';
+    return { level: 'info', text: `[tripo] /api/tripo 模拟模式（${why}），不花额度` };
+  }
+  const limits = `每个 IP 每小时 ${cfg.tasksPerIpPerHour} 个任务，24 小时内最多 ${cfg.tasksPerDay} 个`;
+  return { level: 'warn', text: `⚠ Tripo 真实模式：会消耗额度（${limits}）。只想自测请用 TRIPO_MOCK=1 启动` };
+}
 
 // 客户端 IP。trustProxy = 前面有几层自己的反向代理（Nginx、平台的负载均衡）；0 表示直连，不看 X-Forwarded-For（可以伪造）
 export function clientIp(req, trustProxy = 0) {
