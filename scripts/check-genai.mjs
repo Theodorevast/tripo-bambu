@@ -281,7 +281,7 @@ try {
     await page.locator('.tray-add', { hasText: 'Create with' }).click();
     await dialogOpen('text');
     await page.locator('#ga-prompt').fill('A tiny robot gardener holding a watering can');
-    // 模型选择器：中转放行的三个 H 版本，每行有长处、大概多久、多少积分；默认 H3.1（Recommended）+ 快速贴图；Generate 不用滚就看得见
+    // 模型选择器：两个选项（H · High precision = H3.1、P · Smart Mesh = P1），每行有长处、大概多久、多少积分；默认 H（Recommended）+ 快速贴图；Generate 不用滚就看得见
     await until(page, '模型列表到了', () => window.__genai.state().models?.state === 'ready', null, 20000);
     const picker = await page.evaluate(() => {
       const rows = [...document.querySelectorAll('.ga-panel[data-panel="text"] .ga-model')].map((r) => ({
@@ -292,17 +292,23 @@ try {
       const s = window.__genai.state();
       return { rows, model: s.model, texture: s.texture, goVisible: go.bottom <= card.bottom && go.top >= card.top, summary: document.querySelector('.ga-panel[data-panel="text"] .ga-cost')?.textContent ?? '' };
     });
-    check('模型选择器：三个版本，每行有长处、≈ 时间、积分，H3.1 标着 Recommended', picker.rows.length === 3 && picker.rows.every((r) => r.blurb && /^≈ /.test(r.eta) && /credits$/.test(r.credits)) && picker.rows.find((r) => r.tag)?.id === 'v3.1-20260211', picker.rows.map((r) => `${r.id} ${r.eta} ${r.credits}`).join('；'));
-    check('默认 H3.1 + 快速贴图，Generate 旁边写着这一次的预计', picker.model === 'v3.1-20260211' && picker.texture === 'fast' && /^≈ .* · 20 credits/.test(picker.summary), `${picker.model} ${picker.texture} 「${picker.summary}」`);
+    check('模型选择器：H、P 两个选项，每行有长处、≈ 时间、积分，H 标着 Recommended', picker.rows.map((r) => r.id).join() === 'v3.1-20260211,P1-20260311' && picker.rows.every((r) => r.blurb && /^≈ /.test(r.eta) && /credits$/.test(r.credits)) && picker.rows.find((r) => r.tag)?.id === 'v3.1-20260211', picker.rows.map((r) => `${r.id} ${r.eta} ${r.credits}`).join('；'));
+    check('默认 H + 快速贴图，Generate 旁边写着这一次的预计', picker.model === 'v3.1-20260211' && picker.texture === 'fast' && /^≈ .* · 20 credits/.test(picker.summary), `${picker.model} ${picker.texture} 「${picker.summary}」`);
+    // 换成 P：没有快速贴图档，退到标准贴图（40 积分），预计时间比 H 短；再换回 H，快速贴图还在
+    await page.locator('.ga-panel[data-panel="text"] .ga-model[data-model="P1-20260311"]').click();
+    const pPick = await page.evaluate(() => ({ s: window.__genai.state(), summary: document.querySelector('.ga-panel[data-panel="text"] .ga-cost')?.textContent ?? '' }));
+    await page.locator('.ga-panel[data-panel="text"] .ga-model[data-model="v3.1-20260211"]').click();
+    const hBack = await page.evaluate(() => window.__genai.state());
+    check('选 P：退到标准贴图、40 积分；换回 H 还是快速贴图', pPick.s.model === 'P1-20260311' && /· 40 credits/.test(pPick.summary) && hBack.model === 'v3.1-20260211' && hBack.texture === 'fast', `P「${pPick.summary}」 → ${hBack.model} ${hBack.texture}`);
     check('Generate 不用滚就看得见（贴在左栏底下）', picker.goVisible);
     await shot(page, 'text-prompt');
     await page.locator('.ga-panel[data-panel="text"] .ga-generate').click();
     const job = await newestJob();
     check('建了一个文字任务', job?.mode === 'text', job?.phase);
-    check('任务带着预计耗时和模型名', job?.etaSec > 0 && job?.modelLabel === 'H3.1' && job?.options?.textureQuality === 'fast', `${job?.etaSec} ${job?.modelLabel}`);
+    check('任务带着预计耗时和模型名', job?.etaSec > 0 && job?.modelLabel === 'H · High precision' && job?.options?.textureQuality === 'fast', `${job?.etaSec} ${job?.modelLabel}`);
     await until(page, '生成中有百分比', (id) => { const j = window.__genai.jobs().find((x) => x.id === id); return j?.phase === 'running' && j.progress > 0 && /\d+%/.test(document.querySelector('.ga-busy-label')?.textContent ?? ''); }, job.id, 60000);
     const eta = await page.evaluate(() => ({ eta: document.querySelector('.ga-eta')?.textContent ?? '', note: document.querySelector('.ga-busy-note')?.textContent ?? '' }));
-    check('生成中有倒计时和用的模型', /left|Almost done|longer than usual/.test(eta.eta) && eta.note === 'H3.1 · fast texture', `「${eta.eta}」「${eta.note}」`);
+    check('生成中有倒计时和用的模型', /left|Almost done|longer than usual/.test(eta.eta) && eta.note === 'H · High precision · fast texture', `「${eta.eta}」「${eta.note}」`);
     await shot(page, 'text-running');
     await jobDone(job.id);
     await until(page, '结果预览画好', () => { const s = window.__genai.state(); return s.stage === 'model' && s.stageReady; }, null, 60000);
