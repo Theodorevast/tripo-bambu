@@ -128,32 +128,52 @@ function redactor(key) {
 
 // ---------- 限流 ----------
 
-// 内存里的滑动窗口计数。只在单个进程 / 单个 Worker 实例里有效；多实例上线要换成 KV、Durable Objects 或 Redis，
-// 接口照这个写：hit(key, limit, windowMs, now) → { ok, retryAfterMs, release() }，可以是异步的
+// 滑动窗口的纯逻辑：stamps 是一个 key 在窗口里的时间戳（升序），原地修改。
+// 内存版（下面的 createMemoryStore）和 Durable Objects 版（rate-limiter.mjs）共用这几个函数，计数规则只有这一份
+export const RATE_WINDOW_MAX_MS = DAY; // 最长的窗口（全站每日上限）：比它还旧的时间戳一定没用了，定期清理按它来
+
+export function pruneStamps(stamps, since) {
+  let i = 0;
+  while (i < stamps.length && stamps[i] <= since) i++;
+  if (i) stamps.splice(0, i);
+}
+
+// 占一个名额：没超就记下 now，返回 { ok: true }；超了返回 { ok: false, retryAfterMs }（还要等多久）。limit ≤ 0 表示关掉
+export function windowHit(stamps, limit, windowMs, now) {
+  if (limit <= 0) return { ok: false, retryAfterMs: null };
+  pruneStamps(stamps, now - windowMs);
+  if (stamps.length >= limit) return { ok: false, retryAfterMs: Math.max(1000, stamps[0] + windowMs - now) };
+  // 时间戳来自各个实例的时钟，可能差几毫秒：插到对的位置，保持升序
+  let i = stamps.length;
+  while (i > 0 && stamps[i - 1] > now) i--;
+  stamps.splice(i, 0, now);
+  return { ok: true, retryAfterMs: 0 };
+}
+
+// 退回名额：去掉占名额时记下的那个时间戳。返回有没有去掉
+export function windowRelease(stamps, stamp) {
+  const i = stamps.lastIndexOf(stamp);
+  if (i < 0) return false;
+  stamps.splice(i, 1);
+  return true;
+}
+
+// 内存里的滑动窗口计数。只在单个进程 / 单个 Worker 实例里有效；Cloudflare 上用 rate-limiter.mjs 的 Durable Objects 版，
+// 别的多实例部署换成 Redis 之类。接口照这个写：hit(key, limit, windowMs, now) → { ok, retryAfterMs, release() }，可以是异步的
 export function createMemoryStore({ maxKeys = 50_000 } = {}) {
   const buckets = new Map(); // key → 时间戳数组（升序）
   let hits = 0;
-  const prune = (arr, since) => {
-    let i = 0;
-    while (i < arr.length && arr[i] <= since) i++;
-    if (i) arr.splice(0, i);
-  };
   return {
     async hit(key, limit, windowMs, now) {
-      if (limit <= 0) return { ok: false, retryAfterMs: null, release() {} };
       const arr = buckets.get(key) ?? [];
       buckets.delete(key); // 重新插入到末尾：Map 的顺序就是最近使用的顺序
-      prune(arr, now - windowMs);
-      if (arr.length >= limit) {
-        buckets.set(key, arr);
-        return { ok: false, retryAfterMs: Math.max(1000, arr[0] + windowMs - now), release() {} };
-      }
-      arr.push(now);
-      buckets.set(key, arr);
+      const r = windowHit(arr, limit, windowMs, now);
+      if (arr.length) buckets.set(key, arr);
+      if (!r.ok) return { ...r, release() {} };
       // 偶尔清一遍过期的，键太多时丢掉最久没用的
       if (++hits % 1000 === 0) {
         for (const [k, a] of buckets) {
-          prune(a, now - DAY);
+          pruneStamps(a, now - RATE_WINDOW_MAX_MS);
           if (!a.length) buckets.delete(k);
         }
       }
@@ -165,8 +185,7 @@ export function createMemoryStore({ maxKeys = 50_000 } = {}) {
         release() {
           if (released) return;
           released = true;
-          const i = arr.lastIndexOf(now);
-          if (i >= 0) arr.splice(i, 1);
+          windowRelease(arr, now);
         },
       };
     },
@@ -513,7 +532,9 @@ export function createHandler(options = {}) {
     throw fail('upstream', 'Tripo 的结果链接跳转次数太多');
   }
 
-  function streamResponse(cfg, body, size, contentType, extra = {}) {
+  // limit：大小上限。模拟资源是自己的文件，传 Infinity：不套计数用的 TransformStream。
+  // Worker 的静态资源绑定不给 Content-Length 头，但原生的流原样转发时运行时会自己带上长度，套了 TransformStream 就变成分块传输
+  function streamResponse(cfg, body, size, contentType, extra = {}, limit = cfg.maxDownloadBytes) {
     const headers = {
       'content-type': contentType,
       'x-content-type-options': 'nosniff',
@@ -523,11 +544,11 @@ export function createHandler(options = {}) {
       ...extra,
     };
     if (Number.isFinite(size) && size > 0) {
-      if (size > cfg.maxDownloadBytes) throw fail('upstream', '结果文件超过大小上限');
+      if (size > limit) throw fail('upstream', '结果文件超过大小上限');
       headers['content-length'] = String(size);
       return new Response(body, { status: 200, headers });
     }
-    const stream = body instanceof ReadableStream ? body.pipeThrough(limitStream(cfg.maxDownloadBytes)) : body;
+    const stream = body instanceof ReadableStream && Number.isFinite(limit) ? body.pipeThrough(limitStream(limit)) : body;
     return new Response(stream, { status: 200, headers });
   }
 
@@ -577,8 +598,8 @@ export function createHandler(options = {}) {
       const file = files[0];
       if (file.size === 0) throw fail('bad_request', '图片是空的');
       if (file.size > cfg.maxImageBytes) throw fail('bad_request', `单张图最大 ${cfg.maxImageBytes / MB} MB`, 413);
-      const data = new Uint8Array(await file.arrayBuffer());
-      const kind = sniffImage(data);
+      // 只读文件头认格式；转发时切片复用同一份数据：Worker 一个实例只有 128 MB，10 MB 的图不再多复制两份
+      const kind = sniffImage(new Uint8Array(await file.slice(0, 8).arrayBuffer()));
       if (!kind) throw fail('bad_request', '只支持 PNG 或 JPEG 图片', 415);
 
       if (cfg.mock) {
@@ -586,7 +607,7 @@ export function createHandler(options = {}) {
         return json(200, { ok: true, token: `mock_file_${failing ? 'fail_' : ''}${randomHex(8)}`, type: kind });
       }
       const out = new FormData();
-      out.append('file', new Blob([data], { type: kind === 'png' ? 'image/png' : 'image/jpeg' }), kind === 'png' ? 'image.png' : 'image.jpg');
+      out.append('file', file.slice(0, file.size, kind === 'png' ? 'image/png' : 'image/jpeg'), kind === 'png' ? 'image.png' : 'image.jpg');
       const res = await callTripo(cfg, redact, 'POST', '/files', { form: out, timeoutMs: UPLOAD_TIMEOUT_MS });
       const token = res?.file_token;
       if (typeof token !== 'string' || !FILE_TOKEN.test(token)) throw fail('upstream', 'Tripo 上传成功但没返回可用的 file_token');
@@ -685,7 +706,7 @@ export function createHandler(options = {}) {
       if (!asset && kind === 'preview') return new Response(mockPreviewSvg(), { status: 200, headers: { ...BASE_HEADERS, 'content-type': 'image/svg+xml' } });
       if (!asset) throw fail('upstream', '模拟模式没有可用的模型文件：Node 下检查 public/models/，Worker 下设 MOCK_MODEL_URL');
       const type = kind === 'model' ? 'model/gltf-binary' : asset.contentType ?? 'image/webp';
-      return streamResponse(cfg, asset.body, asset.size, type, kind === 'model' ? { 'content-disposition': `inline; filename="tripo-${id}.glb"` } : {});
+      return streamResponse(cfg, asset.body, asset.size, type, kind === 'model' ? { 'content-disposition': `inline; filename="tripo-${id}.glb"` } : {}, Infinity);
     }
     const data = await getRealTask(cfg, redact, id);
     if (String(data.status ?? '').toLowerCase() !== 'success') throw fail('not_found', '任务还没有成功完成，没有结果可下载');
