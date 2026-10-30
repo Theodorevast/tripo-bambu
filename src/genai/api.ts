@@ -1,6 +1,6 @@
 import { describeError } from './messages';
 import { createMockFetch } from './mock';
-import type { GenErrorCode, ImageRef, TaskInfo, TaskRequest, TaskStatus, TripoApi, TripoErrorCode } from './types';
+import type { DownloadProgress, GenErrorCode, GenMode, ImageRef, ModeTable, ModelInfo, ModelList, TaskInfo, TaskRequest, TaskStatus, TextureChoice, TripoApi, TripoErrorCode } from './types';
 
 // 调服务端中转（T1，/api/tripo/*）的客户端。密钥只在服务端，这里只发请求、把回复和错误整理成 types.ts 里的样子。
 // 失败一律抛 TripoError：code 是错误码（中转给的，或者按 HTTP 状态、连不上、回的不是 JSON 推出来的），
@@ -68,6 +68,30 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
+// 边收边报进度地读完回复体（下载模型：40 MB 的文件要好几秒，界面上显示收到多少）。
+// 进度最多每 100 毫秒报一次，最后一定报一次收齐的；块直接攒成 Blob（不另外拼一份大数组）
+async function readWithProgress(res: Response, onProgress: (p: DownloadProgress) => void): Promise<Blob> {
+  const declared = Number(res.headers.get('content-length'));
+  const total = Number.isFinite(declared) && declared > 0 ? declared : undefined;
+  const reader = res.body!.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let loaded = 0;
+  let last = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value as Uint8Array<ArrayBuffer>);
+    loaded += value.byteLength;
+    const t = Date.now();
+    if (t - last >= 100) {
+      last = t;
+      onProgress(total ? { loaded, total } : { loaded });
+    }
+  }
+  onProgress(total ? { loaded, total } : { loaded });
+  return new Blob(chunks, { type: res.headers.get('content-type') ?? 'model/gltf-binary' });
+}
+
 // 多少秒以后再试：回复体的 retryAfter（秒，数字或数字字符串）优先，其次 Retry-After 头（秒数或 HTTP 日期）。没有时 undefined
 export function retryAfterOf(res: Response, body: unknown, now = Date.now()): number | undefined {
   const fromBody = isRecord(body) ? toNumber(body.retryAfter) : null;
@@ -90,6 +114,38 @@ function failure(res: Response, body: unknown, missing: GenErrorCode): TripoErro
   if (code) return new TripoError(code, { status: res.status, serverMessage, retryAfter });
   if (res.status === 404 && !rec) return new TripoError(missing, { status: 404 });
   return new TripoError(codeForStatus(res.status), { status: res.status, serverMessage, retryAfter });
+}
+
+const MODES: readonly GenMode[] = ['text', 'image', 'multiview'];
+const TEXTURES: readonly TextureChoice[] = ['none', 'fast', 'standard'];
+
+// 模型目录里的 [生成方式][贴图档] 表：只留正数（null、不认识的键丢掉）；整张表不对时返回 null
+function toModeTable(v: unknown): ModeTable | null {
+  if (!isRecord(v)) return null;
+  const out = { text: {}, image: {}, multiview: {} } as ModeTable;
+  for (const mode of MODES) {
+    const row = v[mode];
+    if (!isRecord(row)) continue;
+    for (const t of TEXTURES) {
+      const n = toNumber(row[t]);
+      if (n !== null && n > 0) out[mode][t] = n;
+    }
+  }
+  return out;
+}
+
+function toModelInfo(v: unknown): ModelInfo | null {
+  if (!isRecord(v) || typeof v.id !== 'string' || !v.id || v.id.length > 60) return null;
+  const textures = Array.isArray(v.textures) ? TEXTURES.filter((t) => (v.textures as unknown[]).includes(t)) : [];
+  return {
+    id: v.id,
+    label: typeof v.label === 'string' && v.label ? v.label.slice(0, 40) : v.id,
+    blurb: typeof v.blurb === 'string' ? v.blurb.slice(0, 120) : '',
+    textures: textures.length ? textures : ['none', 'standard'],
+    eta: toModeTable(v.eta),
+    measured: v.measured === true,
+    credits: toModeTable(v.credits),
+  };
 }
 
 function malformed(what: string): TripoError {
@@ -138,6 +194,25 @@ export function createTripoApi(opts: { base: string; fetch?: typeof fetch }): Tr
       }
     },
 
+    async models(): Promise<ModelList> {
+      const body = await json('/models', { cache: 'no-store', headers: ACCEPT_JSON });
+      const models = (Array.isArray(body.models) ? body.models : []).map(toModelInfo).filter((m): m is ModelInfo => m !== null);
+      if (!models.length) throw malformed('models');
+      const want = typeof body.defaultModel === 'string' ? body.defaultModel : '';
+      const texture = TEXTURES.find((t) => t === body.defaultTexture) ?? 'standard';
+      return { defaultModel: models.some((m) => m.id === want) ? want : models[0].id, defaultTexture: texture, models };
+    },
+
+    resolve(url: string): string {
+      // 绝对地址、或者中转和网页同源（base 是 /api/... 这种路径）：原样用；中转在别的域名时按它的地址解析
+      if (/^[a-z][a-z0-9+.-]*:/i.test(url) || !/^[a-z][a-z0-9+.-]*:\/\//i.test(base)) return url;
+      try {
+        return new URL(url, base).href;
+      } catch {
+        return url;
+      }
+    },
+
     async balance() {
       const body = await json('/balance', { cache: 'no-store', headers: ACCEPT_JSON });
       const balance = toNumber(body.balance);
@@ -169,12 +244,14 @@ export function createTripoApi(opts: { base: string; fetch?: typeof fetch }): Tr
       const info: TaskInfo = { status, progress };
       if (typeof body.modelUrl === 'string') info.modelUrl = body.modelUrl;
       if (typeof body.previewUrl === 'string') info.previewUrl = body.previewUrl;
+      const credits = toNumber(body.credits);
+      if (credits !== null && credits >= 0) info.credits = credits;
       if (typeof body.error === 'string') info.error = body.error;
       else if (isRecord(body.error) && typeof body.error.message === 'string') info.error = body.error.message;
       return info;
     },
 
-    async download(taskId: string): Promise<Blob> {
+    async download(taskId: string, onProgress?: (p: DownloadProgress) => void): Promise<Blob> {
       const res = await send(`/download/${enc(taskId)}`, { headers: { Accept: 'model/gltf-binary, application/octet-stream, */*' } });
       if (!res.ok) throw failure(res, await readJson(res), 'not_found');
       const type = res.headers.get('content-type') ?? '';
@@ -183,7 +260,7 @@ export function createTripoApi(opts: { base: string; fetch?: typeof fetch }): Tr
       if (/json/i.test(type)) throw failure(res, await readJson(res), 'not_found');
       let blob: Blob;
       try {
-        blob = await res.blob();
+        blob = onProgress && res.body ? await readWithProgress(res, onProgress) : await res.blob();
       } catch (err) {
         throw new TripoError('network', { serverMessage: err instanceof Error ? err.message : undefined });
       }

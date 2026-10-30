@@ -337,11 +337,122 @@ describe('参数白名单', () => {
       `POST ${API}/generation/multiview-to-model`,
     ]);
     // texture=false 时一并关掉 pbr（Tripo 的 pbr 默认 true，会强制带贴图）
-    expect(calls[0].body).toEqual({ prompt: 'a chair', model: 'v3.1-20260211', texture: false, pbr: false });
-    expect(calls[1].body).toEqual({ input: 'file_abc123', model: 'v3.1-20260211', texture: true, pbr: true });
+    // 默认带 face_limit = 30 万（网页导入时反正要简化到这么多）
+    expect(calls[0].body).toEqual({ prompt: 'a chair', model: 'v3.1-20260211', texture: false, pbr: false, face_limit: 300000 });
+    expect(calls[1].body).toEqual({ input: 'file_abc123', model: 'v3.1-20260211', texture: true, pbr: true, face_limit: 300000 });
     // 多视图用 view-key 写法，跳过没有的视图
-    expect(calls[2].body).toEqual({ inputs: [{ front: 'file_f' }, { back: 'file_b' }], model: 'v3.0-20250812' });
+    expect(calls[2].body).toEqual({ inputs: [{ front: 'file_f' }, { back: 'file_b' }], model: 'v3.0-20250812', face_limit: 300000 });
     for (const c of calls) expect(c.headers.get('authorization')).toBe(`Bearer ${KEY}`);
+  });
+
+  it('快速贴图：fast → 不带 PBR，v3.0 以上再加 texture_quality + texture_version；H2.5 只关 PBR；不带贴图时不发；P1 没有 fast', async () => {
+    const handle = make();
+    await send(handle, text('a', { textureQuality: 'fast' }), REAL);
+    await send(handle, text('b', { textureQuality: 'standard' }), REAL);
+    await send(handle, text('c', { textureQuality: 'fast', texture: false }), REAL);
+    await send(handle, text('d', { textureQuality: 'fast', modelVersion: 'v2.5-20250123' }), REAL);
+    expect(calls[0].body).toMatchObject({ texture: true, pbr: false, texture_quality: 'fast', texture_version: 'v3.5-20260815' });
+    expect(calls[1].body).not.toHaveProperty('texture_quality');
+    expect(calls[1].body).not.toHaveProperty('pbr');
+    expect(calls[2].body).toMatchObject({ texture: false, pbr: false });
+    expect(calls[2].body).not.toHaveProperty('texture_version');
+    expect(calls[3].body).toMatchObject({ model: 'v2.5-20250123', texture: true, pbr: false });
+    expect(calls[3].body).not.toHaveProperty('texture_quality');
+    calls.length = 0;
+    await bad({ mode: 'text', prompt: 'x', textureQuality: 'detailed' });
+    await bad({ mode: 'text', prompt: 'x', textureQuality: 'extreme' });
+    await bad({ mode: 'text', prompt: 'x', textureQuality: 'fast', pbr: true });
+    await bad({ mode: 'text', prompt: 'x', textureQuality: 'fast', modelVersion: 'P1-20260311' }, { ...REAL, TRIPO_MODEL_VERSIONS: 'v3.1-20260211,P1-20260311' });
+  });
+
+  it('compress：默认不发；TRIPO_COMPRESS=geometry 打开（只给 v3.0 以上）；请求里的 compress 布尔值可以单次改', async () => {
+    const handle = make();
+    const on = { ...REAL, TRIPO_COMPRESS: 'geometry' };
+    await send(handle, text('a'), REAL);
+    await send(handle, text('b'), on);
+    await send(handle, text('c', { modelVersion: 'v2.5-20250123' }), on);
+    await send(handle, text('d', { compress: true }), REAL);
+    await send(handle, text('e', { compress: false }), on);
+    expect(calls.map((c) => (c.body as Record<string, unknown>).compress)).toEqual([undefined, 'geometry', undefined, 'geometry', undefined]);
+    calls.length = 0;
+    await bad({ mode: 'text', prompt: 'x', compress: 'geometry' });
+  });
+
+  it('face_limit：TRIPO_FACE_LIMIT 改默认、0 关掉；请求里的 faceLimit 只收 0 或 1000–500000 的整数；P1 低模不发默认值', async () => {
+    const handle = make();
+    const many = { ...REAL, TRIPO_MAX_TASKS_PER_IP_PER_HOUR: '50' }; // 一个用例里建 6 个任务：默认每小时 5 个不够
+    await send(handle, text('a'), { ...many, TRIPO_FACE_LIMIT: '150000' });
+    await send(handle, text('b'), { ...many, TRIPO_FACE_LIMIT: '0' });
+    await send(handle, text('c', { faceLimit: 0 }), many);
+    await send(handle, text('d', { faceLimit: 80000 }), many);
+    const p1 = { ...many, TRIPO_MODEL_VERSIONS: 'v3.1-20260211,P1-20260311' };
+    await send(handle, text('e', { modelVersion: 'P1-20260311' }), p1);
+    await send(handle, text('f', { modelVersion: 'P1-20260311', faceLimit: 5000 }), p1);
+    expect(calls.map((c) => (c.body as Record<string, unknown>).face_limit)).toEqual([150000, undefined, undefined, 80000, undefined, 5000]);
+    calls.length = 0;
+    await bad({ mode: 'text', prompt: 'x', faceLimit: 999 });
+    await bad({ mode: 'text', prompt: 'x', faceLimit: 600000 });
+    await bad({ mode: 'text', prompt: 'x', faceLimit: 1000.5 });
+    await bad({ mode: 'text', prompt: 'x', faceLimit: '300000' });
+  });
+});
+
+describe('模型列表（GET /models）和加速参数的退路', () => {
+  it('只列放行的版本（默认 H 系列三个，P 系列不在），带说明、能选的贴图档、预计耗时和积分', async () => {
+    const out = await send(make(), get('/api/tripo/models'), REAL);
+    expect(out.status).toBe(200);
+    expect(out.json.defaultModel).toBe('v3.1-20260211');
+    expect(out.json.defaultTexture).toBe('fast');
+    expect(out.json.models.map((m: { id: string }) => m.id)).toEqual(['v3.1-20260211', 'v3.0-20250812', 'v2.5-20250123']);
+    const h31 = out.json.models[0];
+    expect(h31).toMatchObject({ label: 'H3.1', textures: ['none', 'fast', 'standard'], measured: false });
+    expect(h31.blurb.length).toBeGreaterThan(5);
+    expect(h31.credits.text).toEqual({ none: 10, fast: 20, standard: 20 });
+    expect(h31.credits.image).toEqual({ none: 20, fast: 30, standard: 30 });
+    for (const m of ['text', 'image', 'multiview']) for (const t of ['none', 'fast', 'standard']) expect(h31.eta[m][t]).toBeGreaterThan(0);
+    // 快速贴图和标准贴图同价；fast 比带 PBR 的标准贴图快
+    for (const m of out.json.models) expect(m.eta.text.fast).toBeLessThan(m.eta.text.standard);
+  });
+
+  it('跟着 TRIPO_MODEL_VERSIONS、TRIPO_DEFAULT_MODEL_VERSION 走；目录里没有的版本照列，只是没有耗时和积分；模拟模式一样能问', async () => {
+    const env = { ...REAL, TRIPO_MODEL_VERSIONS: 'v3.0-20250812,P1-20260311,v9.9-test', TRIPO_DEFAULT_MODEL_VERSION: 'P1-20260311' };
+    const out = await send(make(), get('/api/tripo/models'), env);
+    expect(out.json.defaultModel).toBe('P1-20260311');
+    expect(out.json.models.map((m: { id: string }) => m.id)).toEqual(['v3.0-20250812', 'P1-20260311', 'v9.9-test']);
+    expect(out.json.models[2]).toMatchObject({ label: 'v9.9-test', eta: null, credits: null });
+    // P1：没有 fast 档，价目表的 30 / 40 积分
+    expect(out.json.models[1]).toMatchObject({ label: 'P1', textures: ['none', 'standard'] });
+    expect(out.json.models[1].credits.text).toEqual({ none: 30, standard: 40 });
+    expect(out.json.models[1].eta.text).not.toHaveProperty('fast');
+    const mock = await send(make(), get('/api/tripo/models'), { TRIPO_MOCK: '1' });
+    expect(mock.json.models).toHaveLength(3);
+    expect((await send(make(), postJson({}, {}, '/api/tripo/models'), REAL)).status).toBe(405);
+  });
+
+  it('加速参数被 Tripo 当成无效参数拒了（1004）：去掉 face_limit、快速贴图再建一次；别的错误不重试', async () => {
+    let n = 0;
+    const calls = fakeUpstream({
+      'POST openapi.tripo3d.ai/v3/generation/text-to-model': () => (++n === 1 ? tripoErr(400, 1004, 'invalid face_limit') : createdOk()),
+    });
+    const out = await send(make(), text('a chair', { textureQuality: 'fast' }), REAL);
+    expect(out.json).toEqual({ ok: true, taskId: UUID });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].body).toMatchObject({ face_limit: 300000, texture_quality: 'fast' });
+    expect(calls[1].body).toEqual({ prompt: 'a chair', model: 'v3.1-20260211', texture: true, pbr: false });
+    expect(logs.some((l) => l.includes('face_limit'))).toBe(true);
+
+    // 内容审核没过（2008）、积分不够（2010）：不重试
+    for (const code of [2008, 2010]) {
+      const again = fakeUpstream({ 'POST openapi.tripo3d.ai/v3/generation/text-to-model': () => tripoErr(code === 2010 ? 403 : 400, code) });
+      await send(make(), text('x'), REAL);
+      expect(again).toHaveLength(1);
+    }
+  });
+
+  it('查任务：成功时带上 Tripo 报的扣费（credits）', async () => {
+    fakeUpstream({ [`GET openapi.tripo3d.ai/v3/tasks/${UUID}`]: () => taskOk({ model_url: 'https://cdn.tripo3d.ai/m.glb' }, { credits_consumed: 20.5 }) });
+    const out = await send(make(), get(`/api/tripo/task/${UUID}`), REAL);
+    expect(out.json).toMatchObject({ status: 'success', credits: 20.5 });
   });
 });
 
