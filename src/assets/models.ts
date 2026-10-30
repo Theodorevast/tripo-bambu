@@ -48,6 +48,21 @@ export function applyAnisotropy(root: THREE.Object3D, value: number): void {
   for (const texture of modelTextures(root)) texture.anisotropy = value;
 }
 
+// 作品里不透明的材质一律双面画：Tripo 生成的模型常常不封口、有些面绕向是反的（示例扶手椅 3% 的边是开口），
+// 单面画时从开口、反面看过去是一个个洞，直接漏出背景。投影照旧：PCF 下单面材质投影用背面，这里写明 BackSide，
+// 阴影和预热的投影管线都不变。半透明的不动：three r186 画「半透明 + 双面」要拆两遍（见 scenes/shadowWarm.ts）
+export function applyDoubleSided(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const material = (o as THREE.Mesh).material;
+    if (!material) return;
+    for (const m of Array.isArray(material) ? material : [material]) {
+      if (m.transparent || m.side !== THREE.FrontSide) continue;
+      m.side = THREE.DoubleSide;
+      m.shadowSide ??= THREE.BackSide;
+    }
+  });
+}
+
 // meshopt 解码放进 Worker（GLTFLoader 有 decodeGltfBufferAsync 就走它），解压几何不占主线程。整个页面开一次，node 里跑测试时没有 Worker
 let decoderWorkers = false;
 function startDecoderWorkers(): void {
@@ -91,6 +106,7 @@ export class ModelLibrary {
       // 各向异性要在第一次上传贴图之前设好（WebGL2 在上传时设采样参数，WebGPU 按它建采样器）
       p = (this.oneAtATime ? this.loadOneAtATime(url) : this.loader.loadAsync(url)).then((gltf) => {
         applyAnisotropy(gltf.scene, anisotropy);
+        applyDoubleSided(gltf.scene);
         return gltf.scene;
       });
       this.cache.set(url, p);
@@ -113,6 +129,7 @@ export class ModelLibrary {
 // 上传、生成窗口的预览（works/modelStage.ts）自己解析 GLB，归一化和这里一样
 export function normalizeModel(source: THREE.Object3D): LoadedModel {
   applyAnisotropy(source, anisotropy);
+  applyDoubleSided(source);
   return normalize(source, false);
 }
 
