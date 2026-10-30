@@ -222,8 +222,11 @@ describe('界面文字', () => {
     expect(label('cancelled')).toBe('Cancelled');
   });
 
-  it('titleFromPrompt：前 6 个词、最多 40 个字符，首字母大写，去掉首尾的标点', () => {
-    expect(titleFromPrompt('a cute red fox wearing a tiny wizard hat')).toBe('A cute red fox wearing a');
+  it('titleFromPrompt：前 6 个词、最多 40 个字符，首字母大写，去掉首尾的标点和结尾的虚词', () => {
+    expect(titleFromPrompt('a cute red fox wearing a tiny wizard hat')).toBe('A cute red fox wearing');
+    expect(titleFromPrompt('A tiny robot gardener holding a watering can')).toBe('A tiny robot gardener holding');
+    expect(titleFromPrompt('a lantern of the')).toBe('A lantern');
+    expect(titleFromPrompt('the')).toBe('The');
     expect(titleFromPrompt('  "steampunk   airship!!"  ')).toBe('Steampunk airship');
     expect(titleFromPrompt('supercalifragilisticexpialidocious extraordinarily magnificent')).toBe('Supercalifragilisticexpialidocious');
     expect(titleFromPrompt('x'.repeat(60))).toBe('X'.padEnd(40, 'x'));

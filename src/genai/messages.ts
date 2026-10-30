@@ -96,10 +96,15 @@ function capitalize(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-// 提示词 → 默认作品名：前 6 个词、最多 40 个字符，首字母大写，去掉末尾的标点
+// 截下来的名字结尾不留虚词（"A tiny robot holding a" → "A tiny robot holding"）
+const TRAILING = new Set(['a', 'an', 'the', 'of', 'with', 'and', 'or', 'in', 'on', 'at', 'for', 'to', 'from', 'by', 'its', 'his', 'her', 'their']);
+
+// 提示词 → 默认作品名：前 6 个词、最多 40 个字符，首字母大写，去掉末尾的标点和虚词
 export function titleFromPrompt(prompt: string): string {
   const words = trimMarks(prompt.replace(/\s+/g, ' ').trim()).split(' ').filter(Boolean).slice(0, TITLE_WORDS);
-  return capitalize(trimMarks(shorten(words.join(' ')))) || 'Untitled model';
+  const cut = trimMarks(shorten(words.join(' '))).split(' ');
+  while (cut.length > 1 && TRAILING.has(cut[cut.length - 1].toLowerCase())) cut.pop();
+  return capitalize(trimMarks(cut.join(' '))) || 'Untitled model';
 }
 
 // 文件名 → 默认作品名：去掉路径和扩展名，下划线、连字符换成空格

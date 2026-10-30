@@ -11,7 +11,8 @@ import path from 'node:path';
 import { launch, startServer, watchErrors } from './lib/browser.mjs';
 
 const REAL = process.env.REAL === '1';
-if (!REAL) process.env.TRIPO_MOCK = '1';
+// 模拟开关（中转里优先级最高）：平时一律 1；只有 REAL=1 才显式设 0（scripts/lib/browser.mjs 没设时默认也是 1）
+process.env.TRIPO_MOCK = REAL ? '0' : '1';
 const OUT = process.argv[2] ?? 'shots/genai-video';
 const [W, H] = (process.env.SIZE ?? '1440x900').split('x').map(Number);
 const tag = `${W}x${H}${process.env.WEBGL2 === '1' ? '-webgl2' : ''}`;

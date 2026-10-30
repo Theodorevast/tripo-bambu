@@ -233,6 +233,10 @@ export class MuseumPage implements Sheet {
       queue = compiled.catch(() => {});
       await compiled;
       if (token !== this.token) return;
+      // 卡片自己的入场（一张张弹进来，第二排以后的晚好几百毫秒）放完了才画：3D 预览画在盖在最上层的画布上，不跟着卡片的透明度，
+      // 模型先到（缓存里有）时会先浮在还没出来的卡片位置上（上传、生成的作品多了以后第二排很常见）
+      await finished(c.node.getAnimations?.() ?? []);
+      if (token !== this.token) return;
       if (model.failed) c.node.querySelector('.mc-plate')?.append(failedNote());
       c.preview.classList.add('ready');
       // 自转：平时慢慢转，悬停时转快、放大一点点；第一次出现时从 0 蹦到原来的大小（缩放乘在模型原有的缩放上）

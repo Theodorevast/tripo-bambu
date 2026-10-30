@@ -1,7 +1,8 @@
 // 上传、Tripo 生成自查（T2）：在模拟模式下走一遍，每一步截图到 shots/genai-NN-<步骤>[-webgl2].png，最后统计页面错误。
 // 1. 编辑模式 → 作品栏「Upload」→ 选文件上传 public/models/ 里的一个 GLB → 预览、改名 → Add to planet → 摆上星球
-// 2. 刷新以后还在（星球上、作品栏里），Museum 里也有
-// 3. 文字、单图（public/thumbs/ 里的 WebP：上传前转成 PNG）、多视图各生成一次：进度走完，作品加进来；单图那次关掉窗口在后台生成，完成提示点进去
+// 2. 刷新以后还在（星球上、作品栏里），Museum 里也有；Museum 有 5 件（两排）时，滚动前后每张卡片的 3D 预览都落在自己的卡片框里（逐像素查）
+// 3. 文字、单图（public/thumbs/ 里的 WebP：上传前转成 PNG）、多视图各生成一次：进度走完，作品加进来；单图那次关掉窗口在后台生成，完成提示点进去；
+//    之后 Museum 有 8 件，再查一遍滚动前后的 3D 预览
 // 4. 提示词带 #fail：任务大约 60% 时失败，窗口里、任务列表里有清楚的提示；带 #quota：额度用完的提示
 // 5. 生成到一半刷新：任务接着轮询，做完照样加进作品
 // 6. Reset demo 以后全部清空（用户作品、生成任务）
@@ -10,10 +11,12 @@
 // mock 不是 true 就立刻中止。只有显式加 REAL=1 才允许真实模式（留给最后经用户同意的真实测试，平时不要用）。
 // WEBGL2=1：藏起 navigator.gpu，走 WebGL2 后备；HEADED=1：有界面的 Chrome
 import { mkdirSync, readFileSync } from 'node:fs';
+import sharp from 'sharp';
 import { launch, startServer, watchErrors } from './lib/browser.mjs';
 
 const REAL = process.env.REAL === '1';
-if (!REAL) process.env.TRIPO_MOCK = '1';
+// 模拟开关（中转里优先级最高）：平时一律 1；只有 REAL=1 才显式设 0（scripts/lib/browser.mjs 没设时默认也是 1）
+process.env.TRIPO_MOCK = REAL ? '0' : '1';
 const WEBGL2 = process.env.WEBGL2 === '1';
 const SUFFIX = WEBGL2 ? '-webgl2' : '';
 const QUERY = '?nolocal';
@@ -84,6 +87,59 @@ async function placeOnPlanet(workId, before = []) {
   }
   return false;
 }
+// Museum 的 3D 预览都落在自己的卡片框里（逐像素）：卡片入场都放完、模型都挂好以后，把页面上别的东西（卡片、顶栏、主画面、页面底色）藏起来，
+// 只截盖在最上层的预览画布：每个不透明的像素都得在某张卡片的 .mc-preview 框里（放宽 2 像素），屏幕里每个框里都要有模型。
+// 预览按每帧的 getBoundingClientRect 定视口，查的是画出来的结果和卡片此刻的位置对不对得上（入场途中、滚动以后）
+async function museumPreviewsInCards(label) {
+  await until(page, 'Museum 卡片入场放完、预览都挂好', () => {
+    const cards = [...document.querySelectorAll('.museum-card')];
+    return document.querySelector('section.museum')?.dataset.ready === 'true' && cards.length > 0
+      && cards.every((c) => c.getAnimations().length === 0 && getComputedStyle(c).opacity === '1' && c.querySelector('.mc-preview.ready'));
+  }, null, 90000);
+  await page.waitForTimeout(800); // 模型挂上时从 0「蹦」到原大（约 0.6 秒）
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const rects = await page.evaluate(() => [...document.querySelectorAll('.museum-card .mc-preview')].map((p) => {
+    const r = p.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }));
+  await page.addStyleTag({ content: 'html, body { background: transparent !important; } body > *:not(#app), #app > *:not(.museum-canvas) { visibility: hidden !important; }' }).then((h) => h.evaluate((n) => n.setAttribute('data-probe', '')));
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const png = await page.screenshot({ omitBackground: true });
+  await page.evaluate(() => document.querySelector('style[data-probe]')?.remove());
+  const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const pad = 2;
+  const visible = rects.map((r) => r.y + r.h > 0 && r.y < info.height && r.x + r.w > 0 && r.x < info.width && r.h > 20);
+  const inside = rects.map(() => 0);
+  let opaque = 0;
+  let outside = 0;
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      if (data[(y * info.width + x) * 4 + 3] < 64) continue;
+      opaque++;
+      const i = rects.findIndex((r) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad);
+      if (i < 0) outside++;
+      else inside[i]++;
+    }
+  }
+  const empty = rects.map((_, i) => i).filter((i) => visible[i] && inside[i] < 150);
+  const ok = opaque > 0 && outside <= Math.max(20, opaque * 0.002) && empty.length === 0;
+  check(`Museum ${label}：每张卡片的 3D 预览都在自己的卡片框里`, ok, `${rects.length} 张卡片，屏幕里 ${visible.filter(Boolean).length} 张；框外像素 ${outside} / ${opaque}${empty.length ? `；没画出模型的卡片 ${empty.map((i) => i + 1).join(', ')}` : ''}`);
+}
+// Museum 滚到最底，等两帧（预览跟上新的卡片位置）
+const scrollMuseum = () => page.evaluate(() => new Promise((r) => {
+  const s = document.querySelector('section.museum');
+  s.scrollTop = s.scrollHeight;
+  requestAnimationFrame(() => requestAnimationFrame(r));
+}));
+const openMuseum = async () => {
+  await page.getByRole('button', { name: 'Museum', exact: true }).click();
+  await until(page, 'Museum 网格就绪', () => document.querySelector('section.museum')?.dataset.ready === 'true', null, 90000);
+};
+const closeMuseum = async () => {
+  await page.keyboard.press('Escape');
+  await until(page, 'Museum 关掉', () => document.querySelector('section.museum')?.hidden === true);
+  await planetReady(you.id);
+};
 const placingNow = (title) => until(page, `${title} 进入摆放`, (t) => [...document.querySelectorAll('.tray-item')].some((b) => b.title === t && b.getAttribute('aria-pressed') === 'true'), title);
 const genTab = async (tab) => {
   await page.locator(`.ga-tab[data-tab="${tab}"]`).click();
@@ -168,14 +224,14 @@ try {
     await editing(true);
     check('刷新后作品栏里还有它', (await page.locator('.tray-item', { hasText: 'Comfy Armchair' }).count()) === 1);
     await editing(false);
-    await page.getByRole('button', { name: 'Museum', exact: true }).click();
-    await until(page, 'Museum 网格就绪', () => document.querySelector('section.museum')?.dataset.ready === 'true', null, 90000);
+    await openMuseum();
     check('Museum 里有这件作品', (await page.locator('.museum-card', { hasText: 'Comfy Armchair' }).count()) === 1);
-    await page.locator('.museum-card', { hasText: 'Comfy Armchair' }).scrollIntoViewIfNeeded();
-    await shot(page, 'museum-upload');
-    await page.keyboard.press('Escape');
-    await until(page, 'Museum 关掉', () => document.querySelector('section.museum')?.hidden === true);
-    await planetReady(you.id);
+    await museumPreviewsInCards('5 件（第一屏）');
+    await shot(page, 'museum-5');
+    await scrollMuseum();
+    await museumPreviewsInCards('5 件（滚到底）');
+    await shot(page, 'museum-5-scrolled');
+    await closeMuseum();
   });
 
   // —— 3. 文字生成 ——
@@ -253,6 +309,26 @@ try {
     check('多视图生成的作品加进来了', typeof done.workId === 'string' && done.workId.startsWith('u-'));
   });
 
+  // —— 3d. Museum 有 8 件 ——
+  await step('Museum 有 8 件作品（种子 4 + 上传 1 + 生成 3）：滚动前后 3D 预览都在自己的卡片里，生成的卡片标着 Made with Tripo', async () => {
+    await page.locator('.ga-close').click();
+    await until(page, '窗口完全收起', () => document.querySelector('section.genai')?.hidden === true);
+    await openMuseum();
+    const n = await page.locator('.museum-card').count();
+    check('Museum 里有 8 件作品', n === 8, String(n));
+    const tripoCards = await page.locator('.museum-card .tripo-tag').count();
+    check('3 张生成的卡片标着 Made with Tripo，文字生成的那张有提示词', tripoCards === 3 && (await page.locator('.museum-card .tripo-prompt', { hasText: 'robot gardener' }).count()) === 1, `${tripoCards} 张`);
+    await museumPreviewsInCards('8 件（第一屏）');
+    await shot(page, 'museum-8');
+    await scrollMuseum();
+    await museumPreviewsInCards('8 件（滚到底）');
+    await shot(page, 'museum-8-scrolled');
+    await closeMuseum();
+    await editing(true);
+    await page.locator('.tray-add', { hasText: 'Create with' }).click();
+    await dialogOpen('text');
+  });
+
   // —— 4. 出错 ——
   await step('#fail：任务大约 60% 时失败，窗口里有清楚的提示、任务列表标红；#quota：额度用完的提示', async () => {
     await genTab('text');
@@ -319,6 +395,80 @@ try {
     await editing(true);
     check('作品栏里只剩种子作品', (await page.locator('.tray-item').count()) === you.works.length);
     await shot(page, 'reset');
+  });
+
+  // —— 7. 只用键盘 + 减少动态效果（另开一页）——
+  await step('只用键盘、减少动态效果：回车打开窗口，方向键换标签，打字、Ctrl+Enter 生成，Esc 关掉、焦点回到按钮；窗口只淡入淡出', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, reducedMotion: 'reduce' });
+    const p = await ctx.newPage();
+    const errs = watchErrors(p);
+    if (WEBGL2) await p.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
+    try {
+      await p.goto(`${base}/${QUERY}#/t/${you.id}`);
+      await p.waitForFunction(() => window.__ready === true && !document.querySelector('#boot') && window.__app.routeIdle(), null, { timeout: 90000 });
+      await p.waitForFunction((id) => document.querySelector('#app')?.dataset.planetReady === id, you.id, { timeout: 90000 });
+      await p.locator('.topbar button.primary').click();
+      await p.locator('.tray-tripo').focus();
+      await p.keyboard.press('Enter');
+      await p.waitForFunction(() => window.__genai.state().open && window.__genai.state().tab === 'text');
+      const motion = await p.evaluate(() => document.querySelector('.ga-card').getAnimations().every((a) => a.effect.getKeyframes().every((k) => !k.transform || k.transform === 'none')));
+      check('减少动态效果：窗口打开只淡入（没有位移、缩放）', motion);
+      check('打开时焦点在选中的标签上', await p.evaluate(() => document.activeElement?.id === 'ga-tab-text'));
+      await p.keyboard.press('ArrowRight');
+      check('方向键换到 Image 标签', await p.evaluate(() => window.__genai.state().tab === 'image' && document.activeElement?.id === 'ga-tab-image'));
+      await p.keyboard.press('ArrowLeft');
+      await p.keyboard.press('Tab');
+      check('Tab 进到这一页的提示词输入框', await p.evaluate(() => document.activeElement?.id === 'ga-prompt'));
+      await p.keyboard.type('A small wooden boat');
+      await p.keyboard.press('Control+Enter');
+      await p.waitForFunction(() => window.__genai.jobs()[0]?.prompt === 'A small wooden boat', null, { timeout: 10000 });
+      check('Ctrl+Enter 生成', true);
+      for (let i = 0; i < 25; i++) await p.keyboard.press('Tab');
+      check('Tab 一直在窗口里循环', await p.evaluate(() => !!document.activeElement?.closest('section.genai')));
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => !window.__genai.state().open);
+      check('Esc 关掉窗口，焦点回到 Create with Tripo 按钮', await p.evaluate(() => document.activeElement?.classList.contains('tray-tripo')));
+      await p.screenshot({ path: `shots/genai-${String(++shots).padStart(2, '0')}-keyboard-closed${SUFFIX}.png` });
+      if (errs.length) check('键盘页没有页面错误', false, errs[0]);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  // —— 8. 手机竖屏（另开一页）——
+  await step('手机竖屏 390 × 844：窗口铺满不出屏，上传以后预览、名字、Add to planet 都看得见点得到', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const p = await ctx.newPage();
+    const errs = watchErrors(p);
+    if (WEBGL2) await p.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
+    try {
+      await p.goto(`${base}/${QUERY}#/t/${you.id}`);
+      await p.waitForFunction(() => window.__ready === true && !document.querySelector('#boot') && window.__app.routeIdle(), null, { timeout: 90000 });
+      await p.waitForFunction((id) => document.querySelector('#app')?.dataset.planetReady === id, you.id, { timeout: 90000 });
+      await p.locator('.topbar button.primary').click();
+      await p.locator('.tray-add', { hasText: 'Upload' }).click();
+      await p.waitForFunction(() => window.__genai.state().open);
+      await p.locator('.ga-file-model').setInputFiles('public/models/pumpkin-girl.glb');
+      await p.waitForFunction(() => { const s = window.__genai.state(); return s.upload?.phase === 'ready' && s.stageReady; }, null, { timeout: 90000 });
+      const fit = await p.evaluate(() => {
+        const r = (s) => document.querySelector(s).getBoundingClientRect();
+        const card = r('.ga-card');
+        const stage = r('.ga-stage');
+        return { card: card.left >= 0 && card.right <= innerWidth, stage: stage.width > 200 && stage.top >= 0 && stage.bottom <= innerHeight, scroll: document.documentElement.scrollWidth <= innerWidth };
+      });
+      await p.locator('.ga-add').scrollIntoViewIfNeeded();
+      const add = await p.evaluate(() => {
+        const b = document.querySelector('.ga-add').getBoundingClientRect();
+        return b.bottom <= innerHeight && document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('.ga-add') !== null;
+      });
+      await p.screenshot({ path: `shots/genai-${String(++shots).padStart(2, '0')}-phone${SUFFIX}.png` });
+      check('手机：窗口不出屏、预览看得见、没有横向滚动，Add to planet 点得到', fit.card && fit.stage && fit.scroll && add, JSON.stringify({ ...fit, add }));
+      await p.locator('.ga-close').click();
+      await p.waitForFunction(() => !window.__genai.state().open);
+      if (errs.length) check('手机页没有页面错误', false, errs[0]);
+    } finally {
+      await ctx.close();
+    }
   });
 } catch (err) {
   check('脚本中断', false, err?.stack ?? String(err));
