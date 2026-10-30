@@ -71,7 +71,7 @@ try {
 
   const rows = [];
   const measure = async (on) => {
-    await page.evaluate((v) => window.__cursorFx.setEnabled(v), on);
+    await page.evaluate((v) => { window.__cursorFx.setEnabled(v); window.__cursorFx.setTiming(true); }, on);
     await page.waitForTimeout(600);
     const s0 = await page.evaluate(() => window.__cursorFx.state());
     await page.evaluate(() => {
@@ -111,9 +111,30 @@ try {
     await measure(true);
     await measure(false);
   }
+  // 每帧有没有新建对象：跟随层开着、指针一直动，用 V8 的采样堆分析记 SECONDS 秒，数 cursor.ts / cursorMath.ts 里的函数分配了多少
+  await page.evaluate(() => { window.__cursorFx.setEnabled(true); window.__cursorFx.setTiming(false); }); // 平时的路径：不记时间
+  await page.waitForTimeout(500);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('HeapProfiler.enable');
+  await cdp.send('HeapProfiler.startSampling', { samplingInterval: 32, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); // 被回收掉的也算
+  const a0 = await page.evaluate(() => window.__cursorFx.state().frames);
+  await page.waitForTimeout(SECONDS * 1000);
+  const a1 = await page.evaluate(() => window.__cursorFx.state().frames);
+  const { profile } = await cdp.send('HeapProfiler.stopSampling');
+  const alloc = { cursor: 0, total: 0, fns: new Map() };
+  const walk = (n) => {
+    const size = n.selfSize;
+    alloc.total += size;
+    if (/\/src\/ui\/cursor(Math)?\.ts/.test(n.callFrame.url)) {
+      alloc.cursor += size;
+      const k = `${n.callFrame.functionName || '(匿名)'}:${n.callFrame.lineNumber + 1}`;
+      alloc.fns.set(k, (alloc.fns.get(k) ?? 0) + size);
+    }
+    for (const c of n.children) walk(c);
+  };
+  walk(profile.head);
   moving = false;
   await mover;
-  await page.evaluate(() => window.__cursorFx.setEnabled(true));
 
   const f = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
   console.log(`backend: ${backend}，画布 2880×1800（1440×900 × 2），指针一直在画圈；每段 ${SECONDS} 秒，A = 跟随层开，B = 关`);
@@ -127,6 +148,8 @@ try {
   };
   console.log(`平均：帧间隔 p50 A ${f(avg(true, 'p50'))} / B ${f(avg(false, 'p50'))} ms；p95 A ${f(avg(true, 'p95'))} / B ${f(avg(false, 'p95'))} ms；`
     + `World.frame CPU p50 A ${f(avg(true, 'cpu50'), 3)} / B ${f(avg(false, 'cpu50'), 3)} ms；GPU p50 A ${f(avg(true, 'gpu50'), 3)} / B ${f(avg(false, 'gpu50'), 3)} ms；跟随层 JS ${f(avg(true, 'fxMs'), 4)} ms/帧`);
+  const top = [...alloc.fns].sort((x, y) => y[1] - x[1]).slice(0, 5).map(([k, v]) => `${k} ${v} B`).join('，');
+  console.log(`堆分配（采样 ${SECONDS} 秒，跟随层跑了 ${a1 - a0} 帧）：cursor.ts / cursorMath.ts 里 ${alloc.cursor} B（${top || '没有'}）；整页 JS 共 ${(alloc.total / 1024).toFixed(0)} KB`);
 } finally {
   await browser.close();
   await server.close();
