@@ -17,6 +17,8 @@ import { launch, startServer, watchErrors } from './lib/browser.mjs';
 const REAL = process.env.REAL === '1';
 // 模拟开关（中转里优先级最高）：平时一律 1；只有 REAL=1 才显式设 0（scripts/lib/browser.mjs 没设时默认也是 1）
 process.env.TRIPO_MOCK = REAL ? '0' : '1';
+// 模拟模式下一次自查要建十几个任务：放宽每小时、每天的上限（只在模拟时；真实模式照用 .env.local 和中转的默认上限）
+if (!REAL) { process.env.TRIPO_MAX_TASKS_PER_IP_PER_HOUR ??= '500'; process.env.TRIPO_MAX_TASKS_PER_DAY ??= '5000'; }
 const WEBGL2 = process.env.WEBGL2 === '1';
 const SUFFIX = WEBGL2 ? '-webgl2' : '';
 const QUERY = '?nolocal';
