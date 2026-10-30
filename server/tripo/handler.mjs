@@ -5,6 +5,7 @@
 //
 // 接口约定（前端按这个调）：
 //   GET  /api/tripo/health        → { ok, mock }
+//   GET  /api/tripo/models        → { ok, defaultModel, defaultTexture, models }（模型选择器：说明、贴图档、预计耗时、积分）
 //   GET  /api/tripo/balance       → { ok, balance, frozen }
 //   POST /api/tripo/upload        multipart，字段 file，一张 PNG / JPEG → { ok, token, type }
 //   POST /api/tripo/task          JSON { mode: 'text' | 'image' | 'multiview', ... } → { ok, taskId }
@@ -23,14 +24,70 @@ const DAY = 24 * HOUR;
 // H 系列 10–30 积分一个任务；P 系列贵得多（P2 带贴图 110 积分），默认不放行，要用就在 TRIPO_MODEL_VERSIONS 里加
 const DEFAULT_MODEL_VERSIONS = ['v3.1-20260211', 'v3.0-20250812', 'v2.5-20250123'];
 const DEFAULT_MODEL_VERSION = 'v3.1-20260211';
+
+// ---------- 模型目录：前端模型选择器的唯一来源（GET /api/tripo/models）----------
+// 只列出 TRIPO_MODEL_VERSIONS 放行了的版本，顺序按放行列表。label、blurb 是给人看的英文，界面原样显示。
+// textures：这个版本能选的贴图档——none 不带贴图；fast 快速贴图（pbr: false，v3.0 以上再加 texture_quality: fast）；
+//   standard 标准贴图（照旧，Tripo 默认带 PBR）。PBR 是最慢的一段（官方：约 120 秒对 40 秒），fast 省的主要就是它。
+// fastQuality：fast 档能不能加 texture_quality: fast（要配 texture_version v3.5-20260815）；compress：能不能用 compress: geometry（Tripo：v3.0 以上）。
+// maxFaces：版本自己的面数上限（P1 是低模）；中转默认的 face_limit 超过它就不发。
+// 积分按 Tripo 价目表（docs/TRIPO.md 10.7、10.9；1 积分 = 0.01 美元）：快速贴图和标准贴图同价、PBR 不另收钱；
+// 只有高清贴图、8K、高清几何、四边面、拆件才加钱（这些都不放行）
+const H_CREDITS = {
+  text: { none: 10, fast: 20, standard: 20 },
+  image: { none: 20, fast: 30, standard: 30 },
+  multiview: { none: 20, fast: 30, standard: 30 },
+};
+export const MODEL_CATALOG = {
+  'v3.1-20260211': { label: 'H3.1', blurb: 'Finest shapes and textures', textures: ['none', 'fast', 'standard'], fastQuality: true, compress: true, credits: H_CREDITS },
+  'v3.0-20250812': { label: 'H3.0', blurb: 'Clean shapes, a bit quicker', textures: ['none', 'fast', 'standard'], fastQuality: true, compress: true, credits: H_CREDITS },
+  'v2.5-20250123': { label: 'H2.5', blurb: 'Older model, simpler shapes', textures: ['none', 'fast', 'standard'], credits: H_CREDITS },
+  // P 系列贵（P1 带贴图 40–50 积分），默认不放行；要用就把 P1-20260311 加进 TRIPO_MODEL_VERSIONS
+  'P1-20260311': {
+    label: 'P1', blurb: 'Low-poly look, quickest shape', textures: ['none', 'standard'], maxFaces: 20_000,
+    credits: { text: { none: 30, standard: 40 }, image: { none: 40, standard: 50 }, multiview: { none: 40, standard: 50 } },
+  },
+  // P2 一个任务 100–130 积分：只在目录里留着说明，不要加进 TRIPO_MODEL_VERSIONS
+  'P2-20260801': {
+    label: 'P2', blurb: 'Quad mesh for 3D artists (expensive)', textures: ['none', 'standard'], maxFaces: 50_000,
+    credits: { text: { none: 100, standard: 110 }, image: { none: 100, standard: 110 }, multiview: { none: 100, standard: 110 } },
+  },
+};
+
+// 预计耗时（秒，从建任务到 success），模型 × 生成方式 × 贴图档。界面上的「≈ 2 min」和倒计时都按它算。
+// 现在的数是估的（measured: false）：v3.1 文字不带贴图实测约 90 秒；官方 v3.1 不带贴图约 40 秒、带贴图（PBR）约 120 秒，
+// 标准贴图不带 PBR 约 80 秒；P1 约 10 秒 / 60 秒；第三方实测 H3.1 单图约 197 秒、H2.5 约 159 秒（含排队）。来源见 docs/TRIPO.md 10.9。
+// 跑完 scripts/bench-tripo.mjs 后把实测的中位数填进来、measured 改成 true；单图、多视图没测的照文字的数估
+export const ETA_SEC = {
+  'v3.1-20260211': { measured: false, text: { none: 90, fast: 120, standard: 170 }, image: { none: 75, fast: 105, standard: 160 }, multiview: { none: 80, fast: 110, standard: 165 } },
+  'v3.0-20250812': { measured: false, text: { none: 75, fast: 100, standard: 145 }, image: { none: 60, fast: 90, standard: 135 }, multiview: { none: 65, fast: 95, standard: 140 } },
+  'v2.5-20250123': { measured: false, text: { none: 70, fast: 100, standard: 140 }, image: { none: 60, fast: 90, standard: 130 }, multiview: { none: 65, fast: 95, standard: 135 } },
+  'P1-20260311': { measured: false, text: { none: 30, standard: 80 }, image: { none: 25, standard: 75 }, multiview: { none: 30, standard: 80 } },
+  'P2-20260801': { measured: false, text: { none: 120, standard: 180 }, image: { none: 120, standard: 180 }, multiview: { none: 120, standard: 180 } },
+};
+
+// 界面上默认选中的贴图档：fast（同价，比带 PBR 的标准贴图快三成左右）。想默认要完整的 PBR 材质就改成 'standard'
+export const DEFAULT_TEXTURE = 'fast';
+// 快速贴图：texture_quality = fast 必须配这个 texture_version（Tripo 文档）
+export const FAST_TEXTURE_VERSION = 'v3.5-20260815';
+// 默认的 face_limit：生成结果在网页里导入时反正要简化到 30 万面（src/works/importTypes.ts 的 IMPORT_LIMITS.maxTriangles），
+// 让 Tripo 直接出 30 万面以内的：下载从 40 多 MB 降到 10 MB 左右，导入时也不用再简化。TRIPO_FACE_LIMIT=0 关掉
+const DEFAULT_FACE_LIMIT = 300_000;
+const FACE_LIMIT_MIN = 1_000;
+const FACE_LIMIT_MAX = 500_000;
+const TEXTURE_QUALITIES = ['standard', 'fast'];
+const GEN_MODES = ['text', 'image', 'multiview'];
 // 结果文件只从这些域名（及其子域名）拉。阿里云文档里的样例是 openapi.cdn.tripo3d.com；国际区的实际主机待确认，
 // 不在名单里时报错信息会写出主机名，确认是 Tripo 的就加进 TRIPO_DOWNLOAD_HOSTS
 const DEFAULT_DOWNLOAD_HOSTS = ['tripo3d.ai', 'tripo3d.com'];
 const VIEWS = ['front', 'left', 'back', 'right'];
+// 三种任务共用的可选字段：textureQuality（standard / fast）、faceLimit（整数，0 = 不发 face_limit；不传用中转的默认）、
+// compress（布尔，不传用 TRIPO_COMPRESS）
+const OPTION_FIELDS = ['texture', 'pbr', 'modelVersion', 'textureQuality', 'faceLimit', 'compress'];
 const TASK_FIELDS = {
-  text: ['mode', 'prompt', 'texture', 'pbr', 'modelVersion'],
-  image: ['mode', 'token', 'type', 'texture', 'pbr', 'modelVersion'],
-  multiview: ['mode', 'views', 'texture', 'pbr', 'modelVersion'],
+  text: ['mode', 'prompt', ...OPTION_FIELDS],
+  image: ['mode', 'token', 'type', ...OPTION_FIELDS],
+  multiview: ['mode', 'views', ...OPTION_FIELDS],
 };
 const UPSTREAM_ROUTES = {
   text: '/generation/text-to-model',
@@ -60,6 +117,7 @@ class TripoError extends Error {
     this.retryAfterSec = extra.retryAfterSec ?? null;
     // 建任务时请求可能已经到了 Tripo（超时、5xx）：这种不退还限流名额，免得重复扣费时还多放一次
     this.indeterminate = extra.indeterminate ?? false;
+    this.upstreamCode = null; // Tripo 回的请求级业务码（mapUpstreamError 填）
   }
 }
 const fail = (code, message, status, extra) => new TripoError(code, message, status, extra);
@@ -87,6 +145,34 @@ function count(v, fallback) {
 function list(v) {
   return str(v).split(',').map((x) => x.trim()).filter(Boolean);
 }
+// TRIPO_FACE_LIMIT：空 = 默认 30 万；0 = 关掉；1000–500000 之间的整数照用；别的当没设
+function faceLimitOf(v) {
+  const s = str(v);
+  if (!s) return DEFAULT_FACE_LIMIT;
+  const n = Number(s);
+  if (n === 0) return 0;
+  return Number.isInteger(n) && n >= FACE_LIMIT_MIN && n <= FACE_LIMIT_MAX ? n : DEFAULT_FACE_LIMIT;
+}
+
+// 给前端的模型列表（GET /models）：放行的版本，带说明、能选的贴图档、预计耗时、积分。目录里没有的版本也列出来，只是没有耗时和积分
+export function modelsInfo(cfg) {
+  const models = cfg.modelVersions.map((id) => {
+    const meta = Object.hasOwn(MODEL_CATALOG, id) ? MODEL_CATALOG[id] : null;
+    const eta = Object.hasOwn(ETA_SEC, id) ? ETA_SEC[id] : null;
+    const textures = meta ? [...meta.textures] : ['none', 'standard'];
+    const pick = (table) => (table ? Object.fromEntries(GEN_MODES.map((m) => [m, Object.fromEntries(textures.map((t) => [t, table[m]?.[t] ?? null]))])) : null);
+    return {
+      id,
+      label: meta?.label ?? id,
+      blurb: meta?.blurb ?? '',
+      textures,
+      eta: pick(eta),
+      measured: eta?.measured === true,
+      credits: pick(meta?.credits),
+    };
+  });
+  return { defaultModel: cfg.defaultModel, defaultTexture: DEFAULT_TEXTURE, models };
+}
 
 export function readConfig(env = {}) {
   const key = str(env.TRIPO_API_KEY);
@@ -111,6 +197,10 @@ export function readConfig(env = {}) {
     modelVersions,
     defaultModel: modelVersions.includes(preferred) ? preferred
       : modelVersions.includes(DEFAULT_MODEL_VERSION) ? DEFAULT_MODEL_VERSION : modelVersions[0],
+    // 0 = 不发 face_limit（Tripo 自己定面数）；超出范围的值当没设
+    faceLimit: faceLimitOf(env.TRIPO_FACE_LIMIT),
+    // compress: geometry（meshopt）默认关：等真实测过一次结果文件用的是 EXT_meshopt_compression、导入正常再打开（docs/TRIPO.md 10.9）
+    compress: str(env.TRIPO_COMPRESS).toLowerCase() === 'geometry',
     downloadHosts: [...DEFAULT_DOWNLOAD_HOSTS, ...list(env.TRIPO_DOWNLOAD_HOSTS).map((h) => h.toLowerCase().replace(/^\*?\./, ''))],
   };
 }
@@ -357,6 +447,12 @@ function mapUpstreamError(status, payload, retryAfter, redact) {
   const msg = payload && typeof payload === 'object' && typeof payload.message === 'string' ? redact(payload.message).slice(0, 200) : '';
   const tag = Number.isFinite(code) ? `（Tripo ${code}）` : `（HTTP ${status}）`;
   const retryAfterSec = Number(retryAfter) > 0 ? Math.ceil(Number(retryAfter)) : null;
+  const err = mapUpstreamCode(status, code, msg, tag, retryAfterSec);
+  err.upstreamCode = Number.isFinite(code) ? code : null;
+  return err;
+}
+
+function mapUpstreamCode(status, code, msg, tag, retryAfterSec) {
   if (code === 2010) return fail('quota', `Tripo 账户积分不足，暂时不能生成${tag}`);
   if (code === 1007 || code === 2000 || status === 429) return fail('rate_limited', `Tripo 当前繁忙（频率或并发上限），请稍后再试${tag}`, 429, { retryAfterSec: retryAfterSec ?? 30 });
   if (code === 2008) return fail('bad_request', `内容没有通过 Tripo 的审核，请换个描述或图片${tag}`);
@@ -448,7 +544,42 @@ export function buildTask(body, cfg) {
   payload.model = model;
   if (texture !== undefined) payload.texture = texture;
   if (pbr !== undefined) payload.pbr = pbr;
-  return { mode, route: UPSTREAM_ROUTES[mode], payload, mockTriggers };
+  // 加速用的可选参数（Tripo 当成无效参数拒绝时去掉再试一次，见 createTask）：快速贴图、face_limit、compress。都不加钱
+  const optional = [];
+  const meta = Object.hasOwn(MODEL_CATALOG, model) ? MODEL_CATALOG[model] : null;
+  const quality = body.textureQuality ?? undefined;
+  if (quality !== undefined && (typeof quality !== 'string' || !TEXTURE_QUALITIES.includes(quality))) throw fail('bad_request', `textureQuality 只能是 ${TEXTURE_QUALITIES.join('、')}`);
+  // 快速贴图：不要 PBR（最慢的一段），v3.0 以上再用 Tripo 的快速贴图模型。不带贴图时贴图档没有意义，不发
+  if (quality === 'fast' && texture !== false) {
+    if (!meta?.textures.includes('fast')) throw fail('bad_request', `${model} 不支持快速贴图（textureQuality: fast）`);
+    if (pbr === true) throw fail('bad_request', '快速贴图不带 PBR：textureQuality: fast 时不要传 pbr: true');
+    payload.texture = true;
+    payload.pbr = false;
+    if (meta.fastQuality) {
+      payload.texture_quality = 'fast';
+      payload.texture_version = FAST_TEXTURE_VERSION;
+      optional.push('texture_quality', 'texture_version');
+    }
+  }
+  // compress: geometry = meshopt 压缩几何（网页的导入管线解得开 EXT_meshopt_compression）。默认关着（TRIPO_COMPRESS=geometry 打开），
+  // 请求里的 compress: true / false 可以单次改（测速脚本用）；只有目录里写了 compress 的版本（v3.0 以上）才发
+  const squeeze = optionalBool(body.compress, 'compress') ?? cfg.compress;
+  if (squeeze && meta?.compress) {
+    payload.compress = 'geometry';
+    optional.push('compress');
+  }
+  let faces = cfg.faceLimit;
+  if (body.faceLimit !== undefined && body.faceLimit !== null) {
+    const n = body.faceLimit;
+    if (!Number.isInteger(n) || (n !== 0 && (n < FACE_LIMIT_MIN || n > FACE_LIMIT_MAX))) throw fail('bad_request', `faceLimit 要是 0（不限）或 ${FACE_LIMIT_MIN}–${FACE_LIMIT_MAX} 的整数`);
+    faces = n;
+  }
+  // 版本自己有更低的上限（P1 低模）：默认值超过它就不发，让 Tripo 按版本的规矩来
+  if (faces > 0 && !(meta?.maxFaces && faces > meta.maxFaces)) {
+    payload.face_limit = faces;
+    optional.push('face_limit');
+  }
+  return { mode, route: UPSTREAM_ROUTES[mode], payload, mockTriggers, optional };
 }
 
 // ---------- 处理函数 ----------
@@ -570,6 +701,10 @@ export function createHandler(options = {}) {
     return json(200, { ok: true, mock: cfg.mock });
   }
 
+  async function models(cfg) {
+    return json(200, { ok: true, ...modelsInfo(cfg) });
+  }
+
   async function balance(cfg, redact) {
     if (cfg.mock) return json(200, { ok: true, balance: 1000, frozen: 0 });
     const data = await callTripo(cfg, redact, 'GET', '/account/balance');
@@ -646,7 +781,18 @@ export function createHandler(options = {}) {
         const taskId = `mock_${now().toString(36)}_${duration.toString(36)}_${task.mockTriggers.fail ? 'f' : 's'}_${randomHex(4)}`;
         return json(200, { ok: true, taskId });
       }
-      const data = await callTripo(cfg, redact, 'POST', task.route, { json: task.payload });
+      let data;
+      try {
+        data = await callTripo(cfg, redact, 'POST', task.route, { json: task.payload });
+      } catch (err) {
+        // 加速用的可选参数（face_limit、快速贴图）被 Tripo 当成无效参数（1003 / 1004）拒了：去掉它们再建一次。
+        // 加速不能挡住生成；建任务失败不扣积分，多试这一次不花钱
+        if (!(err instanceof TripoError) || ![1003, 1004].includes(err.upstreamCode) || !task.optional.length) throw err;
+        log.warn?.(`[tripo] 可选参数 ${task.optional.join(', ')} 被拒（Tripo ${err.upstreamCode}），去掉后重试一次`);
+        const plain = { ...task.payload };
+        for (const k of task.optional) delete plain[k];
+        data = await callTripo(cfg, redact, 'POST', task.route, { json: plain });
+      }
       const taskId = data?.task_id;
       if (typeof taskId !== 'string' || !TASK_ID.test(taskId)) throw fail('upstream', 'Tripo 没有返回任务 id', 502, { indeterminate: true });
       return json(200, { ok: true, taskId });
@@ -684,6 +830,9 @@ export function createHandler(options = {}) {
       if (upstreamModelUrl(data.output)) out.modelUrl = `${base}/download/${id}`;
       else out.error = 'Tripo 说任务成功了，但没有返回模型文件';
       if (upstreamPreviewUrl(data.output)) out.previewUrl = `${base}/preview/${id}`;
+      // 这个任务扣了多少积分（Tripo 的 credits_consumed，两位小数）：测速脚本对账用
+      const credits = Number(data.credits_consumed);
+      if (data.credits_consumed != null && Number.isFinite(credits)) out.credits = credits;
     }
     if (status === 'failed' || status === 'cancelled') out.error = redact(describeTaskError(data, status));
     return json(200, out);
@@ -783,13 +932,14 @@ export function createHandler(options = {}) {
       const seg = route.split('/').filter(Boolean);
       let res;
       if (seg.length === 1 && seg[0] === 'health' && method === 'GET') res = await health(cfg);
+      else if (seg.length === 1 && seg[0] === 'models' && method === 'GET') res = await models(cfg);
       else if (seg.length === 1 && seg[0] === 'balance' && method === 'GET') res = await balance(cfg, redact);
       else if (seg.length === 1 && seg[0] === 'upload' && method === 'POST') res = await upload(cfg, redact, request, ip);
       else if (seg.length === 1 && seg[0] === 'task' && method === 'POST') res = await createTask(cfg, redact, request, ip);
       else if (seg.length === 2 && seg[0] === 'task' && method === 'GET') res = await taskStatus(cfg, redact, seg[1], prefix);
       else if (seg.length === 2 && seg[0] === 'download' && method === 'GET') res = await result(cfg, redact, request, env, seg[1], 'model');
       else if (seg.length === 2 && seg[0] === 'preview' && method === 'GET') res = await result(cfg, redact, request, env, seg[1], 'preview');
-      else if (['health', 'balance', 'upload', 'task', 'download', 'preview'].includes(seg[0]) && seg.length <= 2) throw fail('bad_request', `这个接口不支持 ${method}`, 405);
+      else if (['health', 'models', 'balance', 'upload', 'task', 'download', 'preview'].includes(seg[0]) && seg.length <= 2) throw fail('bad_request', `这个接口不支持 ${method}`, 405);
       else throw fail('not_found', '没有这个接口');
       return withCors(res);
     } catch (err) {

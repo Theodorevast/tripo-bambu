@@ -105,6 +105,46 @@ describe('createTripoApi：请求', () => {
     expect((await rejects(api.download('t-1'))).code).toBe('not_found');
     expect((await rejects(api.download('t-1'))).code).toBe('upstream');
   });
+
+  it('download 带 onProgress：边收边报（有 Content-Length 时带总长），最后一次是收齐的', async () => {
+    const parts = [new Uint8Array(300), new Uint8Array(700)];
+    const body = new ReadableStream<Uint8Array>({ start(c) { for (const p of parts) c.enqueue(p); c.close(); } });
+    const { api } = apiWith(new Response(body, { status: 200, headers: { 'content-type': 'model/gltf-binary', 'content-length': '1000' } }));
+    const seen: Array<{ loaded: number; total?: number }> = [];
+    const blob = await api.download('t-1', (p) => seen.push(p));
+    expect(blob.size).toBe(1000);
+    expect(seen.at(-1)).toEqual({ loaded: 1000, total: 1000 });
+  });
+
+  it('models：只留认得的字段和正数；默认版本不在列表里时用第一个；空列表报 upstream', async () => {
+    const { api, fetch } = apiWith(
+      jsonRes(200, {
+        ok: true, defaultModel: 'nope', defaultTexture: 'fast',
+        models: [
+          { id: 'v3.1-20260211', label: 'H3.1', blurb: 'Best', textures: ['none', 'fast', 'standard', 'ultra'], measured: true, eta: { text: { none: 90, fast: null, standard: -1 } }, credits: { text: { none: 10 } } },
+          { id: '', label: 'broken' },
+          { id: 'v9', textures: 'none' },
+        ],
+      }),
+      jsonRes(200, { ok: true, defaultModel: 'x', models: [] }),
+    );
+    const list = await api.models();
+    expect(fetch.mock.calls[0][0]).toBe('/api/tripo/models');
+    expect(list.defaultModel).toBe('v3.1-20260211');
+    expect(list.defaultTexture).toBe('fast');
+    expect(list.models.map((m) => m.id)).toEqual(['v3.1-20260211', 'v9']);
+    expect(list.models[0]).toMatchObject({ label: 'H3.1', textures: ['none', 'fast', 'standard'], measured: true, eta: { text: { none: 90 } }, credits: { text: { none: 10 } } });
+    expect(list.models[0].eta?.text).not.toHaveProperty('fast');
+    expect(list.models[1]).toMatchObject({ label: 'v9', textures: ['none', 'standard'], eta: null, credits: null });
+    expect((await rejects(api.models())).code).toBe('upstream');
+  });
+
+  it('resolve：同源部署原样；中转在别的域名时按中转地址解析', () => {
+    expect(createTripoApi({ base: '/api/tripo' }).resolve('/api/tripo/preview/t-1')).toBe('/api/tripo/preview/t-1');
+    const far = createTripoApi({ base: 'https://proxy.example/api/tripo' });
+    expect(far.resolve('/api/tripo/preview/t-1')).toBe('https://proxy.example/api/tripo/preview/t-1');
+    expect(far.resolve('https://cdn.example/a.webp')).toBe('https://cdn.example/a.webp');
+  });
 });
 
 describe('createTripoApi：错误', () => {

@@ -281,15 +281,33 @@ try {
     await page.locator('.tray-add', { hasText: 'Create with' }).click();
     await dialogOpen('text');
     await page.locator('#ga-prompt').fill('A tiny robot gardener holding a watering can');
+    // 模型选择器：中转放行的三个 H 版本，每行有长处、大概多久、多少积分；默认 H3.1（Recommended）+ 快速贴图；Generate 不用滚就看得见
+    await until(page, '模型列表到了', () => window.__genai.state().models?.state === 'ready', null, 20000);
+    const picker = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.ga-panel[data-panel="text"] .ga-model')].map((r) => ({
+        id: r.dataset.model, blurb: r.querySelector('.ga-model-blurb')?.textContent ?? '', eta: r.querySelector('.ga-model-eta')?.textContent ?? '', credits: r.querySelector('.ga-model-credits')?.textContent ?? '', tag: !!r.querySelector('.ga-model-tag'),
+      }));
+      const go = document.querySelector('.ga-panel[data-panel="text"] .ga-generate').getBoundingClientRect();
+      const card = document.querySelector('.ga-card').getBoundingClientRect();
+      const s = window.__genai.state();
+      return { rows, model: s.model, texture: s.texture, goVisible: go.bottom <= card.bottom && go.top >= card.top, summary: document.querySelector('.ga-panel[data-panel="text"] .ga-cost')?.textContent ?? '' };
+    });
+    check('模型选择器：三个版本，每行有长处、≈ 时间、积分，H3.1 标着 Recommended', picker.rows.length === 3 && picker.rows.every((r) => r.blurb && /^≈ /.test(r.eta) && /credits$/.test(r.credits)) && picker.rows.find((r) => r.tag)?.id === 'v3.1-20260211', picker.rows.map((r) => `${r.id} ${r.eta} ${r.credits}`).join('；'));
+    check('默认 H3.1 + 快速贴图，Generate 旁边写着这一次的预计', picker.model === 'v3.1-20260211' && picker.texture === 'fast' && /^≈ .* · 20 credits/.test(picker.summary), `${picker.model} ${picker.texture} 「${picker.summary}」`);
+    check('Generate 不用滚就看得见（贴在左栏底下）', picker.goVisible);
     await shot(page, 'text-prompt');
     await page.locator('.ga-panel[data-panel="text"] .ga-generate').click();
     const job = await newestJob();
     check('建了一个文字任务', job?.mode === 'text', job?.phase);
+    check('任务带着预计耗时和模型名', job?.etaSec > 0 && job?.modelLabel === 'H3.1' && job?.options?.textureQuality === 'fast', `${job?.etaSec} ${job?.modelLabel}`);
     await until(page, '生成中有百分比', (id) => { const j = window.__genai.jobs().find((x) => x.id === id); return j?.phase === 'running' && j.progress > 0 && /\d+%/.test(document.querySelector('.ga-busy-label')?.textContent ?? ''); }, job.id, 60000);
+    const eta = await page.evaluate(() => ({ eta: document.querySelector('.ga-eta')?.textContent ?? '', note: document.querySelector('.ga-busy-note')?.textContent ?? '' }));
+    check('生成中有倒计时和用的模型', /left|Almost done|longer than usual/.test(eta.eta) && eta.note === 'H3.1 · fast texture', `「${eta.eta}」「${eta.note}」`);
     await shot(page, 'text-running');
     await jobDone(job.id);
     await until(page, '结果预览画好', () => { const s = window.__genai.state(); return s.stage === 'model' && s.stageReady; }, null, 60000);
     const done = (await jobs()).find((j) => j.id === job.id);
+    check('任务成功时记下了 Tripo 的预览图（下载、导入期间先放在舞台上）', /\/preview\//.test(done?.previewUrl ?? ''), done?.previewUrl);
     textWork = done.workId;
     check('做完以后作品加进来（有作品 id）', typeof textWork === 'string' && textWork.startsWith('u-'), textWork);
     check('结果旁边写着 Made with Tripo 和提示词', /Made with Tripo/.test(await page.locator('.ga-note').textContent()) && /robot gardener/.test(await page.locator('.ga-note').textContent()));
