@@ -111,28 +111,33 @@ try {
     await measure(true);
     await measure(false);
   }
-  // 每帧有没有新建对象：跟随层开着、指针一直动，用 V8 的采样堆分析记 SECONDS 秒，数 cursor.ts / cursorMath.ts 里的函数分配了多少
+  // 每帧有没有新建对象：跟随层开着、指针一直动，用 V8 的采样堆分析连记两段 SECONDS 秒，数 cursor.ts / cursorMath.ts 里的函数分配了多少。
+  // 第一段紧接着「关」那段：tick 停了好几秒，V8 可能把它降回没优化的版本（解释执行时每个小数都装箱），要跑一会儿才重新优化；第二段是稳定以后
   await page.evaluate(() => { window.__cursorFx.setEnabled(true); window.__cursorFx.setTiming(false); }); // 平时的路径：不记时间
   await page.waitForTimeout(500);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('HeapProfiler.enable');
-  await cdp.send('HeapProfiler.startSampling', { samplingInterval: 32, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); // 被回收掉的也算
-  const a0 = await page.evaluate(() => window.__cursorFx.state().frames);
-  await page.waitForTimeout(SECONDS * 1000);
-  const a1 = await page.evaluate(() => window.__cursorFx.state().frames);
-  const { profile } = await cdp.send('HeapProfiler.stopSampling');
-  const alloc = { cursor: 0, total: 0, fns: new Map() };
-  const walk = (n) => {
-    const size = n.selfSize;
-    alloc.total += size;
-    if (/\/src\/ui\/cursor(Math)?\.ts/.test(n.callFrame.url)) {
-      alloc.cursor += size;
-      const k = `${n.callFrame.functionName || '(匿名)'}:${n.callFrame.lineNumber + 1}`;
-      alloc.fns.set(k, (alloc.fns.get(k) ?? 0) + size);
-    }
-    for (const c of n.children) walk(c);
+  const sample = async () => {
+    await cdp.send('HeapProfiler.startSampling', { samplingInterval: 32, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); // 被回收掉的也算
+    const a0 = await page.evaluate(() => window.__cursorFx.state().frames);
+    await page.waitForTimeout(SECONDS * 1000);
+    const a1 = await page.evaluate(() => window.__cursorFx.state().frames);
+    const { profile } = await cdp.send('HeapProfiler.stopSampling');
+    const alloc = { frames: a1 - a0, cursor: 0, total: 0, fns: new Map() };
+    const walk = (n) => {
+      const size = n.selfSize;
+      alloc.total += size;
+      if (/\/src\/ui\/cursor(Math)?\.ts/.test(n.callFrame.url)) {
+        alloc.cursor += size;
+        const k = `${n.callFrame.functionName || '(匿名)'}:${n.callFrame.lineNumber + 1}`;
+        alloc.fns.set(k, (alloc.fns.get(k) ?? 0) + size);
+      }
+      for (const c of n.children) walk(c);
+    };
+    walk(profile.head);
+    return alloc;
   };
-  walk(profile.head);
+  const allocs = [await sample(), await sample()];
   moving = false;
   await mover;
 
@@ -148,8 +153,11 @@ try {
   };
   console.log(`平均：帧间隔 p50 A ${f(avg(true, 'p50'))} / B ${f(avg(false, 'p50'))} ms；p95 A ${f(avg(true, 'p95'))} / B ${f(avg(false, 'p95'))} ms；`
     + `World.frame CPU p50 A ${f(avg(true, 'cpu50'), 3)} / B ${f(avg(false, 'cpu50'), 3)} ms；GPU p50 A ${f(avg(true, 'gpu50'), 3)} / B ${f(avg(false, 'gpu50'), 3)} ms；跟随层 JS ${f(avg(true, 'fxMs'), 4)} ms/帧`);
-  const top = [...alloc.fns].sort((x, y) => y[1] - x[1]).slice(0, 5).map(([k, v]) => `${k} ${v} B`).join('，');
-  console.log(`堆分配（采样 ${SECONDS} 秒，跟随层跑了 ${a1 - a0} 帧）：cursor.ts / cursorMath.ts 里 ${alloc.cursor} B（${top || '没有'}）；整页 JS 共 ${(alloc.total / 1024).toFixed(0)} KB`);
+  // 行号是 Vite 转换后的 JS（tick、readMode、pointermove 的处理函数……），和 .ts 源文件差几行
+  allocs.forEach((alloc, i) => {
+    const top = [...alloc.fns].sort((x, y) => y[1] - x[1]).slice(0, 5).map(([k, v]) => `${k} ${v} B`).join('，');
+    console.log(`堆分配第 ${i + 1} 段（采样 ${SECONDS} 秒，跟随层跑了 ${alloc.frames} 帧）：cursor.ts / cursorMath.ts 里 ${alloc.cursor} B（${top || '没有'}）；整页 JS 共 ${(alloc.total / 1024).toFixed(0)} KB`);
+  });
 } finally {
   await browser.close();
   await server.close();
