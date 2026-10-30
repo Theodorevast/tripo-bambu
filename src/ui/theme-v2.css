@@ -143,7 +143,7 @@ html, body { background: var(--v2-midnight); color: var(--v2-text); font: 400 14
 :where(#app) button[aria-pressed='true'] { translate: none; color: var(--v2-star); background: rgba(216, 192, 142, 0.18); box-shadow: inset 0 0 0 1px var(--v2-gold); }
 :where(#app) button.primary[aria-pressed='true'] { color: var(--v2-midnight); background: #eadbb6; box-shadow: inset 0 0 0 1px rgba(15, 21, 48, 0.4), 0 0 0 1px var(--v2-gold); }
 :where(#app) button.danger { color: var(--danger); }
-:where(#app) button:disabled { opacity: 0.45; cursor: default; translate: none; }
+:where(#app) button:disabled { opacity: 0.45; cursor: var(--cur-default, default); translate: none; }
 :where(#app) button:disabled::after { opacity: 0; }
 
 /* 小字说明：Inter 小号、字距稍宽；数字等宽 */
@@ -1045,3 +1045,40 @@ kbd { padding: 3px 6px; border-radius: 3px; background: rgba(15, 21, 48, 0.6); b
   .ga-stage .dots i:nth-child(n) { animation: none; }
   .ga-close .icon, .ga-switch-track i, .ga-bar i { transition-duration: 0.01ms !important; }
 }
+
+/* —— 鼠标光标（ui/cursor.ts、cursor.css 的第二版）——
+   指针：细长的星图指针（星光白、右半面暗一档、中间一道金色的脊线，像天体仪上的指针）；能点时镀金，右上角一颗四角小星；
+   能拖、拖着是一圈香槟金的天体仪刻度（拖着时圈收紧、刻度转到斜角）。图由 scripts/make-cursors.mjs 生成，热点是指针的尖 / 圈的正中。
+   跟随层：一圈带四道刻度的香槟金细线（0.9px）。慢、柔、不回弹（--cursor-pop: 1），拖动时不拉长（不要挤压拉伸），
+   而是像转盘一样跟着走过的距离慢慢转；快速移动时洒几颗淡淡的星尘和小星，往上飘一点再淡掉 */
+@media (hover: hover) and (pointer: fine) {
+  @supports (cursor: image-set(url('data:,') 1x) 1 1, auto) {
+    :root {
+      --cur-default: image-set(url('./cursors/v2-default.png') 1x, url('./cursors/v2-default@2x.png') 2x) 5 3, default;
+      --cur-pointer: image-set(url('./cursors/v2-pointer.png') 1x, url('./cursors/v2-pointer@2x.png') 2x) 5 3, pointer;
+      --cur-grab: image-set(url('./cursors/v2-grab.png') 1x, url('./cursors/v2-grab@2x.png') 2x) 16 16, grab;
+      --cur-grabbing: image-set(url('./cursors/v2-grabbing.png') 1x, url('./cursors/v2-grabbing@2x.png') 2x) 16 16, grabbing;
+    }
+  }
+}
+:root {
+  --cursor-follow: 0.12;
+  --cursor-pop: 1;
+  --cursor-stretch: 0;
+  --cursor-spin: 0.35;
+  --cursor-motes: 10;
+  --cursor-mote-gap: 16;
+  --cursor-mote-speed: 260;
+  --cursor-mote-life: 0.85;
+  --cursor-mote-drift: 10;
+  --cursor-ring-fill: rgba(216, 192, 142, 0.12);
+  --cursor-mote: #efe2bf;
+}
+.cursor-fx-ring {
+  border: 0;
+  box-shadow: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke-linecap='round'%3E%3Cg stroke='%230f1530' stroke-opacity='.32' stroke-width='2.2'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Cpath d='M12 1.2v2M22.8 12h-2M12 22.8v-2M1.2 12h2'/%3E%3C/g%3E%3Cg stroke='%23d8c08e' stroke-width='0.9'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Cpath d='M12 1.2v2M22.8 12h-2M12 22.8v-2M1.2 12h2'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat; /* 金线底下垫一道淡淡的午夜蓝：金色按钮上也看得见 */
+}
+.cursor-fx-ring::after { inset: 4.5px; transition: opacity 0.45s var(--v2-ease); }
+.cursor-fx-mote { left: -2px; top: -2px; width: 4px; height: 4px; }
+.cursor-fx-mote.is-star { left: -4px; top: -4px; width: 8px; height: 8px; background: var(--v2-gold); }

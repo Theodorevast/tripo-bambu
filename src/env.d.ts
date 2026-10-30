@@ -5,4 +5,5 @@ interface Window {
   __thumbReady?: boolean; // dev/thumb 页面渲染完
   __app?: import('./debug').DebugHooks; // Playwright 脚本用的坐标换算
   __world?: import('./scenes/world').World; // 截图、测性能的脚本直接调世界（换天空预设、读绘制统计）
+  __cursorFx?: import('./ui/cursor').CursorFx; // 鼠标跟随层：测性能时开关、读每帧花的时间（ui/cursor.ts）
 }
