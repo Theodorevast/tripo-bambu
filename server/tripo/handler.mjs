@@ -488,7 +488,8 @@ export function createHandler(options = {}) {
       let res;
       try {
         // 不带 Authorization：结果链接自己带签名，密钥不能发给存储主机
-        res = await getFetch()(url.toString(), { redirect: 'manual', signal: ac.signal, headers: { accept } });
+        // 要原始字节（identity）：fetch 会自动解压 gzip，但 Content-Length 还是压缩后的大小，转发出去长度就对不上了
+        res = await getFetch()(url.toString(), { redirect: 'manual', signal: ac.signal, headers: { accept, 'accept-encoding': 'identity' } });
       } catch (err) {
         log.warn?.(redact(`[tripo] 拉结果失败 ${url.hostname}：${err?.name ?? ''} ${err?.message ?? err}`));
         throw fail('upstream', '从 Tripo 拉结果文件失败，请稍后再试');
@@ -691,7 +692,9 @@ export function createHandler(options = {}) {
     const raw = kind === 'model' ? upstreamModelUrl(data.output) : upstreamPreviewUrl(data.output);
     if (!raw) throw fail('not_found', kind === 'model' ? 'Tripo 没有返回模型文件' : 'Tripo 没有返回预览图');
     const res = await fetchResult(cfg, redact, raw, kind === 'model' ? 'model/gltf-binary, application/octet-stream;q=0.9, */*;q=0.1' : 'image/*');
-    const size = Number(res.headers.get('content-length'));
+    // 存储主机还是压缩了的话，fetch 拿到的是解压后的字节，Content-Length 不能照抄
+    const encoding = (res.headers.get('content-encoding') ?? '').trim().toLowerCase();
+    const size = encoding && encoding !== 'identity' ? NaN : Number(res.headers.get('content-length'));
     const upstreamType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
     let type;
     if (kind === 'model') {

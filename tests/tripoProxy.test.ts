@@ -412,6 +412,17 @@ describe('下载只放行 Tripo 的结果，不能当通用代理', () => {
     expect(storage?.headers.get('authorization')).toBeNull();
   });
 
+  it('存储主机压缩了响应：不照抄压缩后的 Content-Length（fetch 已经解压），并且请求时要原始字节', async () => {
+    const calls = upstreamWith('https://openapi.cdn.tripo3d.com/out/model.glb', {
+      'GET openapi.cdn.tripo3d.com/out/model.glb': () => new Response(glb, { headers: { 'content-encoding': 'gzip', 'content-length': '5' } }),
+    });
+    const out = await download();
+    expect(out.status).toBe(200);
+    expect(out.headers.get('content-length')).toBeNull();
+    expect(out.bytes.length).toBe(glb.length);
+    expect(calls.find((c) => c.url.includes('cdn.tripo3d.com'))?.headers.get('accept-encoding')).toBe('identity');
+  });
+
   it.each([
     ['别的主机', 'https://evil.example.com/model.glb'],
     ['后缀伪装', 'https://openapi.cdn.tripo3d.com.evil.example/model.glb'],
