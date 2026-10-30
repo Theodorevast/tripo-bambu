@@ -330,7 +330,7 @@ try {
 } finally {
   // 中途抛错也走到这里：把已有的结果和收集到的页面错误都打出来，再关掉浏览器和服务器
   const errors = errorLists.flatMap(([name, list]) => list.map((e) => `[${name}] ${e}`));
-  console.log(`base: ${base} · backend: ${backend} · 启动画面的图: ${art === 'orrery' ? '天体仪和翠宝剪影（第二版，线稿）' : art === 'gif' ? '像素翠宝动图' : art === 'dots' ? '没有，用圆点' : art}`);
+  console.log(`base: ${base} · backend: ${backend} · 启动画面的图: ${art === 'orrery' ? '天体仪和中间的 Tripo 标志（第二版，线稿）' : art === 'gif' ? '像素翠宝动图' : art === 'dots' ? '没有，用圆点' : art}`);
   if (numbers) console.log(numbers);
   console.log(results.join('\n'));
   if (fatal) console.log(`✗ 脚本中断：${fatal?.stack ?? fatal}`);

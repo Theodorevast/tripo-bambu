@@ -2,7 +2,7 @@
    才由 JS 插进来，写在那里的话启动画面会先露出没有样式的样子；构建时它和其余 CSS 合成同一个文件，放在 <head> 里，首帧就有。
    第二版（v2-ui）：午夜的天文台。夜空渐变（顶上 Midnight，往下 Indigo、Dusk violet，地平线一点 Mauve、Haze rose 的余晖），
    满天细星（近的一层轻轻闪）；正中一具细金色的天体仪：外圈刻度慢慢转，中圈一颗小星绕着走（加载中的信号），内圈虚线反着转，
-   最中间一个很小的单色翠宝剪影。下面 Cinzel 的大写标题、Cormorant 斜体的一句话、三个阶段的月相（蛾眉月 → 上弦 → 满月）。
+   最中间是 Tripo 的标志：V 和 T 的外轮廓，香槟金细线，启动画面一出来就一笔笔画出来（约 1.2 秒），画完以后轻轻发光。下面 Cinzel 的大写标题、Cormorant 斜体的一句话、三个阶段的月相（蛾眉月 → 上弦 → 满月）。
    动的只有 transform 和 opacity（主线程在建 3D、编译着色器时，合成器照样转得动）。
    3D 准备好后（boot.ts 设 data-state="leaving"）字先淡掉往上收，天体仪放大散开，夜空淡掉，露出正在飞进来的星系 */
 #boot {
@@ -84,15 +84,21 @@
 .boot-ring.r2 b { top: -2.5px; width: 5px; height: 5px; margin-left: -2.5px; background: var(--b-star); box-shadow: 0 0 6px 1px rgba(246, 241, 231, 0.55); }
 .boot-ring.r3 b { top: -2.5px; width: 3px; height: 3px; margin-left: -1.5px; background: var(--b-gold); }
 @keyframes boot-spin { to { transform: rotate(1turn); } }
-/* 十字准线：横竖两道细线，两头淡掉，比外圈长一点 */
+/* 十字准线：横竖两道细线，两头淡掉，比外圈长一点；中间一段空着（让给标志） */
 .boot-cross { position: absolute; inset: -14px; pointer-events: none; opacity: 0.55; background:
-  linear-gradient(90deg, transparent, rgba(216, 192, 142, 0.5) 18%, rgba(216, 192, 142, 0.14) 40%, rgba(216, 192, 142, 0.14) 60%, rgba(216, 192, 142, 0.5) 82%, transparent) center / 100% 1px no-repeat,
-  linear-gradient(180deg, transparent, rgba(216, 192, 142, 0.5) 18%, rgba(216, 192, 142, 0.14) 40%, rgba(216, 192, 142, 0.14) 60%, rgba(216, 192, 142, 0.5) 82%, transparent) center / 1px 100% no-repeat; }
-/* 正中的翠宝剪影：圆身子、张开的小手、小脚、胸口一个 V，香槟金的细线，轻轻浮着 */
-.boot-triboo { position: absolute; left: 50%; top: 50%; width: 36px; height: 36px; margin: -18px 0 0 -18px; overflow: visible; fill: none; stroke: var(--b-gold); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; animation: boot-float 5s ease-in-out infinite alternate; }
-.boot-triboo .bt-body { fill: rgba(216, 192, 142, 0.1); }
-.boot-triboo .bt-v { stroke: var(--b-star); }
-@keyframes boot-float { from { transform: translateY(1.5px); } to { transform: translateY(-1.5px); } }
+  linear-gradient(90deg, transparent, rgba(216, 192, 142, 0.5) 18%, rgba(216, 192, 142, 0) 37%, rgba(216, 192, 142, 0) 63%, rgba(216, 192, 142, 0.5) 82%, transparent) center / 100% 1px no-repeat,
+  linear-gradient(180deg, transparent, rgba(216, 192, 142, 0.5) 18%, rgba(216, 192, 142, 0) 37%, rgba(216, 192, 142, 0) 63%, rgba(216, 192, 142, 0.5) 82%, transparent) center / 1px 100% no-repeat; }
+/* 正中的 Tripo 标志：V 和 T 的外轮廓（从品牌标志描下来的，比例不变），香槟金细线（宽屏约 1.3 px，手机约 1.1 px：线宽按标志的坐标单位给），
+   不填色。一出来先画 V、再画 T（stroke-dashoffset，合起来约 1.2 秒），画完以后后面一团很淡的金色光慢慢呼吸（只动 opacity）。
+   放在天体仪里面：撤掉启动画面时跟着天体仪一起放大、淡掉，不另起一层 */
+.boot-logo { position: absolute; left: 50%; top: 50%; width: 27%; height: auto; translate: -50% -50%; overflow: visible; fill: none; stroke: var(--b-gold); stroke-width: 12; stroke-linejoin: round; stroke-linecap: round; }
+.boot-logo path { stroke-dasharray: 1; stroke-dashoffset: 0; }
+.boot-logo .bl-v { animation: boot-draw 0.72s cubic-bezier(0.55, 0.1, 0.35, 1) 0.1s backwards; }
+.boot-logo .bl-t { animation: boot-draw 0.6s cubic-bezier(0.55, 0.1, 0.35, 1) 0.7s backwards; }
+@keyframes boot-draw { from { stroke-dashoffset: 1; } }
+.boot-logo-glow { position: absolute; left: 50%; top: 50%; width: 44%; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, rgba(216, 192, 142, 0.24), rgba(216, 192, 142, 0.08) 55%, rgba(216, 192, 142, 0)); opacity: 0.6; animation: boot-glow-in 0.6s ease-out 1.1s backwards, boot-breathe 3.4s ease-in-out 1.7s infinite alternate; }
+@keyframes boot-glow-in { from { opacity: 0; } }
+@keyframes boot-breathe { from { opacity: 0.6; } to { opacity: 1; } }
 
 .boot-brand { margin: 0; padding-left: 0.22em; font: 600 23px/1.1 'Cinzel', 'Cormorant Garamond', Georgia, serif; letter-spacing: 0.22em; text-transform: uppercase; color: var(--b-star); }
 .boot-title { margin: -2px 0 8px; font: italic 400 18px/1.3 'Cormorant Garamond', Georgia, serif; letter-spacing: 0.01em; color: rgba(246, 241, 231, 0.7); }

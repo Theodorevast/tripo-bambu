@@ -13,7 +13,8 @@
     <canvas id="stage"></canvas>
     <div id="app"></div>
     <!-- 启动画面（src/ui/boot.ts、boot.css），第二版：夜空、细金色的天体仪（三道同心环、刻度、一颗绕着走的小星），
-         正中一个很小的单色翠宝剪影；标题 Cinzel，三个阶段是三个月相（蛾眉月 → 上弦 → 满月）。都是线稿，不放动图 -->
+         正中是 Tripo 的标志（V 和 T 的外轮廓，从 public/brand/tripo-logo.png 描下来的，坐标以标志方块的中心为原点、方块边长 700），
+         香槟金细线一笔笔画出来；标题 Cinzel，三个阶段是三个月相（蛾眉月 → 上弦 → 满月）。都是线稿，不放动图 -->
     <div id="boot" data-state="loading">
       <div class="boot-sky"></div>
       <div class="boot-stars" aria-hidden="true"><i class="far"></i><i class="mid"></i><i class="near"></i><i class="glint g1"></i><i class="glint g2"></i><i class="glint g3"></i></div>
@@ -23,10 +24,10 @@
           <i class="boot-ring r2"><b></b></i>
           <i class="boot-ring r3"><b></b></i>
           <i class="boot-cross"></i>
-          <svg class="boot-triboo" viewBox="-16 -16 32 32" focusable="false">
-            <circle class="bt-body" r="8.6" cy="-0.6" />
-            <path class="bt-limb" d="M-8.4 0.4 L-12.6 -3.4 M8.4 0.4 L12.6 -3.4 M-3.6 7.6 L-4.4 11.6 M3.6 7.6 L4.4 11.6" />
-            <path class="bt-v" d="M-3.6 -2.8 L-0.1 2.6 L3.4 -1.2" />
+          <i class="boot-logo-glow"></i>
+          <svg class="boot-logo" viewBox="-218 -186 428 390" focusable="false">
+            <path class="bl-v" pathLength="1" d="M-183.0 -167.5L-26.0 99.5L-15.5 110.0L-7.5 113.0L5.5 113.0L14.5 109.0L23.0 100.5L119.5 -64.0L194.0 -63.5L152.0 7.5L60.0 164.5L45.5 181.0L25.5 193.0L0.5 198.0L-18.5 196.0L-39.5 187.0L-46.5 182.0L-63.0 163.5L-208.0 -85.5L-212.0 -104.5L-210.0 -126.5L-201.0 -147.5L-194.0 -157.5Z" />
+            <path class="bl-t" pathLength="1" d="M-129.0 -179.5L144.5 -180.0L169.5 -171.0L180.5 -163.0L195.0 -145.5L201.0 -132.5L203.5 -118.0L91.5 -118.0L60.0 -65.5L10.0 19.5L1.5 25.0L-8.5 23.0L-16.0 14.5L-38.0 -24.5L16.0 -117.5L-92.5 -118.0Z" />
           </svg>
         </div>
         <p class="boot-brand">Community Planets</p>
