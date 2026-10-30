@@ -129,15 +129,15 @@ td.d { color: rgba(246, 241, 231, 0.7); }
   <table>
     <thead><tr><th>项目</th><th>第一版</th><th>第二版</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td>首页每帧 GPU 时间（p50，WebGPU）</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">每帧所有渲染加起来的 GPU 时间戳，取中位数</td></tr>
+      <tr><td>首页每帧 GPU 时间（p50，WebGPU）</td><td class="n">1.2 ms</td><td class="n">1.529 ms</td><td class="d">第二版多 +0.329 ms</td></tr>
       <tr><td>首页每帧 GPU 时间（p50，WebGL2）</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d"></td></tr>
-      <tr><td>首页静止帧间隔（中位 / 最长）</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">要求：平时 ≤ 17 ms，最长 ≤ 33 ms</td></tr>
-      <tr><td>进星球（穿云）最长帧</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">要求 ≤ 33 ms</td></tr>
-      <tr><td>跳星球最长帧</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d">要求 ≤ 33 ms</td></tr>
-      <tr><td>回星系最长帧</td><td class="n"><span class="tbd">待测</span></td><td class="n"><span class="tbd">待测</span></td><td class="d"></td></tr>
+      <tr><td>首页静止帧间隔（中位 / 最长）</td><td class="n">16.7 / 16.8 ms</td><td class="n">16.7 / 16.9 ms</td><td class="d">要求：平时 ≤ 17 ms，最长 ≤ 33 ms</td></tr>
+      <tr><td>进星球（穿云）最长帧</td><td class="n">16.8 ms</td><td class="n">16.8 ms</td><td class="d">要求 ≤ 33 ms</td></tr>
+      <tr><td>跳星球最长帧</td><td class="n">16.8 ms</td><td class="n">16.8 ms</td><td class="d">要求 ≤ 33 ms</td></tr>
+      <tr><td>回星系最长帧</td><td class="n">16.8 ms</td><td class="n">16.8 ms</td><td class="d"></td></tr>
     </tbody>
   </table>
-  <p class="foot">两版都是构建版（第一版 int/v6，第二版 v2-medieval），开页带 ?nolocal（种子里的占位作品）。
+  <p class="foot">两版都是构建版（第一版 int/v6，第二版 v2-medieval），开页带 ?nolocal（种子里的占位作品）。量的时间：2026-10-29 23:58（UTC）。
   同一台机器上别的进程也在用 GPU、CPU：帧间隔偶尔会有一两帧长帧，出现的时刻每次不一样；GPU 时间是每帧所有渲染加起来的时间戳，取中位数。没量到的数字写「待测」。</p>
   <p class="foot">另外，天空和后期（v2-sky）在同一个第二版构建里开关量过自己加的那部分（首页，2880 × 1800，每组 3 遍取中位数）：WebGPU 夜空 +0.179 ms、空气里的星屑 +0.002 ms、泛光 + 胶片颗粒 +0.058 ms，合计 +0.239 ms；WebGL2 合计 +0.250 ms。</p>
 </div>
