@@ -103,11 +103,12 @@ export class Armillary {
   }
 
   // 每帧：首页淡入、星球视图淡出；跟着你的星球（pos、size = 星球在首页上的半径），慢慢转
-  update(dt: number, home: boolean, you: { pos: THREE.Vector3; size: number } | null, reduced: boolean): void {
+  // dim：整体再乘的亮度（开场拼标志的时候压下去，让标志单独出来）
+  update(dt: number, home: boolean, you: { pos: THREE.Vector3; size: number } | null, reduced: boolean, dim = 1): void {
     const on = home && you !== null && ARMILLARY.on > 0;
     this.fade += ((on ? 1 : 0) - this.fade) * (1 - Math.exp(-5 * dt));
     if (Math.abs(this.fade - (on ? 1 : 0)) < 0.002) this.fade = on ? 1 : 0;
-    if (this.lines) this.lines.fade.value = this.fade;
+    if (this.lines) this.lines.fade.value = this.fade * dim;
     this.group.visible = this.fade > 0.001;
     if (!you || !this.group.visible) return;
     if (!reduced) this.spin += dt * 0.045 * ARMILLARY.speed;

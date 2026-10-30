@@ -1,6 +1,8 @@
 import * as THREE from 'three/webgpu';
 import { atan, cos, float, instancedBufferAttribute, length, mix, sin, smoothstep, step, time, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { HOME_SPIRAL, spiralB, spiralPoint, spiralR0, type HomeSpiral } from './homeLayout';
+import { BRAND_MARK, closed } from './brandMark';
+import { FineLines } from './fineLines';
 
 // 首页螺旋星系的点缀（H2）：星球只有十几颗时看不出螺旋臂，沿两条臂撒上
 // - 星尘：沿臂的中线密、离开中线很快变稀，一条窄窄的弧带；靠中心亮、往外慢慢暗，一直画到最外那颗星球外面；
@@ -91,9 +93,11 @@ export interface GalaxyExtent {
   rotation: number; // 版式把星系在平面里转了多少（弧度，homeLayout 的 meta）
 }
 
-// Tripo 的标志（翠宝胸口那个，ui/badge.ts 的 MARK）：一圈圆（半径 1）、一个 V、一个 T。坐标 y 朝上（badge 里 y 朝下，这里翻过来）
-const MARK_V: Array<[number, number]> = [[-0.5, 0.3], [-0.03, -0.4], [0.44, 0.1]];
-const MARK_T: Array<Array<[number, number]>> = [[[-0.1, 0.36], [0.46, 0.36]], [[0.05, 0.36], [-0.12, 0.05]]];
+// 标志：一圈圆（半径 1）、V 和 T 的外轮廓。几何在 brandMark.ts（和启动画面天体仪中心的细金线标志同一份），坐标 y 朝上
+const MARK_V = closed(BRAND_MARK.vOutline);
+const MARK_T = closed(BRAND_MARK.tOutline);
+// 第二版：只有三成星尘去拼标志（其余的留在旋臂上、拼的时候暗一点），主笔画用细金线描（下面的 mark，FineLines），星尘只做点缀
+const MARK_SHARE = 3; // 每 10 粒里几粒去拼
 
 // 沿一条折线按长度均匀取第 u（0..1）处的点
 function along(line: Array<[number, number]>, u: number): [number, number] {
@@ -113,38 +117,48 @@ function along(line: Array<[number, number]>, u: number): [number, number] {
   return line[line.length - 1];
 }
 
-// 每粒星尘在标志上的目标：x、y（标志平面，圆的半径 = 1）、先后（0..1）、哪一笔（0 圆、1 V、2 T）。
-// 圆 42%、V 34%、T 24%；沿笔画均匀撒，横着抖一点（笔画有一点宽度、软一点）；先后按高度（从上往下扫）加一点随机
+// 每粒星尘在标志上的目标：x、y（标志平面，圆的半径 = 1）、先后（0..1）、哪一笔（0 圆、1 V、2 T；-1 = 不去拼，留在旋臂上）。
+// 第二版：每 10 粒里只有 MARK_SHARE 粒去拼；去拼的那些里圆 42%、V 34%、T 24%，沿笔画均匀撒，横着抖得很少（笔画是细线，星尘贴着线）；
+// 先后按高度（从上往下扫）加一点随机
 function markTargets(out: Float32Array, n: number, rand: () => number): void {
-  const nRing = Math.round(n * 0.42);
-  const nV = Math.round(n * 0.34);
-  for (let i = 0; i < n; i++) {
+  const logo = (i: number) => i % 10 < MARK_SHARE;
+  const total = Math.floor(n / 10) * MARK_SHARE + Math.min(n % 10, MARK_SHARE);
+  const nRing = Math.round(total * 0.42);
+  const nV = Math.round(total * 0.34);
+  for (let idx = 0; idx < n; idx++) {
+    if (!logo(idx)) {
+      out[idx * 4] = 0;
+      out[idx * 4 + 1] = 0;
+      out[idx * 4 + 2] = rand();
+      out[idx * 4 + 3] = -1;
+      continue;
+    }
+    const i = Math.floor(idx / 10) * MARK_SHARE + (idx % 10); // 去拼的那些里排第几
     let x: number;
     let y: number;
     let part: number;
     if (i < nRing) {
       const a = (i / nRing) * Math.PI * 2;
-      const r = 1 + gauss(rand) * 0.028;
+      const r = 1 + gauss(rand) * 0.012;
       x = Math.cos(a) * r;
       y = Math.sin(a) * r;
       part = 0;
     } else if (i < nRing + nV) {
       [x, y] = along(MARK_V, (i - nRing) / Math.max(1, nV - 1));
-      x += gauss(rand) * 0.025;
-      y += gauss(rand) * 0.025;
+      x += gauss(rand) * 0.01;
+      y += gauss(rand) * 0.01;
       part = 1;
     } else {
-      const k = (i - nRing - nV) / Math.max(1, n - nRing - nV - 1);
-      // 横的那一笔比斜的那一笔长一点：按长度分
-      [x, y] = k < 0.58 ? along(MARK_T[0], k / 0.58) : along(MARK_T[1], (k - 0.58) / 0.42);
-      x += gauss(rand) * 0.024;
-      y += gauss(rand) * 0.024;
+      const k = (i - nRing - nV) / Math.max(1, total - nRing - nV - 1);
+      [x, y] = along(MARK_T, k);
+      x += gauss(rand) * 0.01;
+      y += gauss(rand) * 0.01;
       part = 2;
     }
-    out[i * 4] = x;
-    out[i * 4 + 1] = y;
-    out[i * 4 + 2] = THREE.MathUtils.clamp((1 - y) / 2 * 0.8 + rand() * 0.2, 0, 1);
-    out[i * 4 + 3] = part;
+    out[idx * 4] = x;
+    out[idx * 4 + 1] = y;
+    out[idx * 4 + 2] = THREE.MathUtils.clamp((1 - y) / 2 * 0.8 + rand() * 0.2, 0, 1);
+    out[idx * 4 + 3] = part;
   }
 }
 
@@ -173,21 +187,31 @@ export class GalaxyDecor {
   private readonly halo: THREE.Sprite;
   private readonly ground: THREE.Mesh;
   private builtFor = '';
+  // 开场标志的主笔画（第二版）：细金线一笔一笔描出来（圆 → V → T），几颗星光白的小星点在笔画端点；星尘只做点缀
+  private readonly markGroup = new THREE.Group();
+  private readonly mark: FineLines;
+  private readonly markOrder: Float32Array; // 每一段在描的顺序里排在哪（0..1）
+  private readonly markStarOrder: number[] = [];
+  private markShown = -1; // 上一次写透明度时的「描到哪 × 亮度」（没变不重写）
 
   constructor() {
     this.group.name = 'home-galaxy';
     // 星尘：圆的小光点，中间实、边上一圈软的晕；每粒按自己的亮度当相位慢慢闪。叠加混合：和云海拉开，像在发光
     const S = instancedBufferAttribute(this.shapeAttr) as unknown as THREE.Node<'vec4'>;
-    const shapeK = smoothstep(0, 1, this.uShape.mul(1.6).sub(S.z.mul(0.6)).clamp(0, 1)); // 这一粒到了几成（先后错开）
-    // 第二版：和星尘同一套颜色——圆是香槟金、V 是星光白、T 是浅一点的香槟（不再是翠宝黄）
-    const partColor = mix(mix(lin('#d8c08e'), lin('#f6f1e7'), step(0.5, S.w)), lin('#ead8a8'), step(1.5, S.w));
+    const isLogo = step(-0.5, S.w); // 去拼标志的（其余的留在旋臂上）
+    const shapeK = smoothstep(0, 1, this.uShape.mul(1.6).sub(S.z.mul(0.6)).clamp(0, 1)).mul(isLogo); // 这一粒到了几成（先后错开）
+    // 第二版：拼标志的星尘是香槟金，只有少数几粒星光白当点缀（亮一点、会带一点泛光）；每一粒都暗、小，叠在一起也不发白
+    const accent = step(0.93, S.z.mul(91.7).add(S.x.mul(13.1)).fract());
+    const partColor = mix(lin('#d8c08e'), lin('#f6f1e7'), accent);
+    // 不拼的那些：拼的时候暗下去一半多（旋臂还在，但让开主角）
+    const stay = float(1).sub(smoothstep(0, 1, this.uShape).mul(float(1).sub(isLogo)).mul(0.6));
     this.dust = makeBatch(Math.round(DUST_BASE * 2.5), 'home-dust', this.fade, true, (c) => {
       const d = length(uv().sub(0.5)).mul(2);
       // 第二版：亮点更小更实、晕更淡；闪烁更克制（慢、幅度小）
       const core = smoothstep(0.36, 0.0, d);
       const halo = smoothstep(1.0, 0.2, d).mul(0.16);
       const twinkle = sin(time.mul(0.9).add(c.a.mul(53))).mul(0.09).add(0.95);
-      const bright = mix(c.a, float(1.15), shapeK);
+      const bright = mix(c.a.mul(stay), mix(float(0.3), float(0.85), accent), shapeK);
       const k = core.add(halo).mul(bright).mul(twinkle).mul(this.glow).mul(2.0);
       return vec4(mix(c.rgb, partColor, shapeK).mul(k), k); // 叠加：颜色本身乘亮度
     });
@@ -205,7 +229,7 @@ export class GalaxyDecor {
       const y = mix(P.y, T.y, shapeK).add(arc.mul(this.uLift));
       const m = this.dust.sprite.material as THREE.SpriteNodeMaterial;
       m.positionNode = vec3(cos(ang).mul(rad), y, sin(ang).mul(rad));
-      m.scaleNode = (instancedBufferAttribute(this.dust.size) as unknown as THREE.Node<'float'>).mul(mix(float(1), float(1.2), shapeK));
+      m.scaleNode = (instancedBufferAttribute(this.dust.size) as unknown as THREE.Node<'float'>).mul(mix(float(1), mix(float(0.5), float(0.8), accent), shapeK));
     }
     // 小云絮：很软的圆斑
     this.wisps = makeBatch(WISP_COUNT, 'home-wisps', this.fade, false, (c) => {
@@ -248,6 +272,73 @@ export class GalaxyDecor {
     this.dust.sprite.renderOrder = -6;
     this.halo.renderOrder = -5;
     this.group.add(this.ground, this.wisps.sprite, this.dust.sprite, this.halo);
+    // 标志的细金线：圆分 120 段，V、T 的外轮廓（和启动画面同一份）每条边按长度切小段；先描圆，再沿 V 的轮廓走一圈、再沿 T 的走一圈。
+    // 普通混合（不叠加），亮度压在泛光的门槛下面，只有几颗点缀的小星会带一点光
+    {
+      const segs: Array<[number, number, number, number, number]> = []; // x0, y0, x1, y1, 先后
+      const R = BRAND_MARK.ring;
+      const ringN = 120;
+      for (let k = 0; k < ringN; k++) {
+        // 从顶上开始逆时针描一圈
+        const a0 = Math.PI / 2 + (k / ringN) * Math.PI * 2;
+        const a1 = Math.PI / 2 + ((k + 1) / ringN) * Math.PI * 2;
+        segs.push([Math.cos(a0) * R, Math.sin(a0) * R, Math.cos(a1) * R, Math.sin(a1) * R, (k / ringN) * 0.45]);
+      }
+      // 轮廓沿着描一圈：每条边按长度切成约 0.035 一段（拐角保持尖的），先后按走过的长度；返回描到每个顶点时的先后（点缀的小星用）
+      const stroke = (line: Array<[number, number]>, from: number, to: number): number[] => {
+        const at: number[] = [from];
+        let total = 0;
+        for (let i = 1; i < line.length; i++) total += Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]);
+        let walked = 0;
+        for (let i = 1; i < line.length; i++) {
+          const [x0, y0] = line[i - 1];
+          const [x1, y1] = line[i];
+          const len = Math.hypot(x1 - x0, y1 - y0);
+          const n = Math.max(1, Math.ceil(len / 0.035));
+          for (let k = 0; k < n; k++) {
+            const u0 = k / n;
+            const u1 = (k + 1) / n;
+            segs.push([x0 + (x1 - x0) * u0, y0 + (y1 - y0) * u0, x0 + (x1 - x0) * u1, y0 + (y1 - y0) * u1, from + ((to - from) * (walked + len * u0)) / total]);
+          }
+          walked += len;
+          at.push(from + ((to - from) * walked) / total);
+        }
+        return at;
+      };
+      const vAt = stroke(MARK_V, 0.47, 0.75);
+      const tAt = stroke(MARK_T, 0.77, 0.98);
+      // 点缀的小星放在笔画的端点上，描到那里时亮起来（顶点编号见 brandMark.ts 的轮廓）
+      const vStar = (i: number, size: number): [number, number, number, number] => [MARK_V[i][0], MARK_V[i][1], size, vAt[i]];
+      const tStar = (i: number, size: number): [number, number, number, number] => [MARK_T[i][0], MARK_T[i][1], size, tAt[i]];
+      const stars: Array<[number, number, number, number]> = [
+        [0, R, 3.4, 0.0], // 圆的顶上（起笔）
+        vStar(0, 3.0), // V 左边那一笔的顶（起笔）
+        vStar(8, 3.0), // V 右边那一笔的顶
+        vStar(13, 3.8), // V 的尖
+        tStar(6, 3.0), // T 横的右端
+        tStar(10, 2.8), // T 的尖
+      ];
+      this.mark = new FineLines(segs.length, stars.length, { name: 'home-mark-lines', twinkle: 0.3, twinkleSpeed: 1.2 });
+      this.markOrder = new Float32Array(segs.length);
+      const gold = new THREE.Color(BRAND_MARK.color).multiplyScalar(1.05);
+      const star = new THREE.Color('#f6f1e7').multiplyScalar(1.7);
+      const a = new THREE.Vector3();
+      const b = new THREE.Vector3();
+      segs.forEach(([x0, y0, x1, y1, o], i) => {
+        this.mark.setSegment(i, { a: a.set(x0, y0, 0), b: b.set(x1, y1, 0), width: BRAND_MARK.lineWidthPx, color: gold, alpha: 0 });
+        this.markOrder[i] = o;
+      });
+      stars.forEach(([x, y, size, o], i) => {
+        this.mark.setStar(i, { at: a.set(x, y, 0), size, color: star, alpha: 0, phase: i * 2.3 });
+        this.markStarOrder.push(o);
+      });
+      this.mark.commit();
+      this.mark.fade.value = 0;
+      this.mark.mesh.renderOrder = -5.5; // 星尘（-6）之后、你的星球的暖光（-5）之前
+      this.markGroup.name = 'home-mark';
+      this.markGroup.add(this.mark.mesh);
+      this.group.add(this.markGroup); // 开场预热时显示着一起编译；放完拼标志就藏起来（不占绘制调用）
+    }
   }
 
   // 按螺旋臂的参数、星球半径、星系多大重新撒（参数改了、半径变了、星系变大了才重撒）
@@ -367,6 +458,7 @@ export class GalaxyDecor {
     if (STARDUST_TRIBOO.on <= 0 || reduce) {
       this.shapeT = -1;
       this.uShape.value = 0;
+      this.markGroup.visible = false;
       this.shapePromise = Promise.resolve();
       return this.shapePromise;
     }
@@ -385,6 +477,12 @@ export class GalaxyDecor {
     this.uShapeScale.value = d * Math.tan(THREE.MathUtils.degToRad(view.fov) / 2) * STARDUST_TRIBOO.size;
     this.uTwist.value = STARDUST_TRIBOO.twist;
     this.uLift.value = this.radius * STARDUST_TRIBOO.lift;
+    // 细金线放在同一个平面上：组的朝向是标志平面（x 往右、y 往上），大小 = 标志的尺度
+    this.markGroup.position.copy(this.uShapeCenter.value);
+    this.markGroup.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, dir.clone().negate()));
+    this.markGroup.scale.setScalar(this.uShapeScale.value);
+    this.markGroup.visible = true;
+    this.markShown = -1;
     this.shapeWait = Math.max(0, delay);
     this.shapeT = 0;
     this.uShape.value = 0;
@@ -413,13 +511,31 @@ export class GalaxyDecor {
     const b = STARDUST_TRIBOO.back;
     const t = this.shapeT;
     this.uShape.value = t < g ? t / g : t < g + h ? 1 : Math.max(0, 1 - (t - g - h) / b);
+    // 细金线：星尘快聚好时开始描（圆 → V → T，一笔一笔），停着的时候是满的；流回去时先淡掉
+    const draw = t < g ? THREE.MathUtils.smoothstep(t / g, 0.3, 1.0) : 1;
+    const keep = t < g + h ? 1 : THREE.MathUtils.smoothstep(this.uShape.value, 0.45, 0.95);
+    this.paintMark(draw, keep);
     if (t >= g + h + b) {
       this.shapeT = -1;
       this.uShape.value = 0;
+      this.paintMark(0, 0);
+      this.markGroup.visible = false; // 放完就不画了（第一次放的时候管线已经编好，以后再放直接显示）
       const end = this.shapeEnd;
       this.shapeEnd = null;
       end?.();
     }
+  }
+
+  // 每一段按先后透明度：描到 draw 的地方亮起来；keep 是整体的亮度（流回去时淡掉）。值没变不重写
+  private paintMark(draw: number, keep: number): void {
+    const key = Math.round(draw * 1000) * 1001 + Math.round(keep * 1000);
+    if (key === this.markShown) return;
+    this.markShown = key;
+    this.mark.fade.value = keep;
+    const o = this.markOrder;
+    for (let i = 0; i < o.length; i++) this.mark.setAlpha(i, 0.9 * THREE.MathUtils.smoothstep(draw, o[i], o[i] + 0.04));
+    for (let i = 0; i < this.markStarOrder.length; i++) this.mark.setAlpha(i, THREE.MathUtils.smoothstep(draw, this.markStarOrder[i], this.markStarOrder[i] + 0.06), true);
+    this.mark.commit(false);
   }
 
   // 每帧：首页显示、星球视图淡出；你的星球的暖光跟着它，光环平放在它底下的云面上（seaTop：云顶的高度）

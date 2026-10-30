@@ -201,11 +201,12 @@ export class HomeConstellation {
   }
 
   // 每帧：首页淡入；版式变了重连 / 重摆；悬停的那颗连出去的线变亮（透明度逐帧逼近）
-  update(dt: number, world: World, home: boolean): void {
+  // dim：整体再乘的亮度（开场拼标志的时候压下去，让标志单独出来）
+  update(dt: number, world: World, home: boolean, dim = 1): void {
     const on = home && CONSTELLATION.on > 0;
     this.fade += ((on ? 1 : 0) - this.fade) * (1 - Math.exp(-5 * dt));
     if (Math.abs(this.fade - (on ? 1 : 0)) < 0.002) this.fade = on ? 1 : 0;
-    this.lines.fade.value = this.fade;
+    this.lines.fade.value = this.fade * dim;
     this.lines.mesh.visible = this.fade > 0.001;
     if (!this.lines.mesh.visible) return;
     // 版式（星球、档位、位置、大小）：每 0.2 秒对一次指纹。连法变了重连，只是位置变了（换版式时星球慢慢挪过去）就只重摆
