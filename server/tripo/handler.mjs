@@ -102,11 +102,12 @@ export function readConfig(env = {}) {
     tasksPerIpPerHour: count(env.TRIPO_MAX_TASKS_PER_IP_PER_HOUR, 5),
     tasksPerDay: count(env.TRIPO_MAX_TASKS_PER_DAY, 50),
     uploadsPerIpPerHour: count(env.TRIPO_MAX_UPLOADS_PER_IP_PER_HOUR, 30),
-    requestsPerIpPerMinute: count(env.TRIPO_MAX_REQUESTS_PER_IP_PER_MINUTE, 120),
+    // 所有接口合计（轮询、下载也算）。会场多人共用一个出口 IP 时要调大
+    requestsPerIpPerMinute: count(env.TRIPO_MAX_REQUESTS_PER_IP_PER_MINUTE, 300),
     // Tripo 自己的上限是 20 MB；这里默认 10 MB，最大也只能调到 20
     maxImageBytes: Math.min(count(env.TRIPO_MAX_IMAGE_MB, 10), 20) * MB,
     maxDownloadBytes: count(env.TRIPO_MAX_DOWNLOAD_MB, 200) * MB,
-    origins: list(env.ALLOWED_ORIGINS),
+    origins: list(env.ALLOWED_ORIGINS).map((o) => o.replace(/\/+$/, '')),
     modelVersions,
     defaultModel: modelVersions.includes(preferred) ? preferred
       : modelVersions.includes(DEFAULT_MODEL_VERSION) ? DEFAULT_MODEL_VERSION : modelVersions[0],
@@ -341,8 +342,9 @@ function mapUpstreamError(status, payload, retryAfter, redact) {
   if (code === 1007 || code === 2000 || status === 429) return fail('rate_limited', `Tripo 当前繁忙（频率或并发上限），请稍后再试${tag}`, 429, { retryAfterSec: retryAfterSec ?? 30 });
   if (code === 2008) return fail('bad_request', `内容没有通过 Tripo 的审核，请换个描述或图片${tag}`);
   if (code === 2 || code === 1002 || status === 401) return fail('upstream', `服务端的 Tripo 密钥无效或没配置，请检查 TRIPO_API_KEY${tag}`);
-  if ([1003, 1004, 2002, 2003, 2004, 2015, 2018].includes(code) || status === 400) return fail('bad_request', `Tripo 拒绝了这个请求${tag}${msg ? `：${msg}` : ''}`);
+  // 找不到任务时 Tripo 回什么业务码待确认，以 HTTP 404 为准
   if (status === 404) return fail('not_found', `Tripo 上找不到这个任务${tag}`);
+  if ([1003, 1004, 2002, 2003, 2004, 2015, 2018].includes(code) || status === 400) return fail('bad_request', `Tripo 拒绝了这个请求${tag}${msg ? `：${msg}` : ''}`);
   if (status === 403) return fail('upstream', `Tripo 拒绝访问${tag}${msg ? `：${msg}` : ''}`);
   return fail('upstream', `Tripo 服务出错，请稍后再试${tag}`, 502, { indeterminate: true });
 }
@@ -556,27 +558,28 @@ export function createHandler(options = {}) {
   async function upload(cfg, redact, request, ip) {
     const type = request.headers.get('content-type') ?? '';
     if (!/^multipart\/form-data/i.test(type)) throw fail('bad_request', '上传要用 multipart/form-data，字段名 file', 415);
-    const bytes = await readBody(request, cfg.maxImageBytes + MULTIPART_OVERHEAD);
-    let form;
-    try {
-      form = await new Response(bytes, { headers: { 'content-type': type } }).formData();
-    } catch {
-      throw fail('bad_request', '上传的表单解析不了');
-    }
-    for (const k of form.keys()) {
-      if (k !== 'file') throw fail('bad_request', `上传表单只接受字段 file，不认识 ${JSON.stringify(k).slice(0, 40)}`);
-    }
-    const files = form.getAll('file');
-    if (files.length !== 1 || typeof files[0] === 'string') throw fail('bad_request', '一次上传正好一张图，字段名 file');
-    const file = files[0];
-    if (file.size === 0) throw fail('bad_request', '图片是空的');
-    if (file.size > cfg.maxImageBytes) throw fail('bad_request', `单张图最大 ${cfg.maxImageBytes / MB} MB`, 413);
-    const data = new Uint8Array(await file.arrayBuffer());
-    const kind = sniffImage(data);
-    if (!kind) throw fail('bad_request', '只支持 PNG 或 JPEG 图片', 415);
-
+    // 先占名额再读请求体：超了的直接拒，不用先收下 10 MB；后面校验没过（明确的失败）就退回名额
     const slot = await limit(`upload:${ip}`, cfg.uploadsPerIpPerHour, HOUR, (s) => fail('rate_limited', `上传太频繁：每个 IP 每小时最多 ${cfg.uploadsPerIpPerHour} 张图，请稍后再试`, 429, { retryAfterSec: s }));
     try {
+      const bytes = await readBody(request, cfg.maxImageBytes + MULTIPART_OVERHEAD);
+      let form;
+      try {
+        form = await new Response(bytes, { headers: { 'content-type': type } }).formData();
+      } catch {
+        throw fail('bad_request', '上传的表单解析不了');
+      }
+      for (const k of form.keys()) {
+        if (k !== 'file') throw fail('bad_request', `上传表单只接受字段 file，不认识 ${JSON.stringify(k).slice(0, 40)}`);
+      }
+      const files = form.getAll('file');
+      if (files.length !== 1 || typeof files[0] === 'string') throw fail('bad_request', '一次上传正好一张图，字段名 file');
+      const file = files[0];
+      if (file.size === 0) throw fail('bad_request', '图片是空的');
+      if (file.size > cfg.maxImageBytes) throw fail('bad_request', `单张图最大 ${cfg.maxImageBytes / MB} MB`, 413);
+      const data = new Uint8Array(await file.arrayBuffer());
+      const kind = sniffImage(data);
+      if (!kind) throw fail('bad_request', '只支持 PNG 或 JPEG 图片', 415);
+
       if (cfg.mock) {
         const failing = String(file.name ?? '').toLowerCase().includes('#fail');
         return json(200, { ok: true, token: `mock_file_${failing ? 'fail_' : ''}${randomHex(8)}`, type: kind });
@@ -664,17 +667,17 @@ export function createHandler(options = {}) {
     return json(200, out);
   }
 
-  async function result(cfg, redact, request, id, kind) {
+  async function result(cfg, redact, request, env, id, kind) {
     checkTaskId(id, cfg);
     if (cfg.mock) {
       const s = parseMockTask(id, now());
       if (!s) throw fail('not_found', '没有这个任务');
       if (s.status !== 'success') throw fail('not_found', '任务还没有成功完成，没有结果可下载');
       const loader = kind === 'model' ? options.loadMockModel : options.loadMockPreview;
-      const fallbackUrl = kind === 'model' ? str(request.__env?.MOCK_MODEL_URL) : str(request.__env?.MOCK_PREVIEW_URL);
+      const fallbackUrl = kind === 'model' ? str(env.MOCK_MODEL_URL) : str(env.MOCK_PREVIEW_URL);
       let asset = null;
       try {
-        asset = loader ? await loader(request.__env ?? {}, request) : await fetchMockAsset(fallbackUrl, request, getFetch());
+        asset = loader ? await loader(env, request) : await fetchMockAsset(fallbackUrl, request, getFetch());
       } catch (err) {
         log.warn?.(redact(`[tripo] 读模拟${kind === 'model' ? '模型' : '预览图'}失败：${err?.message ?? err}`));
       }
@@ -723,7 +726,8 @@ export function createHandler(options = {}) {
     return { 'access-control-allow-origin': origin, vary: 'Origin', 'access-control-expose-headers': 'Content-Length, Content-Type, Retry-After' };
   }
 
-  return async function handle(request, env = {}, info = {}) {
+  return async function handle(request, env, info) {
+    env = env ?? {};
     const cfg = readConfig(env);
     const redact = redactor(cfg.key);
     const url = new URL(request.url);
@@ -747,22 +751,20 @@ export function createHandler(options = {}) {
       if (!cfg.mock && !/^https:\/\//.test(cfg.apiBase) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(cfg.apiBase)) {
         throw fail('upstream', 'TRIPO_API_BASE 必须是 https 地址', 500);
       }
-      const ip = ipKey(info.ip);
+      const ip = ipKey(info?.ip);
       await limit(`req:${ip}`, cfg.requestsPerIpPerMinute, MINUTE, (s) => fail('rate_limited', '请求太频繁，请稍后再试', 429, { retryAfterSec: s }));
 
       const { route, prefix } = match;
       const method = request.method;
       const seg = route.split('/').filter(Boolean);
-      // 模拟资源的默认加载要用到 env（Worker 里的 MOCK_MODEL_URL）
-      Object.defineProperty(request, '__env', { value: env, configurable: true });
       let res;
       if (seg.length === 1 && seg[0] === 'health' && method === 'GET') res = await health(cfg);
       else if (seg.length === 1 && seg[0] === 'balance' && method === 'GET') res = await balance(cfg, redact);
       else if (seg.length === 1 && seg[0] === 'upload' && method === 'POST') res = await upload(cfg, redact, request, ip);
       else if (seg.length === 1 && seg[0] === 'task' && method === 'POST') res = await createTask(cfg, redact, request, ip);
       else if (seg.length === 2 && seg[0] === 'task' && method === 'GET') res = await taskStatus(cfg, redact, seg[1], prefix);
-      else if (seg.length === 2 && seg[0] === 'download' && method === 'GET') res = await result(cfg, redact, request, seg[1], 'model');
-      else if (seg.length === 2 && seg[0] === 'preview' && method === 'GET') res = await result(cfg, redact, request, seg[1], 'preview');
+      else if (seg.length === 2 && seg[0] === 'download' && method === 'GET') res = await result(cfg, redact, request, env, seg[1], 'model');
+      else if (seg.length === 2 && seg[0] === 'preview' && method === 'GET') res = await result(cfg, redact, request, env, seg[1], 'preview');
       else if (['health', 'balance', 'upload', 'task', 'download', 'preview'].includes(seg[0]) && seg.length <= 2) throw fail('bad_request', `这个接口不支持 ${method}`, 405);
       else throw fail('not_found', '没有这个接口');
       return withCors(res);

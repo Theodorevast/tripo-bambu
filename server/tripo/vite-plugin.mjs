@@ -1,9 +1,9 @@
 // Vite 插件：开发服务器（npm run dev）和本地预览（vite preview）都挂上 /api/tripo，环境变量从 .env.local 等文件读。
 // 只有服务端读这些变量；VITE_ 开头的才会进前端包，所以密钥一定叫 TRIPO_API_KEY，不能叫 VITE_TRIPO_API_KEY。
+// 进程环境变量优先级最高：TRIPO_MOCK=1 npm run dev 一定是模拟模式，哪怕 .env.local 里有密钥。
 import { resolve } from 'node:path';
-import { loadEnv } from 'vite';
-import { createHandler, readConfig } from './handler.mjs';
-import { createFileLoaders, createNodeMiddleware } from './node-adapter.mjs';
+import { createHandler } from './handler.mjs';
+import { createFileLoaders, createNodeMiddleware, loadEnvFiles, modeBanner } from './node-adapter.mjs';
 
 // Host 头检查（防 DNS 重绑定：恶意网页把自己的域名解析到 127.0.0.1 来调本机的接口）。
 // Vite 自己也查，但我们的中间件排在它前面，所以这里照 Vite 的 allowedHosts 规则再查一遍
@@ -18,8 +18,7 @@ function hostAllowed(hostHeader, allowed) {
 
 function mount(server, kind) {
   const config = server.config;
-  const env = config.envDir === false ? { ...process.env } : loadEnv(config.mode, config.envDir || config.root, '');
-  const cfg = readConfig(env);
+  const env = loadEnvFiles({ dir: config.envDir === false ? null : config.envDir || config.root, mode: config.mode });
   const handle = createHandler(createFileLoaders({ dirs: [config.publicDir, resolve(config.root, config.build.outDir), config.root] }));
   const middleware = createNodeMiddleware({ handle, getEnv: () => env, log: { error: (m) => config.logger.error(m) } });
   const allowed = kind === 'preview' ? config.preview?.allowedHosts ?? config.server?.allowedHosts : config.server?.allowedHosts;
@@ -33,8 +32,9 @@ function mount(server, kind) {
     }
     middleware(req, res, next);
   });
-  const keyNote = cfg.key && !cfg.key.startsWith('tsk_') ? '（TRIPO_API_KEY 看起来不对：Tripo 的密钥以 tsk_ 开头）' : '';
-  config.logger.info(`  [tripo] /api/tripo 已挂上：${cfg.mock ? '模拟模式（没有 TRIPO_API_KEY 或 TRIPO_MOCK=1）' : '真实模式，会花 Tripo 积分'}${keyNote}`);
+  const banner = modeBanner(env);
+  if (banner.level === 'warn') config.logger.warn(`\n  ${banner.text}\n`);
+  else config.logger.info(`  ${banner.text}`);
 }
 
 export default function tripoProxy() {
