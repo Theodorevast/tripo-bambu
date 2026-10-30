@@ -1,0 +1,64 @@
+# Cloudflare Worker 部署配置：一个 Worker 既托管网页（dist/，Workers Static Assets）又做 Tripo API 中转，限流计数在 Durable Objects 里。
+# 上线步骤（按顺序）见 docs/TRIPO.md 第 7 节。/api/* 先进 Worker（server/tripo/worker.mjs），其余请求直接走静态资源，不进 Worker。
+#
+# 两个版本用同一份文件，不用按分支改：
+#   第一版（int/v6，文件夹 gbn）：             npm run cf:deploy    （= npx wrangler@4.156.0 deploy）          → community-planets
+#   第二版（v2-medieval，文件夹 gbn-medieval）：npm run cf:deploy:v2 （= npx wrangler@4.156.0 deploy --env v2） → community-planets-v2
+# 第二版的限流绑到第一版的 RateLimiter（script_name），两版共用同一份计数和每日上限，所以第一版要先部署。
+#
+# 密钥不写在这里，每个 Worker 各设一次：npx wrangler@4.156.0 secret put TRIPO_API_KEY（第二版再加 --env v2）。
+# 本地试跑用 npm run cf:dev（wrangler dev，强制模拟模式，不花额度）。
+
+name = "community-planets"
+main = "server/tripo/worker.mjs"
+compatibility_date = "2026-10-01"
+
+# 先 npm run build。网页用 # 路由，所有页面都是 index.html，不需要 SPA 回退（not_found_handling 用默认值）
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+# 限流计数：每个限流 key 一个对象（task:<ip>、upload:<ip>、req:<ip>），全站每日上限 task:all 全球只有一个对象
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+# SQLite 后端（Workers 免费版只能用这种）。部署过的 tag 不能改；以后改名、删类要追加新的 [[migrations]]
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
+
+# 控制台的 Logs 页能查最近几天的日志（实时的用 wrangler tail）。日志里没有密钥
+[observability]
+enabled = true
+
+# 公开演示的默认值，不放密钥。其余变量用代码里的默认值（docs/TRIPO.md 第 8 节）。
+# 改上限时第二版的 [env.v2.vars] 一起改：两版共用一份计数，每次按发请求那一版的上限判断。
+# TRIPO_MOCK 不写在这里：要临时切模拟模式用 wrangler secret put TRIPO_MOCK（见 docs/TRIPO.md 7.1），写在这里会和它重名
+[vars]
+TRIPO_MAX_TASKS_PER_DAY = "30"                       # 滚动 24 小时内全站最多 30 个生成任务（两版合计）；"0" = 关掉生成
+TRIPO_MAX_TASKS_PER_IP_PER_HOUR = "5"                # 每个 IP 每小时 5 个
+MOCK_MODEL_URL = "/models/tufted-armchair.glb"       # 模拟模式下载的模型（从 dist/ 里取）
+MOCK_PREVIEW_URL = "/thumbs/tufted-armchair.webp"
+
+# ---------- 第二版：--env v2 ----------
+# main、compatibility_date、[assets]、[observability] 沿用上面；绑定和 [vars] 不会继承，要重写一遍。
+# migrations = []：第二版不建自己的 RateLimiter，用第一版的（script_name）
+[env.v2]
+name = "community-planets-v2"
+migrations = []
+
+[[env.v2.durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+script_name = "community-planets"
+
+[env.v2.vars]
+TRIPO_MAX_TASKS_PER_DAY = "30"
+TRIPO_MAX_TASKS_PER_IP_PER_HOUR = "5"
+MOCK_MODEL_URL = "/models/tufted-armchair.glb"
+MOCK_PREVIEW_URL = "/thumbs/tufted-armchair.webp"
+
+# 方案 B（网页放在别的静态托管，Worker 只做中转）：删掉 [assets]，[vars] 加 ALLOWED_ORIGINS = "https://网页的地址"，
+# MOCK_MODEL_URL 写网页那边的完整地址；构建网页时设 VITE_TRIPO_PROXY=https://<这个 Worker 的地址>。见 docs/TRIPO.md 7.2

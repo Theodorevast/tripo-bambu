@@ -63,6 +63,12 @@ export function createHandler(options?: TripoHandlerOptions): TripoHandle;
 export const handle: TripoHandle;
 export function readConfig(env?: TripoEnv): TripoConfig;
 export function createMemoryStore(options?: { maxKeys?: number }): RateLimitStore;
+// 滑动窗口的纯逻辑（内存版和 Durable Objects 版共用）：stamps 升序，原地修改
+export interface WindowResult { ok: boolean; retryAfterMs: number | null }
+export const RATE_WINDOW_MAX_MS: number;
+export function pruneStamps(stamps: number[], since: number): void;
+export function windowHit(stamps: number[], limit: number, windowMs: number, now: number): WindowResult;
+export function windowRelease(stamps: number[], stamp: number): boolean;
 export function ipKey(ip: string | null | undefined): string;
 export function matchTripoPath(pathname: string): { prefix: string; route: string } | null;
 export function isTripoPath(pathname: string): boolean;
