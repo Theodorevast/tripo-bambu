@@ -27,13 +27,15 @@ import { installWorldV2 } from './scenes/worldV2';
 import { openUserWorks } from './works/userWorks';
 import { PlanetStoreWithUserWorks, UserWorksRegistry } from './works/userWorksTeams';
 import { installGenAI } from './genai/install';
+import { installCursor } from './ui/cursor';
 // 第二版的界面主题（午夜天文台：深色半透明面板、香槟金细线、衬线字）：放在所有 import 的最后，
-// 盖过 styles.css 和各模块自带的 CSS（cobrand、badge、coupons、createPlanet、walk、genai）；旧的 CSS 文件不动
+// 盖过 styles.css 和各模块自带的 CSS（cobrand、badge、coupons、createPlanet、walk、genai、cursor）；旧的 CSS 文件不动
 import './ui/theme-v2.css';
 
 // 启动：读数据 → 建 3D 世界 → 装配各个页面 → 按地址显示
 // 启动画面（index.html 的 #boot，页面一打开就有）跟着走三个阶段，3D 准备好后淡出；界面用到的几种字体从这里开始在后台预加载
 const boot = startBoot();
+installCursor(); // 鼠标光标：自己画的指针图（系统画的硬件光标）+ 弹簧跟在后面的小圈（ui/cursor.ts）；启动画面上就有
 // 用户自己的作品（上传的、用 Tripo 生成的，存在 IndexedDB，src/works/）：先把 GLB 和缩略图注册成 blob URL，再读团队、加载星球。
 // 和建 3D 世界同时进行；读不出来时当作没有，照常启动
 const userWorksReady = openUserWorks().then(async (s) => {
