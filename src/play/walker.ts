@@ -6,17 +6,27 @@ import { advance, anyTangent, damp, flatten, retangent, turnToward } from './sph
 // 重力指向球心，所以「上」就是 dir；速度、朝向都是 dir 切平面里的向量，走一步就跟着位置一起转（平行移动），
 // 不用经纬度，走过两极也不会突然转向
 
-// 作品和展台的碰撞体：沿法线竖着的圆柱，在球面上就是一个圆盘。角色中心离作品中心的球心角不能小于 minAngle
+// 作品和展台的碰撞体：沿法线竖着的圆柱，在球面上就是一个圆盘。角色中心离作品中心的球心角不能小于 minAngle。
+// 角色不是圆的（翠宝两侧的手臂比身体宽，params.ts 的 CHAR_SIDE）：圆柱在角色正侧面时再多挡 side，正前、正后不加，
+// 中间按夹角正弦的平方过渡（和椭圆的支撑距离差不到 5 毫米）
 export interface Obstacle {
   readonly center: THREE.Vector3; // 单位向量：作品在球面上的方向
   minAngle: number; // （作品半径 + 角色半径）/ 作品所在的地面半径
   cosMin: number; // cos(minAngle)：比较点积，不用每次算反余弦
+  side: number; // 圆柱在角色正侧面时多挡的球心角：（CHAR_SIDE − CHAR_RADIUS）/ 地面半径；0 = 角色当圆的
+  cosOuter: number; // cos(minAngle + side)：比它还远的，侧面也碰不到，直接跳过
 }
 
-export function setObstacle(o: Obstacle, center: THREE.Vector3, minAngle: number): void {
+export function newObstacle(): Obstacle {
+  return { center: new THREE.Vector3(), minAngle: 0, cosMin: 1, side: 0, cosOuter: 1 };
+}
+
+export function setObstacle(o: Obstacle, center: THREE.Vector3, minAngle: number, side = 0): void {
   o.center.copy(center).normalize();
   o.minAngle = minAngle;
   o.cosMin = Math.cos(minAngle);
+  o.side = side;
+  o.cosOuter = Math.cos(minAngle + side);
 }
 
 const _t = new THREE.Vector3();
@@ -30,20 +40,30 @@ export function inside(dir: THREE.Vector3, obstacles: readonly Obstacle[], count
 
 // 把单位向量 dir 推出所有圆柱：沿「作品中心 → 角色」的大圆推到圆柱边上；速度里朝圆柱里面的分量去掉，
 // 剩下沿圆柱边的分量，角色就贴着圆柱滑过去。几个圆柱挤在一起时推几轮；还出不来就退回 fallback（上一帧的位置）、速度清零。
+// facing：角色的朝向（切向单位向量）；给了才算圆柱的 side（侧着贴过去时按手臂挡）。
 // 返回这一帧有没有碰到圆柱
-export function collide(dir: THREE.Vector3, velocity: THREE.Vector3, obstacles: readonly Obstacle[], count: number, fallback: THREE.Vector3): boolean {
+export function collide(dir: THREE.Vector3, velocity: THREE.Vector3, obstacles: readonly Obstacle[], count: number, fallback: THREE.Vector3, facing: THREE.Vector3 | null = null): boolean {
   let hit = false;
   for (let pass = 0; pass < 4; pass++) {
     let moved = false;
     for (let i = 0; i < count; i++) {
       const o = obstacles[i];
       const d = dir.dot(o.center);
-      if (d <= o.cosMin + 1e-9) continue;
+      const wide = facing !== null && o.side > 0;
+      if (d <= (wide ? o.cosOuter : o.cosMin) + 1e-9) continue;
       // 作品中心指向角色的切向；正好站在作品中心上（出生点）时随便取一个方向推出去
       _t.copy(dir).addScaledVector(o.center, -d);
       if (_t.lengthSq() < 1e-14) anyTangent(o.center, _t);
       else _t.normalize();
-      const a = o.minAngle + 1e-7;
+      let a = o.minAngle;
+      if (wide) {
+        // facing 和「作品 → 角色」这条线的夹角余弦：±1 是作品在正前、正后，0 是在正侧面
+        // （_t 在作品中心的切平面里，除以 d 换到角色脚下的切平面）
+        const k = facing.dot(_t) / d;
+        a += o.side * Math.max(0, 1 - k * k);
+        if (d <= Math.cos(a) + 1e-9) continue;
+      }
+      a += 1e-7;
       const c = Math.cos(a);
       const s = Math.sin(a);
       dir.copy(o.center).multiplyScalar(c).addScaledVector(_t, s);
@@ -99,9 +119,10 @@ export class Walker {
   place(dir: THREE.Vector3, facing: THREE.Vector3, obstacles: readonly Obstacle[] = [], count = obstacles.length): void {
     this.dir.copy(dir).normalize();
     this.velocity.set(0, 0, 0);
-    collide(this.dir, this.velocity, obstacles, count, this.dir);
+    retangent(this.facing.copy(facing), this.dir); // 先定朝向：推出圆柱时侧面按手臂算
+    collide(this.dir, this.velocity, obstacles, count, this.dir, this.facing);
     this.radius = this.ground(this.dir);
-    retangent(this.facing.copy(facing), this.dir);
+    retangent(this.facing, this.dir);
     this.turned.identity();
     this.hasTarget = false;
   }
@@ -157,7 +178,7 @@ export class Walker {
     this.velocity.applyQuaternion(this.turned);
     this.facing.applyQuaternion(this.turned);
     const before = this.velocity.length();
-    this.bumped = collide(this.dir, this.velocity, obstacles, count, _start);
+    this.bumped = collide(this.dir, this.velocity, obstacles, count, _start, this.facing);
     this.impact = this.bumped ? before : 0;
     if (this.bumped) {
       _step.setFromUnitVectors(_mid, this.dir);
