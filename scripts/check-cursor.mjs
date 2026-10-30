@@ -201,7 +201,11 @@ try {
   await stopDrag();
   await page.mouse.up();
   check('画布上拖动：<html data-cursor-drag>，光标换成「拖着」那张', drag.attr && styled(drag.cursor, 'grabbing'), tail(drag.cursor));
-  check('拖动时跟随圈收紧、拉长', rDrag.state.dragging && rDrag.opacity > 0.5, `transform ${rDrag.transform}`);
+  // transform 的矩阵拆成两个方向的缩放：第一版顺着拖的方向拉长（两个数不一样），第二版不拉长、只转（两个数一样）
+  const [ma, mb, mc, md] = (rDrag.transform.match(/-?[\d.e-]+/g) ?? []).map(Number);
+  const sx = Math.hypot(ma, mb);
+  const sy = Math.hypot(mc, md);
+  check('拖动时跟随圈收紧（第一版顺着方向拉长，第二版转）', rDrag.state.dragging && rDrag.opacity > 0.5 && Math.max(sx, sy) < 0.9, `缩放 ${sx.toFixed(2)} × ${sy.toFixed(2)}，转角 ${(Math.atan2(mb, ma) * 180 / Math.PI).toFixed(0)}°`);
   const after = await page.evaluate(() => document.documentElement.hasAttribute('data-cursor-drag'));
   check('松开后去掉 data-cursor-drag', !after);
   // 拖动停下不动时的样子（光标图 + 收紧的圈）
