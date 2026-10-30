@@ -32,12 +32,16 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm test` | 单元测试（T2 最终版：61 个文件、617 项全过） |
+| `npm test` | 单元测试（加上 Durable Objects 限流后：62 个文件、636 项全过） |
 | `npm run typecheck` | 类型检查 |
 | `npm run preview` | 本地预览构建结果（4173 端口，也带 `/api/tripo`） |
 | `npm run smoke` | 冒烟测试（见第 5 节） |
 | `npm run prep` | 处理社区作品：`models-in/` → `public/models`、`public/thumbs`、`src/data/works.json` |
 | `npm run seed` | 用 `src/data/teams.template.json` + `works.json` 生成 `src/data/seed.json` |
+| `npm run cf:dev` | Cloudflare Worker 本地试跑（wrangler dev，强制模拟模式） |
+| `npm run cf:check` | 两个版本的 `wrangler deploy --dry-run`（不用登录） |
+| `npm run cf:deploy` / `cf:deploy:v2` | 构建并部署第一版 / 第二版到 Cloudflare（见 7.2） |
+| `npm run cf:tail` / `cf:tail:v2` | 看线上的实时日志 |
 
 注意：
 
@@ -76,13 +80,13 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 | `src/genai/` | Tripo 生成的前端：中转客户端、任务状态机、提示文案、图片预处理、前端模拟 |
 | `src/assets/` | 模型和缩略图地址、品牌素材地址、本机私有模型替换（`localWorks.ts`，只在开发环境生效） |
 | `src/style/` · `src/lib/` | 调色和遮罩 · 小工具 |
-| `server/tripo/` | Tripo API 中转：核心 `handler.mjs`，加 Vite 插件、Node 服务、Cloudflare Worker 三个外壳 |
+| `server/tripo/` | Tripo API 中转：核心 `handler.mjs`，加 Vite 插件、Node 服务、Cloudflare Worker 三个外壳；Worker 的限流在 `rate-limiter.mjs`（Durable Objects） |
 | `public/` | 静态资源：`models/`（社区作品 GLB）、`thumbs/`（缩略图）、`brand/`（品牌素材，见 6.4） |
 | `scripts/` | 自查（`check-*`）、冒烟（`smoke`）、截图（`shot-*`）、性能（`perf-*`）、录屏（`record-*`）、素材管线（`prep-models`、`build-seed`） |
 | `tests/` | Vitest 单元测试 |
 | `dev/` | 单独的调试页（草、天空、生机、星球、导入、缩略图、多视口）；`npm run dev` 后打开 `/dev/<名字>.html` |
 | `docs/` | 本文件、[TRIPO.md](TRIPO.md)（中转）、`superpowers/`（最初的设计文档和实现计划） |
-| `DEPLOY.md` · `.env.example` · `wrangler.toml.example` | 部署说明（中英） · 服务端环境变量模板 · Cloudflare Worker 样例 |
+| `DEPLOY.md` · `.env.example` · `wrangler.toml` | 部署说明（中英） · 服务端环境变量模板 · Cloudflare Worker 配置（两个版本都用，见 7.2） |
 
 不在仓库里（`.gitignore`）：
 
@@ -104,7 +108,7 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 
 ### 2.1 密钥只在服务端
 
-- 只从环境变量 `TRIPO_API_KEY` 读：本地写在 `.env.local`，部署时设成主机的环境变量；Cloudflare 用 `npx wrangler secret put TRIPO_API_KEY`。
+- 只从环境变量 `TRIPO_API_KEY` 读：本地写在 `.env.local`，部署时设成主机的环境变量；Cloudflare 用 `npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY`（第二版再加 `--env v2`）。
 - **不要**起名 `VITE_TRIPO_API_KEY`：`VITE_` 开头的变量会被打进前端包。Vite 插件发现这种变量会直接报错停下。
 - 错误信息和日志会抹掉密钥，以及长得像密钥的串（`tsk_…`）。单元测试检查所有响应和日志里都没有密钥。
 - 前端只认中转地址：构建时的 `VITE_TRIPO_PROXY`，默认同源。这个地址是公开的，不是密钥。
@@ -117,7 +121,7 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 | --- | --- | --- |
 | Vite 插件 | `server/tripo/vite-plugin.mjs`（已在 `vite.config.ts` 注册） | `npm run dev`、`npm run preview` |
 | 独立 Node 服务 | `server/tripo/node-server.mjs`（`npm start`） | 一个进程同时托管 `dist/` 和 `/api/tripo` |
-| Cloudflare Worker | `server/tripo/worker.mjs` + `wrangler.toml.example` | 部署到 Cloudflare |
+| Cloudflare Worker | `server/tripo/worker.mjs` + `rate-limiter.mjs` + `wrangler.toml` | 部署到 Cloudflare（见 7.2） |
 
 - Express / Koa 可以用 `server/tripo/node-adapter.mjs` 的 `createNodeMiddleware()`。
 - 接口：`GET /health`、`GET /balance`、`POST /upload`、`POST /task`、`GET /task/:id`、`GET /download/:id`、`GET /preview/:id`。出错一律返回 `{ ok: false, code, message }`。
@@ -137,6 +141,7 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 - 只开放基本参数，单个任务最多 30 积分（1 积分 = 0.01 美元）。按默认上限，一天最多约 1500 积分，约 15 美元。
 - P 系列模型一个任务 100 积分起，默认不放行（`TRIPO_MODEL_VERSIONS`）。
 - 会场共用 Wi-Fi 时大家是同一个出口 IP，要调大每 IP 的两项上限，靠每日上限兜底。
+- Cloudflare 上 `wrangler.toml` 设的是每日 30 个（两版合计，最多约 900 积分、9 美元）、每 IP 每小时 5 个。
 
 ### 2.4 模拟模式
 
@@ -171,12 +176,9 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 
 ### 2.6 上线前必须做
 
-1. **换成持久的限流存储。**
-   - 现在的计数都在内存里：
-     - Node 服务只能跑一个进程（多进程上限会翻倍），重启后清零；
-     - Worker 版的计数只在单个实例（isolate）里有效，挡不住分散到很多实例的盗刷。
-   - 中转留好了接口：给 `createHandler({ store })` 传一个实现了 `hit(key, limit, windowMs, now) → { ok, retryAfterMs, release() }` 的对象。
-   - Cloudflare 上用 **Durable Objects**（强一致，推荐）或 **KV**（最终一致，只能当软上限）；Node 多实例用 Redis 或数据库。做法见 TRIPO.md 7.3、第 13 节。
+1. **限流存储。**
+   - Cloudflare Worker：已经换成 **Durable Objects**（`server/tripo/rate-limiter.mjs`），全局一致，全站每日上限只有一个对象，两版共用。见 TRIPO.md 7.3。
+   - Node 服务的计数还在内存里：只能跑一个进程（多进程上限会翻倍），重启后清零。多实例部署要给 `createHandler({ store })` 传一个持久的 store（Redis、数据库），接口照 `rate-limiter.mjs` 的 `createDurableStore`：`hit(key, limit, windowMs, now) → { ok, retryAfterMs, release() }`，滑动窗口的规则用 `handler.mjs` 的 `windowHit` / `windowRelease`。
 2. **设好 `ALLOWED_ORIGINS`。**
    - 网页和中转同源时留空，表示只允许同源。
    - 分开部署时写网页的确切来源（如 `https://planets.example.com`，多个用逗号隔开），**不要用 `*`**。
@@ -340,7 +342,8 @@ export interface UserWorksStore {
 
 ### 6.1 中转（T1 报告）
 
-- **限流在内存里**：Node 单进程、重启清零；Worker 只在单个实例内有效。上线前必须换（见 2.6）。
+- **限流**：Cloudflare Worker 用 Durable Objects（全局一致，两版共用）；Node 服务还在内存里（单进程、重启清零），多实例部署要换（见 2.6）。
+- 本地分成两个终端分别 `wrangler dev` 第一版和 `--env v2` 时，第二版调第一版的 Durable Object 会报 `Network connection lost`；放进同一个 `wrangler dev`（多个 `-c`）就正常（TRIPO.md 7.5）。线上不受影响。
 - **没有用户鉴权和任务归属**：拿到任务 id 就能下载。`ALLOWED_ORIGINS` 挡不住 curl。
 - `/download/:id` 每次都重新查任务、拿新链接、再流式转发（Tripo 的链接几分钟就过期）。前端只在 success 后下载一次，存进 IndexedDB。
 - **待确认**（开发环境没有真实密钥，测不了；代码注释里也标了）：
@@ -432,38 +435,37 @@ TRIPO_API_KEY=… TRIPO_MAX_TASKS_PER_DAY=50 PORT=8787 npm start   # 第一次�
 | `TRIPO_MAX_DOWNLOAD_MB` | 可选 | 默认 200 |
 | `TRIPO_MOCK_MODEL_FILE` | 可选 | 模拟模式的模型，相对 `dist/`，默认 `models/tufted-armchair.glb` |
 
-### 7.2 方式二：Cloudflare Worker
+### 7.2 方式二：Cloudflare Worker（两个版本都这样部署）
+
+配置是仓库根目录的 `wrangler.toml`（以前的 `wrangler.toml.example` 换成了能直接部署的），两个版本用同一份。上线步骤按顺序写在 **TRIPO.md 7.1**，简要：
 
 ```sh
-cp wrangler.toml.example wrangler.toml   # 改 name、[vars]
-npm run build
-npx wrangler secret put TRIPO_API_KEY    # 交互输入，不落盘；本地 wrangler dev 的密钥放 .dev.vars
-npx wrangler deploy
+npx --yes wrangler@4.156.0 login
+npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY             # 第一版（community-planets）
+npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY --env v2    # 第二版（community-planets-v2）
+cd ~/Desktop/gbn && npm run cf:deploy                            # 先部署第一版（int/v6）
+cd ~/Desktop/gbn-medieval && npm run cf:deploy:v2                # 再部署第二版（v2-medieval）
+curl https://community-planets.<子域>.workers.dev/api/tripo/health   # → {"ok":true,"mock":false}
 ```
 
-Worker 有两种方案：
-
-- **方案 A（推荐）**：同一个 Worker 既托管网页又做中转，同源，`ALLOWED_ORIGINS` 留空。
-  - `wrangler.toml` 里写 `[assets] directory = "./dist"`、`binding = "ASSETS"`、`run_worker_first = ["/api/*"]`。
-- **方案 B**：Worker 只做中转，网页放在别的静态托管。
-  1. 删掉 `[assets]` 段；
-  2. `ALLOWED_ORIGINS` 写网页的地址，`MOCK_MODEL_URL` 写网页那边的完整地址；
-  3. 构建网页时设 `VITE_TRIPO_PROXY=https://<worker 地址>`。
-- 客户端 IP 用 Cloudflare 填的 `CF-Connecting-IP`，所以不需要 `TRUST_PROXY`。
-- **限流必须换成 Durable Objects 或 KV 才能上线**（见 2.6）。
+- 同一个 Worker 既托管 `dist/` 又做中转（方案 A，同源，不用设 `ALLOWED_ORIGINS`）：`[assets]` 里 `run_worker_first = ["/api/*"]`，其余请求直接走静态资源。网页用 # 路由，不需要 SPA 回退。
+- 限流在 Durable Objects（绑定 `RATE_LIMITER` → 类 `RateLimiter`，SQLite 后端）：全局一致，全站每日上限只有一个对象。第二版绑到第一版的类（`script_name`），**两版共用一份计数和每日上限**，所以要先部署第一版。真实模式缺这个绑定时接口直接拒绝。详见 TRIPO.md 7.3。
+- 客户端 IP 用 `CF-Connecting-IP`，不需要 `TRUST_PROXY`。
+- 套餐：建议付费版（5 美元 / 月），原因和 Cloudflare 的各项限制见 TRIPO.md 7.4。
+- 不改代码切模拟模式：`echo 1 | npx --yes wrangler@4.156.0 secret put TRIPO_MOCK`（`0` 切回，第二版加 `--env v2`）；改每日上限在控制台改变量（下次部署会恢复成 `wrangler.toml` 的值）。见 TRIPO.md 7.1 第 5 步。
+- 方案 B（网页放在别处，Worker 只做中转）见 TRIPO.md 7.2。
+- npm 脚本：`cf:dev`（本地，强制模拟）、`cf:check`（两个版本 dry-run）、`cf:deploy`、`cf:deploy:v2`、`cf:tail`、`cf:tail:v2`，都用固定版本的 `npx --yes wrangler@4.156.0`（wrangler 没装进项目）。
 
 环境变量：
 
 | 变量 | 设在哪 | 说明 |
 | --- | --- | --- |
-| `TRIPO_API_KEY` | `wrangler secret put`（本地 `.dev.vars`） | **必填**，不要写进 `wrangler.toml` |
-| `TRIPO_MOCK` | `[vars]` | 第一次部署设 `"1"`，走通后删掉 |
-| `ALLOWED_ORIGINS` | `[vars]` | 方案 A 留空；方案 B 必填 |
-| `TRIPO_MAX_TASKS_PER_DAY`、`TRIPO_MAX_TASKS_PER_IP_PER_HOUR` | `[vars]` | 样例里是 `"50"`、`"5"` |
-| `TRIPO_MAX_UPLOADS_PER_IP_PER_HOUR`、`TRIPO_MAX_REQUESTS_PER_IP_PER_MINUTE`、`TRIPO_MAX_IMAGE_MB` | `[vars]` | 可选，默认同上表 |
-| `TRIPO_MODEL_VERSIONS`、`TRIPO_DEFAULT_MODEL_VERSION`、`TRIPO_API_BASE`、`TRIPO_DOWNLOAD_HOSTS`、`TRIPO_MAX_DOWNLOAD_MB` | `[vars]` | 可选，同 Node |
-| `MOCK_MODEL_URL` / `MOCK_PREVIEW_URL` | `[vars]` | 模拟模式的模型和预览图地址；样例是 `/models/tufted-armchair.glb`、`/thumbs/tufted-armchair.webp` |
-| `ASSETS` | `[assets]` 的 binding | 方案 A 的静态资源绑定，不是变量 |
+| `TRIPO_API_KEY` | `wrangler secret put`（两个 Worker 各一次） | **必填**，不要写进 `wrangler.toml` |
+| `TRIPO_MOCK` | `wrangler secret put TRIPO_MOCK`（`1` / `0`） | 临时切模拟模式；不写进 `[vars]`，免得和它重名 |
+| `TRIPO_MAX_TASKS_PER_DAY`、`TRIPO_MAX_TASKS_PER_IP_PER_HOUR` | `[vars]`（第二版在 `[env.v2.vars]`） | 公开演示 `"30"`（两版合计）、`"5"`；两处设成一样 |
+| `MOCK_MODEL_URL` / `MOCK_PREVIEW_URL` | 同上 | `/models/tufted-armchair.glb`、`/thumbs/tufted-armchair.webp`（从 `dist/` 里取） |
+| `TRIPO_MAX_UPLOADS_PER_IP_PER_HOUR`、`TRIPO_MAX_REQUESTS_PER_IP_PER_MINUTE`、`TRIPO_MAX_IMAGE_MB`、`ALLOWED_ORIGINS`、`TRIPO_MODEL_VERSIONS`、`TRIPO_DEFAULT_MODEL_VERSION`、`TRIPO_API_BASE`、`TRIPO_DOWNLOAD_HOSTS`、`TRIPO_MAX_DOWNLOAD_MB` | 要改时加进两处 `[vars]` | 默认值同上表 |
+| `ASSETS`、`RATE_LIMITER` | `[assets]`、`[[durable_objects.bindings]]` | 绑定，不是变量 |
 | `VITE_TRIPO_PROXY` | 构建网页时的环境变量 | 只在方案 B（网页和中转分开）时设；是公开地址，会进前端包 |
 
 ### 7.3 和 `.env.example` 对过
@@ -474,16 +476,17 @@ Worker 有两种方案：
   - `ALLOWED_ORIGINS`、`TRIPO_MODEL_VERSIONS`、`TRIPO_DEFAULT_MODEL_VERSION`、`TRIPO_API_BASE`、`TRIPO_DOWNLOAD_HOSTS`、`TRIPO_MAX_DOWNLOAD_MB`；
   - `TRIPO_MOCK_MODEL_FILE`、`MOCK_MODEL_URL`、`MOCK_PREVIEW_URL`；
   - `PORT`、`HOST`、`STATIC_DIR`、`TRUST_PROXY`。
-- 和 `server/tripo/*.mjs` 实际读取的变量一一对应（代码另外只读 Worker 的 `ASSETS` 绑定），也和 TRIPO.md 第 8 节的表一致。
+- 和 `server/tripo/*.mjs` 实际读取的变量一一对应（代码另外只读 Worker 的 `ASSETS`、`RATE_LIMITER` 绑定），也和 TRIPO.md 第 8 节的表一致。
 - 分属情况：
   - 只有 Node 用：`PORT`、`HOST`、`STATIC_DIR`、`TRUST_PROXY`、`TRIPO_MOCK_MODEL_FILE`；
   - 只有 Worker 用：`MOCK_MODEL_URL`、`MOCK_PREVIEW_URL`；
   - 其余两边都用。
-- `VITE_TRIPO_PROXY` 不在 `.env.example` 里：它是前端构建变量，不是服务端变量，说明在 TRIPO.md 7.2 和 `wrangler.toml.example`。
+- `VITE_TRIPO_PROXY` 不在 `.env.example` 里：它是前端构建变量，不是服务端变量，说明在 TRIPO.md 7.2 和 `wrangler.toml` 末尾的注释。
 
 ### 7.4 上线前检查清单
 
-- [ ] 限流换成持久存储（Durable Objects / KV / Redis），每日上限是全局的
+- [x] Cloudflare：限流在 Durable Objects，每日上限全局一致、两版共用（Node 多实例要自己换成 Redis 之类）
+- [ ] Cloudflare 套餐：建议付费版（TRIPO.md 7.4）；两个 Worker 都设了 `TRIPO_API_KEY`，health 都是 `mock:false`
 - [ ] `ALLOWED_ORIGINS` 设对（同源留空，分开部署写确切来源，不用 `*`）；有反向代理时设 `TRUST_PROXY`
 - [ ] 密钥只在服务端（`wrangler secret` 或主机环境变量），没有任何 `VITE_*KEY`
 - [ ] 先 `TRIPO_MOCK=1` 走通，再用真实密钥只做一个 10 积分的任务验证

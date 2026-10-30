@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | Vite 插件 | `server/tripo/vite-plugin.mjs`（已在 `vite.config.ts` 注册） | `npm run dev`、`npm run preview` |
 | 独立 Node 服务 | `server/tripo/node-server.mjs`（`npm start`） | 一个进程同时托管 `dist/` 和 `/api/tripo`，直接部署 |
-| Cloudflare Worker | `server/tripo/worker.mjs` + `wrangler.toml.example` | 部署到 Cloudflare |
+| Cloudflare Worker | `server/tripo/worker.mjs` + `rate-limiter.mjs` + `wrangler.toml` | 部署到 Cloudflare（第 7 节，两个版本都用） |
 
 > **Tripo API v2 在 2026-10-31 16:00 UTC（北京时间 11 月 1 日 0 点）停用**，所以这里接的是 **v3**。v3 的接口、字段和从 v2 换过来改了什么，见文末「Tripo API v3 调研结果」。
 
@@ -123,7 +123,7 @@ const glb = await (await fetch(new URL(state.modelUrl, base || location.href))).
 
 1. 在 Tripo 开放平台控制台创建 API 密钥（格式 `tsk_…`）。
 2. **本地**：在仓库根目录建 `.env.local`（已在 `.gitignore` 里），写一行 `TRIPO_API_KEY=…`。变量模板见 `.env.example`（只有变量名和说明）。
-3. **部署**：在主机 / 平台的环境变量里设 `TRIPO_API_KEY`；Cloudflare 用 `npx wrangler secret put TRIPO_API_KEY`。
+3. **部署**：在主机 / 平台的环境变量里设 `TRIPO_API_KEY`；Cloudflare 用 `npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY`（第二版再加 `--env v2`）。
 4. **不要**起名 `VITE_TRIPO_API_KEY`：`VITE_` 开头的变量会被 Vite 打进前端包。Vite 插件发现这种变量会直接报错停下。
 5. 密钥不在聊天、工单、截图里传。怀疑泄露就在控制台作废重建。
 
@@ -138,6 +138,7 @@ const glb = await (await fetch(new URL(state.modelUrl, base || location.href))).
 | `npm run dev` | 开发服务器，带 `/api/tripo` |
 | `npm run build && npm run preview` | 本地预览构建结果，同样带 `/api/tripo` |
 | `npm run build && npm start` | 独立 Node 服务（默认 `http://0.0.0.0:8787`），和线上一样 |
+| `npm run cf:dev` | Cloudflare Worker 本地试跑（wrangler dev，强制模拟模式，见 7.5） |
 | `npm test` | 单元测试（含 `tests/tripoProxy.test.ts`，fetch 打桩，不发真实请求） |
 
 强制模拟模式：Git Bash 写 `TRIPO_MOCK=1 npm run dev`；PowerShell 写 `$env:TRIPO_MOCK=1; npm run dev`；cmd 写 `set TRIPO_MOCK=1&& npm run dev`。
@@ -190,44 +191,170 @@ server {
 
 ---
 
-## 7. 部署：Cloudflare Worker
+## 7. 部署：Cloudflare Worker（第一版、第二版都用这个）
 
-`server/tripo/worker.mjs` 把 `/api/tripo/*` 交给中转，其余请求交给静态资源。客户端 IP 用 Cloudflare 填的 `CF-Connecting-IP`（伪造不了）。
+一个 Worker 既托管网页（`dist/`，Workers Static Assets）又做中转：`/api/*` 先进 Worker（`server/tripo/worker.mjs`），其余请求直接走静态资源、不进 Worker。限流计数在 Durable Objects 里（`server/tripo/rate-limiter.mjs`），所有实例、所有机房看到的是同一份计数。客户端 IP 用 Cloudflare 填的 `CF-Connecting-IP`（伪造不了）。
 
-### 7.1 方案 A：同一个 Worker 既托管网页又做中转（推荐）
+配置就是仓库根目录的 `wrangler.toml`，两个版本用同一份，不用按分支改：
+
+| | 第一版 | 第二版 |
+| --- | --- | --- |
+| 分支 / 文件夹 | `int/v6`（→ `main`）/ `Desktop\gbn` | `v2-medieval` / `Desktop\gbn-medieval` |
+| 部署命令 | `npm run cf:deploy` | `npm run cf:deploy:v2`（`--env v2`） |
+| Worker 名 | `community-planets` | `community-planets-v2` |
+| 限流计数 | 自己的 `RateLimiter`（Durable Object） | 绑到第一版的 `RateLimiter`（`script_name`），**两版共用一份计数和每日上限** |
+
+wrangler 没装进项目（不动 `package-lock.json`），统一用固定版本 `npx --yes wrangler@4.156.0`，`npm run cf:*` 脚本里也是它。以前的 `wrangler.toml.example` 换成了能直接部署的 `wrangler.toml`：第二版的 `[env.v2]` 要和第一版写在同一份配置里，两个文件夹各自复制、各自改的话很快就对不上。
+
+### 7.1 上线步骤（按顺序做）
+
+在 Git Bash 里跑（PowerShell 也行，第 2 步的管道写法除外）。两个文件夹先拿到最新代码：第一版在 `int/v6`；第二版的 `v2-medieval` 先合并含这次改动的 `int/v6`。依赖没装过就先 `npm ci`。
+
+**1. 登录 Cloudflare**（一台电脑做一次）
 
 ```sh
-cp wrangler.toml.example wrangler.toml          # 按需改 name、[vars]
-npm run build                                   # dist/ 作为静态资源（Workers Static Assets）上传
-npx wrangler secret put TRIPO_API_KEY           # 交互输入密钥，不落盘
-npx wrangler deploy
+npx --yes wrangler@4.156.0 login      # 浏览器里点授权
+npx --yes wrangler@4.156.0 whoami     # 能看到自己的账号就对了
 ```
 
-`wrangler.toml` 里 `[assets] directory = "./dist"`、`binding = "ASSETS"`、`run_worker_first = ["/api/*"]`：`/api/*` 先进 Worker，其余直接走静态资源。同源，`ALLOWED_ORIGINS` 留空。第一次部署建议在 `[vars]` 里加 `TRIPO_MOCK = "1"` 走通再删。本地调试用 `npx wrangler dev`，密钥放 `.dev.vars`（已在 `.gitignore` 里）。
+**2. 给两个 Worker 各设一次密钥**（存在 Cloudflare，不进仓库；设一次以后每次部署都在）
+
+```sh
+cd ~/Desktop/gbn
+npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY             # 第一版
+npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY --env v2    # 第二版
+```
+
+提示 `Enter a secret value` 时粘贴密钥（不回显）。Worker 还不存在时 wrangler 会问要不要先建一个空的，回答 y。
+
+Git Bash 的默认窗口（mintty）里这个提示有时出不来、一直卡着。可以改成从自己的 `.env.local` 管道传进去，密钥不会显示在屏幕上：
+
+```sh
+sed -n 's/^TRIPO_API_KEY=//p' .env.local | tr -d "\r\n\"'" | npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY
+sed -n 's/^TRIPO_API_KEY=//p' .env.local | tr -d "\r\n\"'" | npx --yes wrangler@4.156.0 secret put TRIPO_API_KEY --env v2
+```
+
+**3. 构建并部署：先第一版，再第二版**（第二版用的是第一版的 `RateLimiter`，第一版没部署时第二版找不到它）
+
+```sh
+cd ~/Desktop/gbn
+npm run cf:deploy        # = npm run build，再 npx --yes wrangler@4.156.0 deploy --env=
+
+cd ~/Desktop/gbn-medieval
+npm run cf:deploy:v2     # = npm run build，再 npx --yes wrangler@4.156.0 deploy --env v2
+```
+
+账号第一次部署到 workers.dev 时，wrangler 会问要不要注册 workers.dev 子域：选 y，起个名字（也可以先在控制台 Workers & Pages 里注册）。部署成功会打印网址。以后改了代码，在对应的文件夹重跑同一条命令。
+
+**4. 确认是真实模式**
+
+浏览器打开下面的地址，或者用 curl：
+
+```sh
+curl https://community-planets.<子域>.workers.dev/api/tripo/health       # → {"ok":true,"mock":false}
+curl https://community-planets-v2.<子域>.workers.dev/api/tripo/health    # → {"ok":true,"mock":false}
+```
+
+- `"mock":true`：这个 Worker 没设上密钥（用 `npx --yes wrangler@4.156.0 secret list` 查，第二版加 `--env v2`），或者设了 `TRIPO_MOCK=1`（见第 5 步）。
+- 500 且提到 `RATE_LIMITER`：Durable Objects 绑定没配上，用仓库里的 `wrangler.toml` 重新部署。
+- 第二版 500「服务端出错」：多半是第一版还没部署或部署失败；`npm run cf:tail:v2` 能看到具体错误。
+
+然后打开首页，在生成页用最便宜的方式试一个任务（文字生成、不带贴图，10 积分）。
+
+**5. 不改代码：切模拟模式、改每日上限**
+
+- 切到模拟模式（马上生效，以后重新部署也保持）：
+  ```sh
+  echo 1 | npx --yes wrangler@4.156.0 secret put TRIPO_MOCK              # 第一版
+  echo 1 | npx --yes wrangler@4.156.0 secret put TRIPO_MOCK --env v2     # 第二版
+  ```
+  切回真实模式：同样的命令把 `1` 换成 `0`（或者 `secret delete TRIPO_MOCK`，会问一次确认）。health 的 `mock` 跟着变。
+- 改每日上限、应急关掉生成：控制台 Workers & Pages → `community-planets` → Settings → Variables and Secrets，改 `TRIPO_MAX_TASKS_PER_DAY`（`0` = 关掉生成）→ Deploy，马上生效。两版共用计数，`community-planets-v2` 也改成一样的。注意：下次 `npm run cf:deploy` 会恢复成 `wrangler.toml` 里的值（wrangler 部署时会先删掉控制台改的变量）。
+- 只是这次部署换个值，也可以不改文件：`npm run build && npx --yes wrangler@4.156.0 deploy --env= --var TRIPO_MAX_TASKS_PER_DAY:10`（第二版换成 `--env v2`）。长期改就改 `wrangler.toml` 里的两处 `[vars]`。
+
+**6. 看日志**
+
+```sh
+npm run cf:tail        # 第一版，实时：每个请求、真实模式提示、出错信息（没有密钥）
+npm run cf:tail:v2     # 第二版
+```
+
+`wrangler.toml` 打开了 `[observability]`，控制台里这个 Worker 的 Logs 页还能查最近几天的日志（免费版每天 20 万条、留 3 天）。
+
+**7. 网址**
+
+| | 网页 | 接口自检 |
+| --- | --- | --- |
+| 第一版 | `https://community-planets.<子域>.workers.dev` | `https://community-planets.<子域>.workers.dev/api/tripo/health` |
+| 第二版 | `https://community-planets-v2.<子域>.workers.dev` | `https://community-planets-v2.<子域>.workers.dev/api/tripo/health` |
+
+`<子域>` 是账号的 workers.dev 子域（控制台 Workers & Pages 页能看到，部署时 wrangler 也会打印完整网址）。要用自己的域名：控制台 → 这个 Worker → Settings → Domains & Routes。
 
 ### 7.2 方案 B：Worker 只做中转，网页放在别处
 
-1. `wrangler.toml` 删掉 `[assets]` 段，`ALLOWED_ORIGINS` 写网页的地址（如 `https://planets.example.com`，多个用逗号隔开）；`MOCK_MODEL_URL` 写网页那边的完整地址。
+1. `wrangler.toml` 删掉 `[assets]` 段，`[vars]` 加 `ALLOWED_ORIGINS`（网页的地址，如 `https://planets.example.com`，多个用逗号隔开）；`MOCK_MODEL_URL` 写网页那边的完整地址。Durable Objects 的绑定保留。
 2. 构建网页时设 `VITE_TRIPO_PROXY=https://community-planets.<子域>.workers.dev`（这是公开地址，不是密钥，可以进前端包），前端所有 `/api/tripo` 请求都以它为前缀；`modelUrl` / `previewUrl` 用它来解析（见第 2 节）。
 3. `dist/` 传到任意静态托管（见仓库根目录 `DEPLOY.md`）。
 
 跨域时：上传（multipart）和 GET 不需要预检；建任务（JSON）会先发 `OPTIONS` 预检，中转会回 204。canvas 要读预览图时 `<img crossOrigin="anonymous">`。
 
-### 7.3 Worker 里的限流只在单个实例内有效
+### 7.3 限流：Durable Objects
 
-Worker 版的计数存在内存里，**只在单个 Worker 实例（isolate）里有效**。Cloudflare 会在很多机房同时跑很多实例、随时回收，所以每 IP 限流和每日上限只挡得住落在同一实例里的连续请求，挡不住分散的盗刷。真正上线要换掉存储，中转留了接口：
+- 绑定 `RATE_LIMITER` → 类 `RateLimiter`（`server/tripo/rate-limiter.mjs`），SQLite 后端（`[[migrations]]` 里的 `new_sqlite_classes`；Workers 免费版只能用这种）。
+- 每个限流 key 一个对象：`task:<ip>`、`upload:<ip>`、`req:<ip>` 各一个。**全站每日上限 `task:all` 全球只有一个对象**，所以是强一致的，换 IP、换机房、换实例都绕不过去。
+- 滑动窗口的规则和 Node / Vite 用的内存版是同一份代码（`handler.mjs` 的 `windowHit` / `windowRelease` / `pruneStamps`），包括 Tripo 明确拒绝时退回名额。
+- 一次限流检查 = 一次 RPC 往返：每个接口请求查一次 `req:<ip>`；建任务再查 `task:<ip>`、`task:all`；上传再查 `upload:<ip>`。静态资源的请求不进 Worker，也不碰 Durable Objects。退名额在响应发出后用 `ctx.waitUntil` 做完。
+- 计数存在对象自己的存储里：对象被回收、重新部署、`wrangler dev` 重启都不丢。一天以前的时间戳由对象的闹钟清掉，什么都不剩就整个删掉，不占存储。
+- 第二版的绑定写了 `script_name = "community-planets"`，用的是第一版的对象（第二版自己不建：`[env.v2]` 里 `migrations = []`）。两版各自按自己的 `[vars]` 判断，所以两处上限要设成一样；不一样时，上限大的那一版能一直用到它自己的上限。
+- 出错就关门：调 Durable Objects 失败（比如免费额度用完）时中转回 500，不调 Tripo。真实模式缺了 `RATE_LIMITER` 绑定时所有接口直接回 500（提示检查 `wrangler.toml`）；只有模拟模式没有绑定时才退回单实例的内存计数（单元测试、只看页面时）。
+- 想让第二版单独计数：删掉 `[[env.v2.durable_objects.bindings]]` 里的 `script_name`，再把 `[env.v2]` 里的 `migrations = []` 删掉（继承顶层的 `[[migrations]]`）。
+- Cloudflare 现在推荐用 `exports` 代替 `migrations` 声明 Durable Object 类。两种都支持；部署过 `migrations` 的以后可以换成 `exports`，反过来不行，所以这里先用 `migrations`。
 
-```js
-// createHandler({ store }) 的 store 只要实现这一个方法（可以是异步的）
-// hit(key, limit, windowMs, now) → { ok, retryAfterMs, release() }
-//   key 形如 task:<ip>、task:all（每日上限）、upload:<ip>、req:<ip>；超限时 ok=false，retryAfterMs 是还要等多久
+最后的兜底照旧：Tripo 账户里只充演示需要的积分（见第 9 节）。
+
+### 7.4 Cloudflare 的限制、价格和该用哪个套餐
+
+2026-10-30 查的官方文档：[Workers 限制](https://developers.cloudflare.com/workers/platform/limits/)、[Workers 价格](https://developers.cloudflare.com/workers/platform/pricing/)、[Durable Objects 价格](https://developers.cloudflare.com/durable-objects/platform/pricing/)、[Durable Objects 限制](https://developers.cloudflare.com/durable-objects/platform/limits/)、[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)。
+
+| | Workers 免费版 | Workers 付费版（每月最低 5 美元） |
+| --- | --- | --- |
+| Worker 请求 | 每天 10 万次（UTC 0 点重置，超了进 Worker 的请求回错误 1027） | 每月 1000 万次，超出每百万 0.30 美元 |
+| 每个请求的 CPU 时间 | **10 ms** | 默认 30 秒，最多 5 分钟；每月含 3000 万 CPU 毫秒，超出每百万 0.02 美元 |
+| 内存 | 每个实例 128 MB | 同左 |
+| 子请求（fetch、调 Durable Objects） | 每个请求 50 个（调 Cloudflare 自己的服务 1000 个） | 1 万个 |
+| 静态资源 | 免费、不限次数；每个版本 2 万个文件，单个文件 25 MiB | 免费、不限次数；10 万个文件，单个 25 MiB |
+| 请求体 | 看域名的套餐：免费 / Pro 100 MB | 同左 |
+| Durable Objects 请求 | 每天 10 万次 | 每月 100 万次，超出每百万 0.15 美元 |
+| Durable Objects 时长 | 每天 13,000 GB-s | 每月 40 万 GB-s，超出每百万 GB-s 12.50 美元 |
+| SQLite 读 / 写 | 每天 500 万 / 10 万行 | 每月 250 亿 / 5000 万行，写超出每百万行 1 美元 |
+| SQLite 存储 | 共 5 GB | 每月 5 GB，超出每 GB 0.20 美元 |
+| Workers Logs | 每天 20 万条，留 3 天 | 每月 2000 万条，留 7 天（2026-12-01 起改按 Cloudflare Observability 计价） |
+
+免费版任何一项每日额度用完，当天这类操作就报错，到 UTC 0 点（北京时间 8 点）恢复。中转出错就关门：Worker 或 Durable Objects 的额度用完时生成接口不可用，但不会多花 Tripo 的钱；静态网页照常打开。
+
+我们的用量（CPU 和内存是估计，本地 wrangler dev 不限也不报 CPU 时间）：
+
+- 静态资源（网页、模型、缩略图）不进 Worker，不算请求；只有不存在的路径会进 Worker，回 404。构建结果 97 个文件、共 78 MB，最大的 `models/military-tank.glb` 6.2 MiB，离 2 万个文件、25 MiB 都很远（第二版的 `public/` 和第一版一样）。
+- 每个 `/api/tripo/*` 请求：1 次 Worker 请求 + 1 次 Durable Objects 请求 + 1 行写入（`req:<ip>`）；建任务再多 2 次请求、2 行写入。
+- 一次生成大约 40–70 个接口请求（建任务、每 2–3 秒轮询一次、下载、预览）。每日上限 30 个时一天大约 2000–5000 个请求，免费版的几项每日额度都只用到几个百分点。
+- 内存：下载是流式的，40–45 MB 的模型不进内存；上传最多 10 MB，要整个读进来解析表单，估计占 20–30 MB。
+- CPU：查任务、建任务、转发下载估计都在 1–2 毫秒以内（等 Durable Objects 和 Tripo 的时间不算 CPU）。**上传是例外**：要在 Worker 里解析最多 10 MB 的 multipart 表单再转发，图大时有可能超过免费版的 10 ms，超了这个请求失败（错误 1102）。
+
+**建议用付费版（5 美元 / 月）**。公开演示时：（1）大图上传不会撞 10 ms 的 CPU 上限；（2）没有每天 10 万次的硬上限，有人刷接口时不会让当天剩下的时间里所有人都用不了生成；（3）Durable Objects 的额度按月算、超了按量计费，不会当天中途报错。按上面的用量，付费版包含的额度就够，每月就是 5 美元。只给团队内部看、上传的图不大时，免费版也能跑。
+
+### 7.5 本地试跑（wrangler dev）
+
+```sh
+npm run cf:dev     # 构建，再 wrangler dev（http://localhost:8787），强制模拟模式（--var TRIPO_MOCK:1）
+npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不用登录）
 ```
 
-- **Durable Objects（推荐）**：强一致。每个 key 一个对象（`env.COUNTER.idFromName(key)`），对象里存时间戳数组，逻辑照抄 `handler.mjs` 里的 `createMemoryStore`。因为 store 要用到 `env`，在 `worker.mjs` 里按请求创建：`createHandler({ store: doStore(env), ... })`。
-- **KV**：最终一致，同一时刻的并发请求可能都读到旧计数，上限会被超过一些；当软上限够用。
-- Cloudflare 自带的 Rate Limiting 绑定可以替代每 IP 的限流，但它按机房计数，同样不适合做全局每日上限。
+- 一定用 `npm run cf:dev`，不要直接 `wrangler dev`：wrangler dev 会读文件夹里的 `.env.local`，里面有真实密钥时就是真实模式，会花额度。`--var TRIPO_MOCK:1` 比 `.env.local` 优先（试过）。
+- Durable Objects 在本地也是真的（存在 `.wrangler/state`），重启 `wrangler dev` 后计数还在；想清零就删掉 `.wrangler/state`。
+- 本地可以自己带 `CF-Connecting-IP` 头（`curl -H 'CF-Connecting-IP: 198.51.100.1' …`），方便测每个 IP 的限流。
+- 本地想看第二版用第一版的计数：要在同一个 `wrangler dev` 里同时跑两个 Worker（多个 `-c`，第二版的配置放前面）。分成两个终端各跑一个时，第二版调第一版的对象会报 `Network connection lost`（本机用 wrangler 4.156.0 试过）。
 
-不论哪种，都要保留最后的兜底：Tripo 账户里只充演示需要的积分（见第 9 节）。
+本地端到端（模拟模式）试过：health 回 `mock:true`；同一 IP 第 6 个任务回 429 `rate_limited`；每日上限到 30 个回 `daily_cap`；重启 `wrangler dev` 后计数还在；首页、模型、缩略图、JS 都能打开；模拟生成 9 秒左右走完，下载的模型和 `dist/models/tufted-armchair.glb` 一致、带 `Content-Length`；第二版（和第一版在同一个 `wrangler dev` 里）看到的是第一版的计数。
 
 ---
 
@@ -262,7 +389,7 @@ Worker 版的计数存在内存里，**只在单个 Worker 实例（isolate）�
 ## 9. 安全设计
 
 - **密钥**：只从环境变量读；中转发出的所有文字（错误信息、日志）都会把密钥本身和长得像密钥的串（`tsk_…`）抹掉；单元测试检查所有响应和日志里都没有密钥；启动提示只说「有没有密钥」。
-- **防盗刷**：每 IP 限流、全站每日上限、上传限流、总请求限流；先占名额再调 Tripo，Tripo 明确拒绝时退回名额，结果不明（超时、5xx）时不退（请求可能已经扣费）。
+- **防盗刷**：每 IP 限流、全站每日上限、上传限流、总请求限流（Cloudflare 上计数在 Durable Objects，全局一致）；先占名额再调 Tripo，Tripo 明确拒绝时退回名额，结果不明（超时、5xx）时不退（请求可能已经扣费）。
 - **跨域白名单不是鉴权**：它只能挡住别的网站在浏览器里调我们的接口，挡不住 curl。真正的保护是上面的限流和每日上限；**最后的兜底是 Tripo 账户余额**——测试账号只充演示需要的积分，演示结束后作废密钥。
 - **参数白名单**：只放行三种任务和固定字段；token 只能是字母、数字、`_`、`-`，所以塞不进 URL（避免让 Tripo 去拉任意地址），也拼不出别的路径。
 - **下载不是通用代理**：前端只给任务 id，中转自己向 Tripo 查结果链接；链接必须是 https、默认端口、主机在白名单里、不带账号密码；跳转逐跳检查；不把密钥发给存储主机；有大小上限；返回时强制 `Content-Type`、加 `X-Content-Type-Options: nosniff` 和 `Content-Security-Policy: sandbox`。
@@ -422,3 +549,5 @@ Worker 版的计数存在内存里，**只在单个 Worker 实例（isolate）�
 - 下载只放行 Tripo 主机：别的主机、后缀伪装、http、带账号密码、非默认端口、内网地址、跳到白名单外都拒绝且不去请求，不把密钥发给存储主机；
 - 错误码映射、状态映射、跨域白名单、模拟模式的时间线和出错开关、Worker 外壳的路由和按 `CF-Connecting-IP` 限流；
 - 最后检查所有用例的响应和日志里都没有出现密钥。
+
+`tests/rateLimiter.test.ts`（假的 Durable Objects 绑定）覆盖 Cloudflare 上的限流：滑动窗口和内存版逐步一致、重启后计数还在、清理闹钟、一次检查一次往返、退名额走 `waitUntil`、可重试的错误只重试一次、两版共用每日上限、静态资源不碰 Durable Objects、真实模式缺绑定时拒绝、模拟模式的模型不套限大小的流。
