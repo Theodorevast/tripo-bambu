@@ -93,7 +93,7 @@ const measure = () => page.evaluate(async (noSide) => {
   }
   const bodyAt = (h) => (body ? body.bands[Math.min(9, Math.max(0, Math.floor((h / CHAR_HEIGHT) * 10)))] : CHAR_RADIUS);
   // 漫游现在用的碰撞体（全部：作品，和第二版的道具）
-  const all = window.__walk.colliders ? window.__walk.colliders() : window.__walk.obstacles().map((o) => ({ ...o, kind: 'work' }));
+  const all = [...window.__walk.obstacles().map((o) => ({ ...o, kind: 'work' })), ...(window.__walk.blockers?.() ?? [])];
   const obstacles = all.map((o) => {
     const ob = { center: new V(), minAngle: 0, cosMin: 1 };
     setObstacle(ob, new V(...o.dir), o.minAngle, noSide ? 0 : o.side ?? 0);

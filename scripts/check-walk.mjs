@@ -224,6 +224,63 @@ const sideGap = await bodyGap(target.id);
 check('撞上作品停在作品表面：正对着停下时翠宝身体和作品的网格之间 −1～12 厘米，侧着贴在旁边时手臂也不插进去（> −1.5 厘米）',
   headGap > -0.01 && headGap < 0.12 && sideGap > -0.015, `正对 ${(headGap * 100).toFixed(1)} 厘米，侧着 ${(sideGap * 100).toFixed(1)} 厘米`);
 
+// —— 3c. 第二版的点缀道具也挡路：正对着灯柱、立石走过去，停在它的圆柱外面；拱门只挡两根柱子，从门洞中间走得过去 ——
+// 道具的圆柱从 __walk.blockers() 取（立石两个圆、拱门四个圆，同一样东西的圆挨着排）。起点挑离别的圆柱最远的方向（立石常常两三块挨着）
+const blockers = await page.evaluate(() => window.__walk.blockers?.() ?? []);
+if (blockers.length) {
+  const others = (skip) => [...obstacles, ...blockers.filter((b) => !skip.includes(b))];
+  // 离 center 3 米、朝着它走的起点：8 个方向里，起点和半路离别的圆柱最远的那个
+  const approachFrom = (center, skip) => {
+    const n = toward(center, [0, 1, 0]);
+    const e = norm([center[1] * n[2] - center[2] * n[1], center[2] * n[0] - center[0] * n[2], center[0] * n[1] - center[1] * n[0]]);
+    let best = null;
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      const t = norm(add(scale(n, Math.cos(a)), e, Math.sin(a)));
+      const room = Math.min(...[3, 1.5].map((m) => Math.min(...others(skip).map((o) => angle(turn(center, t, m / R), o.dir) - o.minAngle))));
+      if (!best || room > best.room) best = { from: turn(center, t, 3 / R), room };
+    }
+    return best.from;
+  };
+  const runInto = async (kind) => {
+    const first = blockers.findIndex((b) => b.kind === kind);
+    if (first < 0) return null;
+    const own = kind === 'menhir' ? blockers.slice(first, first + 2) : [blockers[first]];
+    const center = norm(own.reduce((s, b) => add(s, b.dir), [0, 0, 0]));
+    const from = approachFrom(center, own);
+    await page.evaluate(([d, h]) => window.__walk.teleport(d, h), [from, toward(from, center)]);
+    await page.waitForTimeout(300);
+    const st = traceStats(await walkTrace('w', 2200));
+    const end = await state();
+    const gap = Math.min(...own.map((b) => (angle(end.dir, b.dir) - b.minAngle) * end.radius));
+    return { gap, minClear: st.minClear };
+  };
+  for (const [kind, name] of [['lamp', '灯柱'], ['menhir', '立石']]) {
+    const r = await runInto(kind);
+    if (!r) continue;
+    check(`正对着${name}走过去：停在它的圆柱外面（没穿进任何圆柱，停在边外 0～0.3 米）`, r.minClear > -1e-3 && r.gap > -1e-3 && r.gap < 0.3,
+      `最近 ${r.minClear.toFixed(4)}，停在边外 ${r.gap.toFixed(3)} 米`);
+  }
+  // 拱门：四个圆依次是左柱前后、右柱前后。从门洞正前方 3 米朝门洞中心走 2.6 秒，应该穿过门洞到另一边
+  const arch = blockers.filter((b) => b.kind === 'arch');
+  if (arch.length === 4) {
+    const L = norm(add(arch[0].dir, arch[1].dir));
+    const Rt = norm(add(arch[2].dir, arch[3].dir));
+    const C = norm(add(L, Rt));
+    const span = add(Rt, L, -1);
+    const F = norm([C[1] * span[2] - C[2] * span[1], C[2] * span[0] - C[0] * span[2], C[0] * span[1] - C[1] * span[0]]);
+    const from = turn(C, F, 3 / R);
+    await page.evaluate(([d, h]) => window.__walk.teleport(d, h), [from, toward(from, C)]);
+    await page.waitForTimeout(300);
+    const st = traceStats(await walkTrace('w', 2600));
+    const end = await state();
+    const through = (dot(end.dir, F) - dot(C, F)) * R;
+    const width = (angle(L, Rt) * R - 2 * (arch[0].minAngle * R) - 2 * (arch[0].side * R));
+    check('拱门只挡两根柱子：从门洞中间走得过去，到了另一边，一路没穿进柱子', through < -1 && st.minClear > -1e-3,
+      `走到门洞另一边 ${(-through).toFixed(2)} 米，最近 ${st.minClear.toFixed(4)}；门洞里翠宝（连手臂）左右还能挪 ${(width * 100).toFixed(0)} 厘米`);
+  }
+}
+
 // —— 4. 走到星球背面、翻过北极：镜头的上方向逐帧连续 ——
 await startFrames();
 // 11 秒能走多远（球心角）：按速度曲线 v(t) = V(1 − e^(−10 t)) 积分，再留 15% 余量

@@ -13,6 +13,7 @@ import type { PlanetEntry, World } from './world';
 // - 每帧看 Dressing 现在铺的是哪颗星球（转场的云层全遮住时它才换）：换了就按那颗星球重摆，挂到它的 decor 组下；
 //   那颗星球的遮罩变了（作品挪了、土路改道）也重摆
 // - 和石头一样避开作品四周的花园（星球视图里花园会放大）
+// - 漫游时挡路：每次重摆一起算好挡路的圆柱（PropsField.blockers），main.ts 把 PropsField 交给 WalkMode.blockers
 
 export function installPropsV2(world: World): PropsField {
   const field = new PropsField();
@@ -50,7 +51,7 @@ export function installPropsV2(world: World): PropsField {
       stage: new THREE.Vector3(...STAGE_VIEW_DIR),
       rockColor: new THREE.Color(PRESETS[recipe.preset].ground.rock),
     };
-    const items = field.fill(info);
+    const items = field.fill(info, planet); // 挡路的圆柱一起算好（漫游时 walkMode 按 owner 认星球）
     if (field.group.parent !== planet.decor) planet.decor.add(field.group);
     // 灯柱脚下的暖光（ground.ts 的 LAMP_POOLS）：灯柱底座的位置（星球本地坐标）
     setLampPools(items.filter((it) => it.kind === 'lamp').map((it) => ({ pos: it.dir.clone().multiplyScalar(planet.height(it.dir.x, it.dir.y, it.dir.z)), k: 1 })));
@@ -64,6 +65,7 @@ export function installPropsV2(world: World): PropsField {
     bound = e;
     if (!e) {
       field.group.removeFromParent();
+      field.release();
       setLampPools([]);
       return;
     }

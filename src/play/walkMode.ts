@@ -36,6 +36,15 @@ const _feet = new THREE.Vector3();
 const _feetVel = new THREE.Vector3();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
+// 作品以外挡路的东西（第二版的点缀道具：planet/props-v2.ts 的 PropsField，main.ts 交给 WalkMode.blockers）。
+// 圆柱和作品一样：dir 是星球本地坐标的单位向量，radius 是米。owner 是这些东西摆在哪颗星球上（PlanetObject），
+// 不是脚下这颗就不算；blockerVersion 每次重摆都变，漫游看它变了才重新取，平时每帧只比一个数
+export interface WalkBlockers {
+  readonly blockers: ReadonlyArray<{ readonly kind: string; readonly dir: THREE.Vector3; readonly radius: number }>;
+  readonly blockerVersion: number;
+  readonly owner: object | null;
+}
+
 interface Drag {
   id: number;
   x: number; // 按下的位置
@@ -58,6 +67,7 @@ export class WalkMode {
   onStep: (() => void) | null = null; // 每帧走完、镜头摆好之后调：自查脚本记轨迹用
   onClick: ((x: number, y: number) => boolean) | null = null; // 点了画面先问它（fun/coupons：点到翠宝、券），返回 true 就不走过去
   onInteract: (() => void) | null = null; // 附近没有作品时按 E（fun/coupons：翠宝吐券）
+  blockers: WalkBlockers | null = null; // 作品以外挡路的东西（第二版的点缀道具）
   private readonly app: App;
   private readonly screen: PlanetScreen;
   private entry: PlanetEntry | null = null;
@@ -71,10 +81,14 @@ export class WalkMode {
   private inputY = 0;
   private drag: Drag | null = null;
   private dragging = false; // 正在拖动镜头：暂停自动转到身后
+  // 碰撞圆柱：前 workCount 个是作品（和 obstacleWorks 一一对应），后面接着点缀道具（种类记在 blockerKinds）
   private readonly obstacles: Obstacle[] = [];
   private readonly obstacleWorks: PlacedWork[] = [];
+  private readonly blockerKinds: string[] = [];
+  private workCount = 0;
   private obstacleCount = 0;
   private placedSize = -1;
+  private blockerVersion = -2; // 上次取的点缀道具是哪一版（-1：没有）
   private near: PlacedWork | null = null; // 显示标签、按 E 打开的那件作品
   private readonly label = el('div', { className: 'float-label walk-label' });
   private readonly hint = el('div', { className: 'walk-hint mono' });
@@ -131,9 +145,9 @@ export class WalkMode {
     return this.orbitPos;
   }
 
-  // 当前的碰撞圆柱（自查脚本用）：作品和它的圆柱一一对应
-  get colliders(): { works: readonly PlacedWork[]; obstacles: readonly Obstacle[]; count: number } {
-    return { works: this.obstacleWorks, obstacles: this.obstacles, count: this.obstacleCount };
+  // 当前的碰撞圆柱（自查脚本用）：前 works.length 个和作品一一对应，后面是点缀道具（种类在 kinds 里）
+  get colliders(): { works: readonly PlacedWork[]; kinds: readonly string[]; obstacles: readonly Obstacle[]; count: number } {
+    return { works: this.obstacleWorks, kinds: this.blockerKinds, obstacles: this.obstacles, count: this.obstacleCount };
   }
 
   // 开页后在后台准备角色：加载模型，贴图逐帧上传、着色器后台编译。第一次点 Walk 时不卡
@@ -331,22 +345,37 @@ export class WalkMode {
   // 作品的碰撞圆柱：半径取展台和模型水平半径里大的那个（和编辑条的 workRect 一样）乘缩放，再加角色半径；
   // 作品在角色侧面时再多挡 CHAR_SIDE − CHAR_RADIUS（手臂）。
   // 作品列表只在进入、瞬移、数量变了时重新取（只在这时遍历 Map；漫游时编辑器关着，摆放不会变）；
-  // 半径每帧从作品上读：模型加载完、展台变大，马上就挡得住
+  // 半径每帧从作品上读：模型加载完、展台变大，马上就挡得住。
+  // 点缀道具接在作品后面，和作品同一套圆柱（手臂也算）：只在它们重摆过（blockerVersion 变了）时重新取，半径不变、不用每帧算
   private syncObstacles(force: boolean): void {
     const placed = this.screen.view.placed;
-    if (force || placed.size !== this.placedSize) {
+    const planet = this.entry?.planet ?? null;
+    const extra = this.blockers && planet && this.blockers.owner === planet ? this.blockers : null;
+    const version = extra ? extra.blockerVersion : -1;
+    if (force || placed.size !== this.placedSize || version !== this.blockerVersion) {
       this.placedSize = placed.size;
+      this.blockerVersion = version;
       let i = 0;
       for (const pw of placed.values()) {
         this.obstacleWorks[i] = pw;
         this.obstacles[i] ??= newObstacle();
         i++;
       }
-      this.obstacleCount = i;
+      this.workCount = i;
       this.obstacleWorks.length = i;
+      this.blockerKinds.length = 0;
+      if (extra && planet) {
+        for (const b of extra.blockers) {
+          const g = planet.height(b.dir.x, b.dir.y, b.dir.z);
+          setObstacle((this.obstacles[i] ??= newObstacle()), b.dir, (b.radius + CHAR_RADIUS) / g, (CHAR_SIDE - CHAR_RADIUS) / g);
+          this.blockerKinds.push(b.kind);
+          i++;
+        }
+      }
+      this.obstacleCount = i;
       if (this.near && !this.obstacleWorks.includes(this.near)) this.near = null;
     }
-    for (let i = 0; i < this.obstacleCount; i++) {
+    for (let i = 0; i < this.workCount; i++) {
       const pw = this.obstacleWorks[i];
       const radius = Math.max(pw.plinth.scale.x, pw.model?.footprint ?? 0) * pw.placement.scale;
       const g = pw.root.position.length();
@@ -359,7 +388,7 @@ export class WalkMode {
     let best: PlacedWork | null = null;
     let bestDistance = Infinity;
     const dir = this.walker.dir;
-    for (let i = 0; i < this.obstacleCount; i++) {
+    for (let i = 0; i < this.workCount; i++) {
       const pw = this.obstacleWorks[i];
       const d = Math.acos(THREE.MathUtils.clamp(dir.dot(this.obstacles[i].center), -1, 1)) * this.walker.radius;
       const range = NEAR_DISTANCE * Math.max(1, pw.placement.scale) * (pw === this.near ? 1.1 : 1);
