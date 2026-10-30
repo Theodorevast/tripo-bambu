@@ -64,6 +64,12 @@ const ring = (page) => page.evaluate(() => {
   const st = getComputedStyle(r);
   return { opacity: Number(st.opacity), transform: st.transform, typed: r.attributeStyleMap.get('transform') instanceof CSSTransformValue, state: window.__cursorFx?.state() };
 });
+// 等跟随层收住（rAF 停掉），返回等了多少毫秒；第二版的星尘飘得久，固定等一会儿不够
+const settle = async (page, timeout = 3000) => {
+  const t0 = Date.now();
+  await page.waitForFunction(() => !window.__cursorFx.state().running, null, { timeout, polling: 50 }).catch(() => {});
+  return Date.now() - t0;
+};
 const shot = async (page, name, cx, cy, w = 260, h = 180) => {
   const clip = { x: Math.max(0, Math.round(cx - w / 2)), y: Math.max(0, Math.round(cy - h / 2)), width: w, height: h };
   await page.screenshot({ path: `${OUT}/${name}.png`, clip });
@@ -116,7 +122,8 @@ try {
   // —— 1. 平时：画布空地上，自己的箭头；跟随层停下后收进指针尖、淡掉，rAF 停掉 ——
   await page.mouse.move(spot.x - 40, spot.y - 30);
   await page.mouse.move(spot.x, spot.y, { steps: 6 });
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(300);
+  await settle(page);
   const cDefault = await cursorAt(page, spot.x, spot.y);
   check('平时：画布上是自己的箭头（image-set 1x/2x，后备 default）', styled(cDefault, 'default'), cDefault.slice(0, 90));
   check('平时：html 上也是', styled(await page.evaluate(() => getComputedStyle(document.documentElement).cursor), 'default'));
@@ -138,9 +145,9 @@ try {
   check('移动中跟随层露出来、rAF 在跑', !!moving && moving.opacity > 0.15 && moving.state.running, `opacity ${moving?.opacity}`);
   const motes = await page.evaluate(() => [...document.querySelectorAll('.cursor-fx-mote')].filter((m) => Number(getComputedStyle(m).opacity) > 0).length);
   await page.mouse.move(spot.x, spot.y, { steps: 3 });
-  await page.waitForTimeout(900);
+  const waited = await settle(page);
   const settled = await ring(page);
-  check('停下 0.9 秒后又收住', settled.opacity === 0 && !settled.state.running, `opacity ${settled.opacity}，mode ${settled.state.mode}，移动中露出的小点 ${motes} 颗`);
+  check('停下后又收住（淡掉、rAF 停掉）', settled.opacity === 0 && !settled.state.running, `停下后 ${waited} ms 收住，opacity ${settled.opacity}，移动中露出的小点 ${motes} 颗`);
 
   // —— 3. 能点：按钮（Visit your planet） ——
   const btn = await page.evaluate(() => {
@@ -149,7 +156,8 @@ try {
   });
   await page.mouse.move(btn.x - 30, btn.y + 40);
   await page.mouse.move(btn.x, btn.y, { steps: 8 });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(300);
+  await settle(page);
   const cBtn = await cursorAt(page, btn.x, btn.y);
   const rBtn = await ring(page);
   check('按钮上：自己的「能点」光标', styled(cBtn, 'pointer'), cBtn.slice(0, 80));
@@ -224,7 +232,8 @@ try {
   await page.waitForTimeout(250);
   await stop2();
   await page.mouse.move(-20, H / 2);
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(300);
+  await settle(page);
   const out = await ring(page);
   check('指针移出窗口：认出移出（away）、跟随层淡掉', out.state.away && out.opacity === 0, `away ${out.state.away}，opacity ${out.opacity}`);
   await page.mouse.move(btn.x, btn.y, { steps: 4 });

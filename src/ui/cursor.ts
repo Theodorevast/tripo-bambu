@@ -300,6 +300,7 @@ class Follower {
     spring(s, SCALE, T_SCALE, OMEGA, POP, DT);
     s[ALPHA_TAU] = s[T_ALPHA] > s[ALPHA] ? 0.05 : 0.14;
     approach(s, ALPHA, T_ALPHA, ALPHA_TAU, DT);
+    if (s[T_ALPHA] === 0 && s[ALPHA] < 0.01) s[ALPHA] = 0; // 已经看不见了：直接归零（小点还在飘时圈不再拖着一点点亮）
     // 顺着速度方向拉长（拖动时多一些），或者（第二版）走多远转多少
     s[T_STRETCH] = f.stretch * Math.min(1, speed / 1600) * (drag ? 1 : 0.35);
     approach(s, STRETCH, T_STRETCH, STRETCH_TAU, DT);
