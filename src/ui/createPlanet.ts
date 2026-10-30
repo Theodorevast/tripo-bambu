@@ -38,7 +38,7 @@ const NAME_IDEAS = ['Star Sprouts', 'Pebble Party', 'Moonlit Makers', 'Tiny Orbi
 declare global {
   interface Window {
     __create?: {
-      state(): { open: boolean; step: string; launching: boolean; launch: LaunchState; previewReady: boolean; twinReady: boolean };
+      state(): { open: boolean; step: string; launching: boolean; launch: LaunchState; previewReady: boolean; twinReady: boolean; usedTwin: boolean };
       preview(): PlanetPreview['stats'];
     };
   }
@@ -81,6 +81,7 @@ export class CreatePlanet implements CreatorLayer {
   private readonly preview: PlanetPreview;
   private readonly burst = new BurstFx(); // 星球冲出来时的云、光、冲击环、星星（createPlanetBurst.ts）
   private readonly warmer: LaunchWarmer; // 样子定下来以后，主画面的渲染器里先把新星球独有的着色器备好（Launch 时不卡）
+  private usedTwin = false; // 上一次 Launch 是不是直接用了预热好的替身（自查脚本看）
   private burstReady: Promise<void> | null = null;
   // 第一步
   private readonly nameInput = el('input', { className: 'cp-input', id: 'cp-name', type: 'text', maxLength: LIMITS.nameMax, autocomplete: 'off', spellcheck: false, placeholder: 'e.g. Star Sprouts' });
@@ -128,7 +129,7 @@ export class CreatePlanet implements CreatorLayer {
     app.root.append(this.node);
     this.syncCreateButton();
     window.__create = {
-      state: () => ({ open: this.open_, step: STEPS[this.step].id, launching: this.launching, launch: { ...this.launchState }, previewReady: this.preview.ready, twinReady: this.warmer.ready }),
+      state: () => ({ open: this.open_, step: STEPS[this.step].id, launching: this.launching, launch: { ...this.launchState }, previewReady: this.preview.ready, twinReady: this.warmer.ready, usedTwin: this.usedTwin }),
       preview: () => ({ ...this.preview.stats, gpu: [...this.preview.stats.gpu], twin: { ...this.warmer.stats } }),
     };
   }
@@ -774,14 +775,19 @@ export class CreatePlanet implements CreatorLayer {
     removeEventListener('keydown', this.onKey);
     this.preview.freeze();
     await (this.burstReady ??= this.burst.prepare(this.app.world).catch(() => {}));
+    // 窗口开始收起：预览马上停画（舷窗里留着最后一帧，跟着往下沉、淡掉），不和主画面的 Launch 抢 GPU（v2-ui）
+    this.preview.stop();
     const collapse = this.collapse();
     // 替身一般进第三步时就备好了；还在编（很快就点了 Launch）就先等它编完（最多 1.5 秒，窗口照常收起），
     // 真的星球再加进来：两边的着色器不挤在一起编。镜头等窗口收得差不多、预览手上正在编的也编完了才起飞
     // （WebGL2 上预览的链接会和主画面抢 GPU 进程）
     const collapsed = worldDelay(this.app.world, reducedMotion() ? 0 : 0.36);
     await Promise.race([this.warmer.warm(this.look()), new Promise((r) => setTimeout(r, 1500))]);
+    // 替身编好了、配方和这个团队完全一样：整颗交给 World.addPlanet 直接用（Launch 那一刻不用再新建一颗）；对不上就照旧新建（v2-ui）
+    const prebuilt = this.app.world.planets.has(created.id) ? null : this.warmer.take(created);
+    this.usedTwin = prebuilt !== null;
     const hold = Promise.all([collapsed, this.preview.settled()]);
-    const rise = riseIntoGalaxy(this.app, created, reducedMotion() ? null : this.burst, this.launchState, hold);
+    const rise = riseIntoGalaxy(this.app, created, reducedMotion() ? null : this.burst, this.launchState, hold, prebuilt);
     this.syncCreateButton();
     await collapse;
     this.node.hidden = true;

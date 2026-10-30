@@ -231,6 +231,7 @@ describe('LocalStore：新建的团队', () => {
 // —— App：#/create 打开造星窗口，新团队加入 ——
 function fakeWorld() {
   const added: string[] = [];
+  const prebuilts: unknown[] = [];
   const yours: Array<[string | null, boolean]> = [];
   const world = {
     renderer: { domElement: new FakeElement('canvas') },
@@ -244,10 +245,10 @@ function fakeWorld() {
     director: { peekIntro: () => false },
     focus: () => Promise.resolve(null),
     unfocus: () => Promise.resolve(),
-    addPlanet: (t: Team) => { added.push(t.id); },
+    addPlanet: (t: Team, prebuilt?: unknown) => { added.push(t.id); prebuilts.push(prebuilt); },
     setYou: (id: string | null, glide = false) => { yours.push([id, glide]); },
   } as unknown as World;
-  return { world, added, yours };
+  return { world, added, yours, prebuilts };
 }
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const team = (id: string, extra: Partial<Team> = {}): Team => ({
@@ -262,12 +263,12 @@ describe('App：#/create 和新团队加入', () => {
   function setup(hash: string, teams = [team('a'), team('b')]) {
     const location = new FakeLocation(hash);
     location.install();
-    const { world, added, yours } = fakeWorld();
+    const { world, added, yours, prebuilts } = fakeWorld();
     const app = new App(world, new FakeElement('div') as unknown as HTMLElement, {} as PlanetStore, { teamId: 'a', memberId: 'you' }, teams);
     const log: string[] = [];
     app.creator = { open: () => log.push('open'), close: () => log.push('close') };
     app.planetLayer = { enter: () => {}, leave: () => {} };
-    return { app, location, world, added, yours, log };
+    return { app, location, world, added, yours, log, prebuilts };
   }
 
   it('#/create 打开窗口；去别的地址时关掉', async () => {
@@ -297,6 +298,15 @@ describe('App：#/create 和新团队加入', () => {
     expect(yours).toEqual([['star', true]]);
     app.addTeam(team('other'));
     expect(app.you.teamId).toBe('star'); // 别人的团队加进来不改你的星球
+  });
+
+  it('addTeam 的 prebuilt（造星窗口预热好的星球）原样交给 World.addPlanet；不给时是 undefined（World 照旧新建）', async () => {
+    const { app, prebuilts } = setup('#/');
+    await app.start();
+    const twin = { group: {} };
+    app.addTeam(team('star', { createdByYou: true }), false, twin as never);
+    app.addTeam(team('other'));
+    expect(prebuilts).toEqual([twin, undefined]);
   });
 
   it('开页时团队列表里有你建的团队：它就是你的团队', () => {
