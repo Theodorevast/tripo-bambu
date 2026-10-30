@@ -1,6 +1,7 @@
 // 处理社区作品：压缩 GLB（默认不减面）、截缩略图、写 works.json 和处理报告
 // 默认读 models-in/（GLB + works.csv），输出到 public/models、public/thumbs、src/data/works.json
 // 测试时可用环境变量换目录：PREP_IN、PREP_OUT、WORKS_OUT
+// 最后给每件出星球视图用的轻量模型（public/models/lod/，只减面、贴图不动，scripts/lib/lod.mjs）
 // 可选减面：npm run prep -- --max-tris=300000，面数超过这个值的模型按比例减到它附近（spec 6 默认不减面，用户同意后才开）
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -10,6 +11,7 @@ import sharp from 'sharp';
 import { parseCsv, slugify } from '../src/lib/csv.ts';
 import { launch, startServer } from './lib/browser.mjs';
 import { countTris, createIO } from './lib/gltf.mjs';
+import { makeLods } from './lib/lod.mjs';
 
 const IN = process.env.PREP_IN ?? 'models-in';
 const OUT = process.env.PREP_OUT ?? 'public';
@@ -138,6 +140,8 @@ if (works.length) {
 }
 
 writeFileSync(WORKS, `${JSON.stringify(works, null, 2)}\n`);
+// 星球视图用的 LOD 跟着作品重出（换了模型、名字不变时 LOD 一起换；不再需要的删掉）
+if (works.length) await makeLods(path.join(OUT, 'models'));
 writeFileSync(path.join(IN, 'prep-report.json'), `${JSON.stringify(report, null, 2)}\n`);
 const flagged = report.filter((r) => r.flag);
 console.log(`works.json：${works.length} 件；需要留意 ${flagged.length} 件${flagged.length ? `（${flagged.map((r) => r.file).join('、')}）` : ''}`);
