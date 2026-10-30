@@ -36,7 +36,8 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 | `npm run typecheck` | 类型检查 |
 | `npm run preview` | 本地预览构建结果（4173 端口，也带 `/api/tripo`） |
 | `npm run smoke` | 冒烟测试（见第 5 节） |
-| `npm run prep` | 处理社区作品：`models-in/` → `public/models`、`public/thumbs`、`src/data/works.json` |
+| `npm run prep` | 处理社区作品：`models-in/` → `public/models`、`public/thumbs`、`src/data/works.json`，最后自动跑 `npm run lods` |
+| `npm run lods` | 出星球视图用的轻量模型 `public/models/lod/`（只减面、贴图不动，见第 8 节）；换了模型以后跑，结果提交进仓库 |
 | `npm run seed` | 用 `src/data/teams.template.json` + `works.json` 生成 `src/data/seed.json` |
 | `npm run cf:dev` | Cloudflare Worker 本地试跑（wrangler dev，强制模拟模式） |
 | `npm run cf:check` | 两个版本的 `wrangler deploy --dry-run`（不用登录） |
@@ -331,7 +332,8 @@ export interface UserWorksStore {
 其余脚本：
 
 - `perf-*.mjs` 测性能，`shot*.mjs` 截图，`record-*.mjs` 录屏（`record-genai.mjs` 同样默认模拟模式）；
-- `prep-models.mjs`、`build-seed.mjs` 是素材管线；`inspect-glb.mjs`、`make-*fixture.mjs` 是辅助工具；
+- `prep-models.mjs`、`make-lods.mjs`、`build-seed.mjs` 是素材管线；`inspect-glb.mjs`、`make-*fixture.mjs` 是辅助工具；
+- `perf-load.mjs` 量加载速度（线上或本机限速，见第 8 节），`shot-lod.mjs` 截 LOD 和原文件的对比图；
 - `dev/*.check.mjs` 查对应的调试页。
 
 单元测试 `npm test` 不发真实请求：`tests/tripoProxy.test.ts` 把 fetch 打桩成假的 Tripo 上游。
@@ -493,3 +495,101 @@ curl https://community-planets.<子域>.workers.dev/api/tripo/health   # → {"o
 - [ ] Tripo 账户只充演示需要的积分，演示结束后作废密钥
 - [ ] HTTPS
 - [ ] 计划接入登录、任务归属、用户作品和团队的后端（第 3、4 节）
+
+---
+
+## 8. 加载速度
+
+2026-10-30 量的。「刚进去的时候模型加载有点慢」，原因和改法如下。
+
+### 8.1 慢在哪
+
+用 `scripts/perf-load.mjs` 量线上第一版，从开发机（国内，经本机代理）走真实网络：
+
+| | 改之前 |
+| --- | --- |
+| 冷启动：HTML 到 | 3.2 秒（新连接的 TLS 约 1 秒，首字节 1.4–3.2 秒） |
+| 冷启动：星系可以操作（`window.__ready`） | 12.4 秒 |
+| 点「Visit your planet」→ 第一件 / 全部作品出场 | +47 秒 / +53 秒 |
+| 进星球要下载 | 4 个 GLB，共 14.14 MB，约 0.29 MB/s |
+| 热启动（第二次打开）：星系可以操作 / 作品全部出场 | 5.9 秒 / +1.7 秒；每个文件还要再问一次服务器，每次 0.3–0.65 秒 |
+
+结论：
+
+- **主要是模型的字节数**。「你的星球」4 件作品各 30 万面，几何占文件的四分之三。
+- **4 件同时下载**。带宽平分，每件都要等到快结束才到，所以作品是一起很晚才出场。
+- 启动的 JS 是次要的：压缩后 0.48 MB，其中 `createPlanetTune-*.js` 1.3 MB（gzip 后 0.39 MB）开场就加载，它其实是 three.js 和共用代码，只是被按其中一个模块命名。首页的翠宝 GLB 1.1 MB，不挡启动。
+- 每次打开都要重新问服务器：Cloudflare 默认给所有文件 `Cache-Control: public, max-age=0, must-revalidate`，连带指纹的 `/assets/*` 也一样。
+- Cloudflare 不压缩 `model/gltf-binary`（不在它默认压缩的类型里）。这些 meshopt 压过的 GLB 再 gzip / brotli 也只能省 12–16%，不值得为此让 Worker 经手。
+
+本机可以复现（`npm run build` 后 `THROTTLE=3000/300 node scripts/perf-load.mjs`：vite preview，响应头按 Cloudflare 的规则模拟，Chrome 限速 3 Mbps、往返 300 ms）。改之前：作品 +36.6 秒才开始出场，+40.3 秒全部出场。
+
+### 8.2 改了什么
+
+1. **星球视图用轻量模型（LOD）**。
+   - 文件在 `public/models/lod/`，用 `npm run lods`（`scripts/lib/lod.mjs`）出，**只减面，贴图逐字节不动**。单元测试 `tests/loadSpeed.test.ts` 会检查贴图和原文件一样。
+   - 误差上限是模型最长边的 0.1%（作品 1.6 米，就是 1.6 毫米）。星球视图镜头最近时（离星球中心 1.35 个半径，离作品约 10 米，DPR 2），这个误差不到 0.4 像素。漫游时镜头贴着作品，也只有 1 像素左右。
+   - 21 件里出了 17 件。剩下 4 件本来就不重，或者 UV 接缝太碎、减不下去：坦克、扶手椅、恐龙骨架、南瓜女孩。这 4 件直接用原文件。
+   - 「你的星球」从 14.14 MB 降到 6.36 MB；全部作品在星球视图要下载的量从 73.1 MB 降到 40.5 MB。
+   - 用在主画面（星球视图、编辑、漫游）和 Museum 的卡片预览。大图查看器（Museum 里点开一件）仍然用原文件。地址带 `?lod=0` 时全部用原文件，对比、排查用。
+   - 对比图用 `node scripts/shot-lod.mjs` 截，存在 `shots/lod-ab/`。
+   - LOD 文件**提交进仓库**，约 30 MB。这样构建、部署不用再跑减面，也就不依赖 WASM 版本，结果可以审、可以复现。换了模型时 `npm run prep` 会自动重出。
+2. **下载排队，最显眼的先下**（`src/assets/models.ts` 的 `Downloads`）。
+   - 主画面现在要用的模型一次只下一件。
+   - 进星球时按作品多正对镜头排序（`planetView.ts` 的 `byVisibility`）。
+   - 预取（指着星球、首页空闲时）只在没有别的下载时才下，急件不等它。
+   - 解析照旧一次一件，进星球的转场帧不受影响。
+3. **首页空闲时预取「你的星球」**（`main.ts`）。
+   - 星系可以操作、主线程空下来以后，在后台下载「你的星球」的作品。
+   - 只下载、不解析，主线程上不做事。
+   - 指着星球时的预取照旧。
+4. **长缓存**。
+   - `public/_headers` 会被 Workers Static Assets 读取（[文档](https://developers.cloudflare.com/workers/static-assets/headers/)，最多 100 条规则）。`/assets/*`、`/models/*`、`/thumbs/*`、`/brand/*` 都设成 `public, max-age=31536000, immutable`。
+   - 模型、缩略图、品牌素材的名字不带指纹，换了文件名字也不变。所以代码里的地址都带 `?v=<内容指纹>`：由 `vite.config.ts` 的 `assetVersions` 插件在构建时算，`src/assets/versions.ts` 读。Workers Static Assets 找文件时不看查询串。
+   - `index.html` 仍然每次都问，新版本一部署就生效。
+   - `npm start` 的 Node 服务不读 `_headers`，那边的缓存规则不变（见 7.1）。
+
+改之后，本机同样限速（3 Mbps / 300 ms），首页停 3 秒再点：
+
+| | 改之前 | 改之后 |
+| --- | --- | --- |
+| 点 Visit → 第一件作品出场 | +36.6 秒 | **+2.0 秒** |
+| 点 Visit → 全部出场 | +40.3 秒 | **+16.4 秒** |
+| 点 Visit 以后还要下载 | 14.14 MB | 4.83 MB（另有 1.54 MB 在首页那 3 秒里预取好了） |
+| 热启动 | 每个文件都再问一次，每次约 0.34 秒 | 全部从磁盘缓存读，0 字节，不问服务器 |
+| 冷启动到星系可以操作 | 7.5 秒 | 7.5 秒（没变，见 8.4） |
+
+### 8.3 国内访问（建议，没有做）
+
+国内连 Cloudflare 本身就慢。没有企业版加 ICP 备案，Cloudflare 在国内没有节点；`workers.dev` 也没有为国内优化，有时还会被干扰。
+
+开发机实测：
+
+- 请求被送到洛杉矶（`CF-RAY …-LAX`）。
+- 新连接光 TLS 就要约 1 秒，首字节 1.4–3.2 秒；连接复用以后往返约 0.3 秒（HTTP/3）。
+- 吞吐约 0.24–0.3 MB/s。
+
+按 0.3 MB/s 算，改完以后：
+
+- 「你的星球」的 LOD 6.4 MB，约 21 秒（首页预取能先下掉一部分）；
+- 全部作品的星球视图文件 40.5 MB，约 2.3 分钟；
+- 大图查看器的原文件每件 3–6 MB，约 10–20 秒。
+
+**建议把 `/models/`、`/thumbs/` 放到国内的 CDN**（阿里云 OSS + CDN、腾讯云 COS + CDN、七牛等，合计约 105 MB）。
+
+- 需要一个备案过的域名。国内 CDN 往返通常几十毫秒、几 MB/s 以上，「你的星球」一两秒就能下完。
+- 代码只要改一处：`src/assets/versions.ts` 的 `assetUrl()`，给 `models/`、`thumbs/` 换一个构建时的地址前缀，比如新加 `VITE_ASSET_BASE`。
+- 把 `dist/models`、`dist/thumbs` 传上去。
+- 桶和 CDN 要设：
+  - CORS（`Access-Control-Allow-Origin` 写网页的来源，GLTFLoader 用 fetch 跨域读）；
+  - `Cache-Control: public, max-age=31536000, immutable`；
+  - **CDN 的缓存键要包含查询串**（`?v=`），否则换了文件要手动刷新 CDN。
+- 更彻底的做法是整站放国内（HTML、JS 也是）。冷启动时 HTML 3.2 秒加 JS 3.7 秒，大部分是连 Cloudflare 的开销。海外用户留在 Cloudflare，按地区解析到两个入口。
+
+### 8.4 还可以做的（这次没做）
+
+- **大图查看器第一次打开一件作品时要下载原文件**（3–6 MB）。以前星球视图已经下过原文件，查看器只要问一下服务器；现在星球视图用的是 LOD。
+  - 现在的缓解：在星球上点了作品（作品卡弹出来），或者打开了 Museum 的网格，就在后台低优先级下载原文件（`ModelLibrary.warmFull`）。字节留在 HTTP 缓存里，查看器打开时直接读。
+  - 更好的做法：查看器先显示 LOD（缓存里有），原文件下好再换上。
+- **冷启动的启动画面**要等 110 KB 的 CSS 到了才画出来。线上 HTML 3.2 秒就到了，CSS 和 JS 一起要到 6.9 秒。把启动画面的那几条 CSS 内联进 `index.html`，国内冷启动能早约 3.7 秒看到画面。
+- 首页的翠宝 GLB 1.1 MB，和 JS 抢开场的带宽。

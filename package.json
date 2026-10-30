@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p .",
     "seed": "node scripts/build-seed.mjs",
     "prep": "node scripts/prep-models.mjs",
+    "lods": "node scripts/make-lods.mjs",
     "shot": "node scripts/shot.mjs",
     "smoke": "node scripts/smoke.mjs",
     "cf:dev": "npm run build && npx --yes wrangler@4.156.0 dev --env= --var TRIPO_MOCK:1",

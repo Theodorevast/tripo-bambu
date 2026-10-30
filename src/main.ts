@@ -120,3 +120,10 @@ await boot.phase('land');
 boot.reveal(); // 不等：云散开和开场飞行同时进行
 await app.start();
 void walk.preload(); // 角色模型在后台加载、预编译：第一次点 Walk 时不卡
+// 首页可以操作、主线程空下来以后，在后台下载「你的星球」上的作品（首页最常点的就是 Visit your planet）：只下载、不解析，
+// 排在别的下载后面、一次一件，不碰主线程；点下去时字节多半已经在了。直接打开别的页面（地址带 #/t/...）时不预取
+const idle = (fn: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(fn, 1000));
+idle(() => {
+  const team = app.teams.find((t) => t.id === app.you.teamId);
+  if (team && !app.currentTeam) planetScreen.view.prefetch(team);
+});
