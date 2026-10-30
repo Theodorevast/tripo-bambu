@@ -32,6 +32,8 @@ declare global {
   }
 }
 
+const GENERATED_MAX_BYTES = 200 * 1024 * 1024; // Tripo 生成的模型导入时的大小上限（和中转的下载上限一样）
+
 // 当前用户的 @handle（不带 @）：作品加到别的团队时用它显示作者
 function youHandle(app: App): string | undefined {
   return app.teams.flatMap((t) => t.members).find((m) => m.id === app.you.memberId)?.handle;
@@ -50,9 +52,10 @@ export function installGenAI(app: App, editor: Editor, registry: UserWorksRegist
     editor.syncTeam(next);
   };
 
-  // 生成成功：下载好的 GLB 走同一条导入管线，截缩略图，存进本地，加进发起任务的那个团队
+  // 生成成功：下载好的 GLB 走同一条导入管线，截缩略图，存进本地，加进发起任务的那个团队。
+  // 大小上限比用户上传的 50 MB 宽（中转下载的上限是 200 MB）：v3 带 PBR 贴图的结果可能超过 50 MB，导入时贴图会缩到 2048
   const finish = async (job: GenJob, glb: Blob): Promise<{ workId: string }> => {
-    const result = await importModelFile(glb, `${job.title || 'model'}.glb`);
+    const result = await importModelFile(glb, `${job.title || 'model'}.glb`, { options: { maxBytes: GENERATED_MAX_BYTES } });
     const thumb = await thumbnailOf(result.glb);
     const record: UserWork = {
       id: newUserWorkId(),

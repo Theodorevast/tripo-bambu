@@ -35,11 +35,16 @@ const until = (fn, arg = null, timeout = 90000) => page.waitForFunction(fn, arg,
 const pause = (ms) => page.waitForTimeout(ms);
 const state = () => page.evaluate(() => window.__genai.state());
 
-// 进入摆放后点星球摆上
+// 进入摆放后点星球摆上。每件作品一个位置，都在星球朝着镜头的那一面（避开中间的池塘、在作品栏上面），录出来看得清；
+// 那一点被界面挡住、或者没摆上时再试后面几个备用的位置。dy 是从星球中心往下（正）、往上（负）的像素
+const SPOTS = [[-230, -70], [230, -60], [-170, 70], [190, 80]];
+const SPARE = [[-150, -230], [150, -230], [0, -260], [-60, -180]];
+let spot = 0;
 async function place(before) {
   const center = await page.evaluate((id) => window.__app.planetScreenPos(id), you.id);
-  for (const [dx, dy] of [[-150, 230], [150, 230], [0, 260], [-60, 180], [90, 300], [0, 200]]) {
-    const at = { x: center.x + dx, y: center.y - dy };
+  const mine = SPOTS[spot++ % SPOTS.length];
+  for (const [dx, dy] of [mine, ...SPARE]) {
+    const at = { x: center.x + dx, y: center.y + dy };
     if (!(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id === 'stage', at))) continue;
     await page.mouse.move(at.x - 40, at.y - 30);
     await page.mouse.move(at.x, at.y, { steps: 12 });
@@ -153,7 +158,7 @@ try {
   await shot('multiview-result');
   const views = await addAndPlace();
   await page.locator('.topbar button.primary').click(); // Done
-  await pause(2500);
+  await pause(1200);
   await shot('planet-after');
   console.log(`摆上：上传 ${up} · 文字 ${text} · 单图 ${image} · 多视图 ${views}`);
 } catch (err) {
