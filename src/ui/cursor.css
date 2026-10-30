@@ -1,0 +1,57 @@
+/* 鼠标光标（ui/cursor.ts）
+   1. 指针本身：系统光标换成自己画的图（cursor: image-set，1x / 2x 两张 PNG，scripts/make-cursors.mjs 生成）。
+      还是系统画的硬件光标：不比系统光标慢，高分屏上直接用 2x 那张，不糊。
+      四种：--cur-default 平时、--cur-pointer 能点（按钮、链接、画布上的星球和作品）、--cur-grab 能拖、--cur-grabbing 拖着。
+      最后的关键字是图读不出来时的后备；ui/cursor.ts 也靠它认出指针下面现在是哪一种。热点（后面两个数）是图里指针的尖。
+      别处的 CSS 写 cursor: var(--cur-pointer, pointer)：这一块不生效（触屏、旧浏览器）时就是原来的系统光标。
+      文字输入框保留系统的 I 形光标。
+   2. 跟随层：一个小圈 + 几颗小点，弹簧跟在指针后面（纯装饰，不接鼠标，只动 transform / opacity）。
+      手感的几个数（--cursor-*）由 ui/cursor.ts 在装的时候读一次。
+   只在有悬停、指得准的设备上（鼠标、触控板）；触屏不变。第二版在 theme-v2.css 里只换图、颜色和这几个数 */
+@media (hover: hover) and (pointer: fine) {
+  @supports (cursor: image-set(url('data:,') 1x) 1 1, auto) {
+    :root {
+      --cur-default: image-set(url('./cursors/v1-default.png') 1x, url('./cursors/v1-default@2x.png') 2x) 4 3, default;
+      --cur-pointer: image-set(url('./cursors/v1-pointer.png') 1x, url('./cursors/v1-pointer@2x.png') 2x) 4 3, pointer;
+      --cur-grab: image-set(url('./cursors/v1-grab.png') 1x, url('./cursors/v1-grab@2x.png') 2x) 16 16, grab;
+      --cur-grabbing: image-set(url('./cursors/v1-grabbing.png') 1x, url('./cursors/v1-grabbing@2x.png') 2x) 16 16, grabbing;
+    }
+    html { cursor: var(--cur-default); }
+    :where(a[href], summary) { cursor: var(--cur-pointer); }
+    :where(input:not([type]), input[type='text'], input[type='search'], input[type='email'], input[type='url'], input[type='password'], input[type='number'], input[type='tel'], textarea, [contenteditable]:not([contenteditable='false'])) { cursor: text; }
+    /* 画布的光标是 JS 写在行内样式上的（canvas.style.cursor = 'pointer' / 'grabbing'，editor.ts、galaxyUi.ts、coupons.ts……）：
+       照着换成自己的图。要盖过行内样式只能 !important；grabbing 写在 grab 后面（'cursor: grab' 也匹配 grabbing） */
+    canvas[style*='cursor: pointer'] { cursor: var(--cur-pointer) !important; }
+    canvas[style*='cursor: grab'] { cursor: var(--cur-grab) !important; }
+    canvas[style*='cursor: grabbing'] { cursor: var(--cur-grabbing) !important; }
+    /* 在 3D 画布上按住拖动（转镜头、转星球）：ui/cursor.ts 在 <html> 上标 data-cursor-drag */
+    html[data-cursor-drag] #stage { cursor: var(--cur-grabbing) !important; }
+  }
+}
+
+/* —— 跟随层（第一版）：翠宝黄的小圈（内外两道细墨线，同光标的贴纸边：黄色按钮上也看得见），指着能点的东西时张开、里面淡淡一层黄；
+   拖动时收紧、顺着拖的方向拉长一点；快速移动时身后掉几颗金色的小点和小星星（同纸面底纹 --dots）。停下来就收进指针尖、淡掉 —— */
+:root {
+  --cursor-follow: 0.07; /* 小圈追上指针的时间（秒，临界阻尼：不过冲） */
+  --cursor-pop: 0.55; /* 张开、收紧的弹簧阻尼比：小于 1 会弹一下（第一版的玩具感） */
+  --cursor-stretch: 0.42; /* 拖动时顺着方向最多拉长多少（0 = 不拉长） */
+  --cursor-spin: 0; /* 拖动时每移动 1px 转几度（0 = 不转） */
+  --cursor-motes: 5; /* 小点最多几颗 */
+  --cursor-mote-gap: 26; /* 每移动多少 px 掉一颗 */
+  --cursor-mote-speed: 420; /* 指针快过多少 px/s 才掉 */
+  --cursor-mote-life: 0.32; /* 一颗小点存在几秒 */
+  --cursor-mote-drift: 0; /* 小点散开多远（px） */
+  --cursor-ring: var(--yolk);
+  --cursor-ring-edge: rgba(74, 64, 88, 0.34);
+  --cursor-ring-fill: rgba(242, 183, 5, 0.2);
+  --cursor-mote: #c99300; /* 翠宝黄深一档（--yolk-ledge）：浅色的云海上也看得见 */
+  /* 小星星（四角星，遮罩用） */
+  --cursor-star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 0l1.2 3.8L10 5 6.2 6.2 5 10 3.8 6.2 0 5l3.8-1.2z'/%3E%3C/svg%3E");
+}
+.cursor-fx { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; overflow: hidden; contain: strict; }
+/* 圈画成最大时的尺寸（24px），平时用 scale 缩小：图层按最大尺寸栅格化，缩放时不糊 */
+.cursor-fx-ring { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--cursor-ring); box-shadow: 0 0 0 1px var(--cursor-ring-edge), inset 0 0 0 1px var(--cursor-ring-edge); opacity: 0; will-change: transform, opacity; }
+.cursor-fx-ring::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--cursor-ring-fill); opacity: 0; transition: opacity 0.2s; will-change: opacity; }
+.cursor-fx[data-mode='pointer'] .cursor-fx-ring::after { opacity: 1; }
+.cursor-fx-mote { position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: var(--cursor-mote); opacity: 0; will-change: transform, opacity; }
+.cursor-fx-mote.is-star { left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 0; -webkit-mask: var(--cursor-star) center / contain no-repeat; mask: var(--cursor-star) center / contain no-repeat; }
