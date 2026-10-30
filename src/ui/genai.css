@@ -83,7 +83,7 @@
 :where(#app) .ga-example:hover { rotate: 0deg; }
 
 /* 拖放区：虚线框，整块是按钮；放了图以后显示图 */
-.ga-drop { position: relative; display: grid; justify-items: center; align-content: center; gap: 6px; min-height: 170px; padding: 22px 18px; border-radius: 20px; border: 2.5px dashed var(--paper-3); background: rgba(255, 255, 255, 0.55); text-align: center; color: var(--ink-dim); font-weight: 700; cursor: pointer; transition: border-color 0.2s, background 0.2s, translate 0.3s var(--bounce); }
+.ga-drop { position: relative; display: grid; justify-items: center; align-content: center; gap: 6px; min-height: 170px; padding: 22px 18px; border-radius: 20px; border: 2.5px dashed var(--paper-3); background: rgba(255, 255, 255, 0.55); text-align: center; color: var(--ink-dim); font-weight: 700; cursor: var(--cur-pointer, pointer); transition: border-color 0.2s, background 0.2s, translate 0.3s var(--bounce); }
 .ga-drop b { font: 800 16px/1.2 var(--font-display); color: var(--ink); }
 .ga-drop:hover { border-color: var(--yolk); background: #fffaf0; translate: 0 -2px; }
 .ga-drop:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
@@ -125,7 +125,7 @@
 
 /* 开关、Generate */
 .ga-options { display: flex; flex-wrap: wrap; gap: 8px 18px; }
-.ga-switch { position: relative; display: inline-flex; align-items: center; gap: 10px; font: 800 13.5px/1 var(--font-ui); cursor: pointer; padding: 4px 6px 4px 4px; border-radius: 12px; }
+.ga-switch { position: relative; display: inline-flex; align-items: center; gap: 10px; font: 800 13.5px/1 var(--font-ui); cursor: var(--cur-pointer, pointer); padding: 4px 6px 4px 4px; border-radius: 12px; }
 .ga-switch-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .ga-switch-track { position: relative; width: 46px; height: 28px; border-radius: 999px; background: var(--paper-3); box-shadow: inset 0 2px 0 rgba(74, 64, 88, 0.12); transition: background 0.25s; }
 .ga-switch-track i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 2px 0 rgba(74, 64, 88, 0.2); transition: transform 0.35s var(--bounce); }
@@ -143,8 +143,8 @@
 .ga-side { display: grid; align-content: start; gap: 14px; min-height: 0; }
 .ga-stage { position: relative; aspect-ratio: 1 / 0.92; min-height: 0; overflow: hidden; border-radius: 26px; background: radial-gradient(60% 55% at 50% 44%, #fffcf3, #f6e7cd 60%, #ead4ba 100%); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.6), 0 8px 0 rgba(160, 120, 80, 0.18), 0 22px 40px rgba(60, 45, 30, 0.16); }
 .ga-spot { position: absolute; left: 50%; bottom: 10%; width: 54%; aspect-ratio: 4 / 1; translate: -50% 0; border-radius: 50%; background: radial-gradient(closest-side, rgba(120, 90, 60, 0.2), rgba(120, 90, 60, 0)); pointer-events: none; }
-.ga-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; visibility: hidden; }
-.ga-canvas:active { cursor: grabbing; }
+.ga-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: var(--cur-grab, grab); touch-action: none; visibility: hidden; }
+.ga-canvas:active { cursor: var(--cur-grabbing, grabbing); }
 .ga-stage[data-state='model'] .ga-canvas { visibility: visible; animation: model-pop 0.7s var(--spring) both; }
 .ga-stage-empty, .ga-stage-busy, .ga-stage-error { position: absolute; inset: 0; display: none; place-content: center; justify-items: center; gap: 12px; padding: 22px 26px; text-align: center; }
 .ga-stage[data-state='empty'] .ga-stage-empty, .ga-stage[data-state='busy'] .ga-stage-busy, .ga-stage[data-state='error'] .ga-stage-error { display: grid; }
