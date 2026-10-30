@@ -802,7 +802,7 @@ export class AddWorkDialog {
     const id = this.selected[this.tab];
     const job = id ? this.deps.jobs.get(id) : undefined;
     if (!job) {
-      const empty = this.tab === 'text' ? 'Your Tripo model will appear here. Describe it on the left, then press Generate.' : this.tab === 'image' ? 'Pick a picture on the left, then press Generate. Your model will appear here.' : 'Add the views on the left, then press Generate. Your model will appear here.';
+      const empty = this.tab === 'text' ? 'Your Tripo model will appear here. Describe it, then press Generate.' : this.tab === 'image' ? 'Pick a picture, then press Generate. Your model will appear here.' : 'Add the views, then press Generate. Your model will appear here.';
       return { kind: 'empty', text: empty };
     }
     return this.jobSide(job);

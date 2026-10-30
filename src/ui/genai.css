@@ -209,28 +209,31 @@
 #app:has(> .tray:not([hidden])) > .ga-notice { bottom: 196px; }
 
 /* —— 窄屏、手机竖屏：窗口铺满，舞台在上面（矮一点），内容在下面，整张卡一起滚 —— */
+/* 手机上整张卡按内容撑高、外层（.genai）滚动：纸卡不能被拉成正好一屏高（place-items: stretch 会这样），
+   不然卡里的行只好往小里挤，标签栏、结果栏会压到别的东西上。桌面上 .ga-body、.ga-panels、.ga-side 的 min-height: 0
+   （左栏自己滚）在这里也换回按内容撑开 */
 @media (max-width: 820px) {
-  #app > .genai { padding: 8px; place-items: stretch; }
-  .ga-card { height: auto; min-height: calc(100dvh - 16px); grid-template-rows: auto auto auto; padding: 16px 16px 18px; border-radius: 24px; }
+  #app > .genai { padding: 8px; place-items: start stretch; }
+  .ga-card { height: auto; min-height: calc(100dvh - 16px); grid-template-rows: auto auto auto; align-content: start; padding: 16px 16px 18px; border-radius: 24px; }
+  .ga-head { flex-wrap: wrap; row-gap: 8px; }
   .ga-head h1 { font-size: 28px; }
   .ga-head h1::after { width: 92px; }
-  .ga-status { position: absolute; top: 18px; right: 66px; padding-top: 0; }
+  .ga-status { order: 3; flex: 1 0 100%; justify-content: flex-start; padding-top: 0; }
   .ga-credits, .ga-mock { padding: 5px 9px 6px 7px; font-size: 11.5px; }
   :where(#app) .ga-close { width: 40px; height: 40px; border-radius: 14px; }
   .ga-tabs { margin: 12px -4px 0; padding: 4px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   :where(#app) .ga-tab { padding: 8px 11px 9px 9px; font-size: 12.5px; flex: none; }
   .ga-tab-group { margin-left: 4px; padding-left: 8px; font-size: 0; gap: 0; }
-  .ga-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .ga-panels { overflow: visible; margin: 0; padding: 0; }
-  .ga-side { order: -1; }
+  .ga-body { display: flex; flex-direction: column; gap: 16px; min-height: auto; }
+  .ga-panels { overflow: visible; margin: 0; padding: 0; min-height: auto; flex: none; }
+  .ga-side { order: -1; min-height: auto; flex: none; }
   .ga-stage { aspect-ratio: auto; height: min(40vh, 320px); border-radius: 20px; }
+  .ga-stage[data-state='empty'] { height: 112px; } /* 还没有模型：矮一点，表单不用往下滚就看得见 */
+  .ga-stage[data-state='empty'] .ga-plinth { display: none; }
   .ga-h { font-size: 21px; }
   .ga-drop { min-height: 130px; }
   .ga-views { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #app > .ga-notice { left: 12px; right: 12px; bottom: 12px; max-width: none; }
-}
-@media (max-width: 380px) {
-  .ga-status { display: none; }
 }
 
 /* —— 减弱动效：只留淡入淡出 —— */

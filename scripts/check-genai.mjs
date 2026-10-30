@@ -454,7 +454,12 @@ try {
         const r = (s) => document.querySelector(s).getBoundingClientRect();
         const card = r('.ga-card');
         const stage = r('.ga-stage');
-        return { card: card.left >= 0 && card.right <= innerWidth, stage: stage.width > 200 && stage.top >= 0 && stage.bottom <= innerHeight, scroll: document.documentElement.scrollWidth <= innerWidth };
+        const status = r('.ga-status');
+        const tag = r('.ga-tag');
+        // 上下排：右边那一栏（舞台 + 名字 + Add to planet）整个在表单上面，不压住表单；头上的额度标记不压住团队名牌
+        const stacked = r('.ga-side').bottom <= r('.ga-panel[data-panel="upload"]').top + 1;
+        const head = status.top >= tag.bottom - 1 || status.right <= tag.left || status.left >= tag.right;
+        return { card: card.left >= 0 && card.right <= innerWidth, stage: stage.width > 200 && stage.top >= 0 && stage.bottom <= innerHeight, scroll: document.documentElement.scrollWidth <= innerWidth, stacked, head };
       });
       await p.locator('.ga-add').scrollIntoViewIfNeeded();
       const add = await p.evaluate(() => {
@@ -462,7 +467,7 @@ try {
         return b.bottom <= innerHeight && document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('.ga-add') !== null;
       });
       await p.screenshot({ path: `shots/genai-${String(++shots).padStart(2, '0')}-phone${SUFFIX}.png` });
-      check('手机：窗口不出屏、预览看得见、没有横向滚动，Add to planet 点得到', fit.card && fit.stage && fit.scroll && add, JSON.stringify({ ...fit, add }));
+      check('手机：窗口不出屏、预览看得见、没有横向滚动，结果栏不压住表单、额度标记不压住名牌，Add to planet 点得到', fit.card && fit.stage && fit.scroll && fit.stacked && fit.head && add, JSON.stringify({ ...fit, add }));
       await p.locator('.ga-close').click();
       await p.waitForFunction(() => !window.__genai.state().open);
       if (errs.length) check('手机页没有页面错误', false, errs[0]);

@@ -53,8 +53,9 @@ const app = new App(world, document.querySelector<HTMLDivElement>('#app')!, stor
 const home = installHome(app); // 首页（H2）：你的星球放前排正中、名牌写 You、「Visit your planet」
 const planetScreen = new PlanetScreen(world, app.root, (teamId, workId) => app.navigate({ view: 'museum', teamId, workId }));
 const editor = new Editor(app, planetScreen);
-installGenAI(app, editor, userWorks, store); // 作品栏的「Upload」「Create with Tripo」、生成任务（刷新前没做完的接着轮询）、完成提示（src/genai/）
 const walk = new WalkMode(app, planetScreen);
+// 作品栏的「Upload」「Create with Tripo」、生成任务（刷新前没做完的接着轮询）、完成提示（src/genai/）。「Add to planet」进入摆放前先退出漫游
+installGenAI(app, editor, userWorks, store, { beforePlace: () => walk.exit(true) });
 const coupons = installCoupons(app, planetScreen, walk, editor); // 点翠宝吐优惠券（fun/coupons.ts）：站桩和漫游的翠宝能点，模型、着色器在后台预热
 installHomeTriboo(app, coupons, home); // 首页右下角躲着的翠宝（H2）：点它吐一张券，展开成领券窗口
 installCloudTriboo(world); // 首页翠宝元素①：云海上空一朵翠宝形状的云（scenes/homeCloudTriboo.ts；开场预热之前装上，一起编译）

@@ -2,6 +2,7 @@ import type { App } from '../app';
 import { browserStorage } from '../data/store';
 import type { Work } from '../data/types';
 import type { Editor } from '../editor/editor';
+import { parseRoute } from '../router';
 import { AddWorkDialog } from '../ui/genaiDialog';
 import { GenNotice } from '../ui/genaiNotice';
 import { toast } from '../ui/toast';
@@ -36,7 +37,8 @@ function youHandle(app: App): string | undefined {
   return app.teams.flatMap((t) => t.members).find((m) => m.id === app.you.memberId)?.handle;
 }
 
-export function installGenAI(app: App, editor: Editor, registry: UserWorksRegistry, store: PlanetStoreWithUserWorks): AddWorkDialog {
+// opts.beforePlace：「Add to planet」进入摆放之前调（main.ts 接上：先退出漫游）
+export function installGenAI(app: App, editor: Editor, registry: UserWorksRegistry, store: PlanetStoreWithUserWorks, opts: { beforePlace?: () => void } = {}): AddWorkDialog {
   const api = tripoApiForPage();
 
   // 作品加进团队：App 的团队列表、星系里那颗星球的数据、正在看的星球视图和作品栏一起换上新的
@@ -75,22 +77,28 @@ export function installGenAI(app: App, editor: Editor, registry: UserWorksRegist
 
   const jobs = new GenJobs({ api, storage: browserStorage(), finish });
 
-  // 「Add to planet」：关掉窗口，进入摆放。作品属于别的星球（在那里发起的生成）时先过去，转场落定了再进入摆放
+  // 「Add to planet」：关掉窗口，进入摆放。要在那颗星球的星球页上（不是它的 Members / Museum 页，那时编辑器在页面底下）：
+  // 不在就先过去（作品属于别的星球、或者从 Museum 里点了完成提示），转场落定了再进入摆放。漫游中先退出漫游（编辑和漫游互斥）
   let placing = 0;
+  const onPlanetPage = (teamId: string): boolean => {
+    const route = parseRoute(location.hash);
+    return route.view === 'planet' && route.teamId === teamId && app.currentTeam?.id === teamId;
+  };
   const place = (workId: string, teamId: string): void => {
     dialog.close();
     const work = registry.work(workId);
     if (!work) return;
     const token = ++placing;
+    opts.beforePlace?.();
     const tryPlace = (): boolean => {
-      if (app.routing || app.currentTeam?.id !== teamId) return false;
+      if (app.routing || !onPlanetPage(teamId)) return false;
       const w = registry.work(workId) ?? work;
       if (!editor.placeWork(w)) return false;
       toast(`Click the planet to place ${w.title}`);
       return true;
     };
     if (tryPlace()) return;
-    if (app.currentTeam?.id !== teamId) app.navigate({ view: 'planet', teamId });
+    if (!onPlanetPage(teamId)) app.navigate({ view: 'planet', teamId });
     const started = performance.now();
     const tick = (): void => {
       if (token !== placing || tryPlace() || performance.now() - started > 20000) return;
