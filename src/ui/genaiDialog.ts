@@ -92,6 +92,7 @@ type Side =
 
 // 一页里的模型选择器：模型一行一个（单选），贴图档三格，Generate 旁边这一次的预计
 interface Picker {
+  label: HTMLElement;
   field: HTMLElement;
   models: HTMLElement;
   status: HTMLElement;
@@ -456,11 +457,8 @@ export class AddWorkDialog {
     const models = el('div', { className: 'ga-models', role: 'radiogroup' });
     models.setAttribute('aria-labelledby', `ga-models-${mode}`);
     const status = el('p', { className: 'ga-models-status', textContent: 'Loading models…' });
-    const field = el('div', { className: 'ga-field ga-model-field' },
-      el('span', { className: 'ga-label', id: `ga-models-${mode}` }, 'Model', el('span', { className: 'ga-label-note', textContent: 'times are estimates' })),
-      models,
-      status,
-    );
+    const label = el('span', { className: 'ga-label', id: `ga-models-${mode}` }, 'Model', el('span', { className: 'ga-label-note', textContent: 'times are estimates' }));
+    const field = el('div', { className: 'ga-field ga-model-field' }, models, status);
     const seg = el('div', { className: 'ga-seg', role: 'radiogroup' });
     seg.setAttribute('aria-labelledby', `ga-tex-${mode}`);
     const textures = new Map<TextureChoice, HTMLInputElement>();
@@ -471,7 +469,7 @@ export class AddWorkDialog {
       seg.append(el('label', { className: 'ga-seg-item', title: t.hint, dataset: { texture: t.id } }, input, el('span', { textContent: t.label })));
     }
     const summary = el('span', { className: 'ga-cost' });
-    this.pickers.set(mode, { field, models, status, rows: new Map(), textures, summary });
+    this.pickers.set(mode, { label, field, models, status, rows: new Map(), textures, summary });
     const offline = el('p', { className: 'ga-offline', role: 'status' });
     offline.hidden = true;
     this.offline.set(mode, offline);
@@ -482,7 +480,11 @@ export class AddWorkDialog {
     this.syncPicker(mode);
     return [
       ...(hint ? [hint] : []),
-      el('div', { className: 'ga-options' }, field, el('div', { className: 'ga-field ga-texture-field' }, el('span', { className: 'ga-label', id: `ga-tex-${mode}` }, 'Texture'), seg)),
+      // 一行标题：左边 Model，右边贴图档（省一行高度：1440 × 900 上表单不用滚就放得下）
+      el('div', { className: 'ga-options' },
+        el('div', { className: 'ga-options-head' }, label, el('div', { className: 'ga-texture-field' }, el('span', { className: 'ga-label', id: `ga-tex-${mode}` }, 'Texture'), seg)),
+        field,
+      ),
       offline,
       el('div', { className: 'ga-go' }, go, summary),
     ];
@@ -551,8 +553,9 @@ export class AddWorkDialog {
     }
     p.models.hidden = this.modelsState !== 'ready';
     p.status.hidden = this.modelsState !== 'loading';
-    // 拿不到模型列表：整个模型那一栏收起来（用中转的默认版本照样能生成）
+    // 拿不到模型列表：整个模型那一栏收起来（用中转的默认版本照样能生成），贴图档照旧
     p.field.hidden = this.modelsState === 'failed';
+    p.label.hidden = this.modelsState === 'failed';
     const tex = this.textureFor(current);
     for (const [id, input] of p.textures) {
       const ok = id !== 'fast' || !!current?.textures.includes('fast');
