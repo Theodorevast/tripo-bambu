@@ -83,8 +83,10 @@ export class PlanetScreen implements PlanetLayer {
     this.down = null;
     if (e.button !== 0 || !this.active || !this.interactive || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
     const pw = this.view.pick(e.clientX, e.clientY);
-    if (pw && this.view.team) this.card.show(pw.work, this.view.team, pw.model?.failed ?? false);
-    else this.card.hide();
+    if (pw && this.view.team) {
+      this.card.show(pw.work, this.view.team, pw.model?.failed ?? false);
+      this.view.library.warmFull(pw.work); // 作品卡上能点进 Museum：先在后台下原文件，查看器打开时直接从缓存读
+    } else this.card.hide();
   }
 
   private setHovered(pw: PlacedWork | null): void {

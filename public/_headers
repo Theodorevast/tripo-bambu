@@ -1,0 +1,19 @@
+# Cloudflare Workers Static Assets 的响应头（构建时从 public/ 拷进 dist/；部署时 wrangler 读它，它自己不会被当成文件发出去）。
+# 写法见 https://developers.cloudflare.com/workers/static-assets/headers/ ，本机按同样的规则模拟：scripts/lib/headersFile.mjs。
+# 没写到的（index.html、favicon 等）用 Cloudflare 的默认值 public, max-age=0, must-revalidate：每次都先问一下有没有新版本。
+# 一个地址命中好几条规则时同名的头会用逗号连起来，所以下面几条互不重叠。只管静态文件，/api/* 由 Worker 自己回
+
+# Vite 打包出来的文件名里带内容指纹，内容一变名字就变：缓存一年，不再询问
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 模型（含 lod/）、缩略图、品牌素材：代码里的地址都带 ?v=<内容指纹>（vite.config.ts 的 assetVersions、src/assets/versions.ts），
+# 换了文件地址就变，所以同样缓存一年、不再询问。国内访问 Cloudflare 一次询问要 0.3–2 秒，第二次打开时省掉几十次
+/models/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/thumbs/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/brand/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -56,7 +56,7 @@ export class MuseumPage implements Sheet {
   private readonly node = el('section', { className: 'sheet museum' });
   private readonly presence = new Presence(this.node);
   private readonly canvas = el('canvas', { className: 'museum-canvas' });
-  private readonly library = new ModelLibrary(); // 卡片预览的渲染器专用
+  private readonly library = new ModelLibrary({ lod: true }); // 卡片预览的渲染器专用。卡片小，用星球视图的轻量模型（进过星球的话已经在缓存里）；点开的大图查看器用原文件
   private readonly viewer: Viewer;
   private readonly world: World;
   private readonly onClose: () => void;
@@ -101,6 +101,9 @@ export class MuseumPage implements Sheet {
       return;
     }
     this.viewer.close();
+    // 卡片用 LOD，点开的查看器用原文件：显示网格时就在后台按卡片顺序下原文件（主画面的下载队列，排在别的下载后面，一次一件）。
+    // 直接打开一件作品时不预热别的，免得和查看器抢带宽
+    for (const w of team.works) this.world.models?.warmFull(w);
     if (workId) {
       // 地址里的作品不存在：网格已经显示着，只把地址就地改成网格的（不加历史记录，后退不会又回到坏地址）。
       // 地址栏已经换成别的了（排队期间用户又去了别处，比如 Members）就不改，免得把那条新记录改成 Museum 的地址

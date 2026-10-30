@@ -7,6 +7,7 @@ import { footprintGroundRadius } from '../planet/footprint';
 import { MAX_PLINTH_RADIUS, placementTransform, plinthRadius } from '../planet/placement';
 import { onPlanetRadius, PLANET_RADIUS, PRESETS } from '../planet/presets';
 import { plinthMaterial, STAND_TOP, standGeometry } from './plinth';
+import { planetViewDir } from './shots';
 import { compileShadowExact } from './shadowWarm';
 import type { Entrance } from './stager';
 import type { PlanetEntry, World } from './world';
@@ -38,6 +39,14 @@ export const STAGE = {
   gardens: typeof location === 'undefined' || new URLSearchParams(location.search).get('gardens') !== '0', // 花园开关：?gardens=0 关掉（低画质档、性能对比）
   slowmo: 1, // 落地、长花园、扬尘的时间倍数（样张脚本放慢了拍；?tune 也能看慢动作）
 };
+
+// 作品按多正对星球视图的镜头排序（最显眼的在前，背面的最后）：主画面的下载一件一件排队（assets/models.ts 的 Downloads），
+// 进星球、首页预取都按这个顺序要，慢网上最先看得到的那几件最先出场。星球视图里星球不转（World.focus），按星球本地坐标比就行
+export function byVisibility<T extends Pick<Placement, 'dir'>>(placements: readonly T[]): T[] {
+  const view = planetViewDir();
+  const facing = (p: T) => (p.dir[0] * view.x + p.dir[1] * view.y + p.dir[2] * view.z) / (Math.hypot(...p.dir) || 1);
+  return [...placements].sort((a, b) => facing(b) - facing(a));
+}
 
 // 石头（Dressing）离作品中心至少多远（米）：花园在星球视图里放大以后，范围里的石头会戳进灌木、栅栏
 export function gardenRockClearance(scale: number): number {
@@ -127,7 +136,7 @@ export class PlanetView {
 
   constructor(world: World) {
     this.world = world;
-    this.library = world.models ?? new ModelLibrary(true);
+    this.library = world.models ?? new ModelLibrary({ oneAtATime: true, lod: true });
     PlanetView.active = this;
     // 指着星球或名牌（首页的悬停都汇到 world.hovered）停一会儿，就先下载、解析那颗星球的作品（F2）：
     // 点下去开始转场时模型已经在缓存里，转场开头不用再解析。只下载、解析，不编译（不一定会点进去）
@@ -201,7 +210,7 @@ export class PlanetView {
       const label = work ? this.labelOf(work) : null;
       if (label) this.gardens.atlas.claim(label);
     }
-    this.loading = Promise.all(team.planet.placements.map((p) => this.place(p))).then(() => {});
+    this.loading = Promise.all(byVisibility(team.planet.placements).map((p) => this.place(p))).then(() => {});
     // 转场一开始就准备的、这次没摆上的：作废（place() 在第一个 await 之前就把要用的接走了）
     this.ahead = null;
   }
@@ -213,7 +222,7 @@ export class PlanetView {
     const works = new Map<string, AheadWork>();
     const ahead = { teamId: team.id, works };
     this.ahead = ahead;
-    for (const p of team.planet.placements) {
+    for (const p of byVisibility(team.planet.placements)) {
       const work = team.works.find((w) => w.id === p.workId);
       if (!work?.file || works.has(work.id)) continue;
       let alive = () => this.ahead === ahead;
@@ -234,6 +243,15 @@ export class PlanetView {
     }
   }
 
+  // 首页空闲时预取一颗星球的作品（main.ts：首页可以操作以后预取「你的星球」）：只下载、不解析，主线程上不做事；
+  // 顺序和进星球时一样，排在现在要用的下载后面（一次一件）。点进去时字节已经在了，直接解析
+  prefetch(team: Team): void {
+    for (const p of byVisibility(team.planet.placements)) {
+      const work = team.works.find((w) => w.id === p.workId);
+      if (work) this.library.prefetch(work);
+    }
+  }
+
   // 悬停预取（见构造函数）：同一颗星球指着超过 PRELOAD_DWELL 秒才开始（指针扫过去不算），每颗星球只预取一次
   private preloadHovered(dt: number): void {
     const h = this.world.hovered ?? null;
@@ -245,7 +263,7 @@ export class PlanetView {
     this.hoverFor += dt;
     if (this.hoverFor < PRELOAD_DWELL) return;
     this.preloaded.add(h.team.id);
-    for (const p of h.team.planet.placements) {
+    for (const p of byVisibility(h.team.planet.placements)) {
       const work = h.team.works.find((w) => w.id === p.workId);
       if (work) this.library.preload(work);
     }

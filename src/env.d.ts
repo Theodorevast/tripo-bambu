@@ -1,3 +1,6 @@
+// 构建时塞进来的公共素材内容指纹（vite.config.ts 的 assetVersions；src/assets/versions.ts 读）。单元测试里没有
+declare const __ASSET_VERSIONS__: Record<string, string> | undefined;
+
 // 页面上给自查脚本用的全局标记
 interface Window {
   __ready?: boolean; // 应用启动完、首屏内容加载完
