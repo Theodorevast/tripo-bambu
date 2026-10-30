@@ -50,6 +50,8 @@ interface Press {
 // 编辑模式：摆放、拖动、旋转、缩放、删除作品，改星球外观；每次修改都自动保存
 export class Editor {
   active = false;
+  // 作品栏的「Upload」「Create with Tripo」：打开上传 / 生成窗口（main.ts 里 installGenAI 接上）
+  onAddWork: ((tab: 'upload' | 'text') => void) | null = null;
   private readonly app: App;
   private readonly screen: PlanetScreen;
   private readonly panel: EditPanel;
@@ -75,6 +77,8 @@ export class Editor {
       appearance: (patch) => this.setAppearance(patch),
       reroll: () => this.setAppearance({ seed: Math.floor(Math.random() * 1e9) }),
       reset: () => void this.resetDemo(),
+      upload: () => this.openAddWork('upload'),
+      create: () => this.openAddWork('text'),
     });
     const canvas = app.world.renderer.domElement;
     // 捕获阶段：赶在 OrbitControls 之前处理，点中作品时不让镜头跟着转
@@ -164,6 +168,35 @@ export class Editor {
     if (skipped.length) parts.push(first ? `Skipped ${skipped.join(', ')}` : skipped.join(' · '));
     if (parts.length) toast(parts.join(' · '));
     if (first && this.active) await this.pickFromTray(first);
+  }
+
+  // —— 上传、Tripo 生成的作品（src/works/、src/genai/）——
+
+  // 打开上传 / 生成窗口：先收起摆放中的幽灵、取消选中（窗口盖在星球上，编辑条不留在下面）
+  private openAddWork(tab: 'upload' | 'text'): void {
+    if (!this.onAddWork) return;
+    this.endDrag();
+    this.cancelPlacing();
+    this.select(null);
+    this.onAddWork(tab);
+  }
+
+  // 团队的作品列表变了（加了用户作品）：正在看的是这个团队时，星球视图换上新的团队数据，作品栏跟着刷新。
+  // 摆放不受影响：App 里的团队和 view.team 的配方是同一份（编辑器每次保存都同时改两边）
+  syncTeam(team: Team): void {
+    if (this.view.team?.id !== team.id) return;
+    this.view.team = team;
+    if (this.active) this.refreshTray();
+  }
+
+  // 「Add to planet」：进入编辑（还没进的话），从作品栏挑这件作品进入摆放（点星球摆上）。
+  // 作品要已经在当前星球团队的作品里（syncTeam 之后）；不在当前星球上时返回 false
+  placeWork(work: Work): boolean {
+    if (!this.view.team || !this.view.findWork(work.id)) return false;
+    this.activate();
+    if (!this.active) return false;
+    void this.pickFromTray(work);
+    return true;
   }
 
   // 回到自己团队的星球时把临时作品重新摆上：PlanetView.enter 只摆存档里的作品。

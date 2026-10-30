@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>import pipeline</title>
+    <style>html, body { margin: 0; font: 13px/1.4 ui-monospace, monospace; background: #fbf5e8; color: #4a4058; } pre { margin: 16px; white-space: pre-wrap; } #dot { position: fixed; right: 16px; top: 16px; width: 18px; height: 18px; border-radius: 50%; background: #f2b705; }</style>
+  </head>
+  <body>
+    <!-- 小圆点每帧挪一下：截图、录屏时能看出主线程卡没卡 -->
+    <i id="dot"></i>
+    <pre id="out">…</pre>
+    <script type="module" src="./import.ts"></script>
+  </body>
+</html>

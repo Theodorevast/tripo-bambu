@@ -555,9 +555,9 @@ export class PlanetView {
     };
   }
 
-  // 路牌上写什么：作者的 @handle（团队成员里找不到就不立路牌）
+  // 路牌上写什么：作者的 @handle（团队成员里找不到时用作品自己记的 handle——用户作品加到了别的团队；都没有就不立路牌）
   private labelOf(work: Work): string | null {
-    const handle = this.team?.members.find((m) => m.id === work.authorId)?.handle;
+    const handle = this.team?.members.find((m) => m.id === work.authorId)?.handle ?? work.authorHandle;
     return handle ? `@${handle}` : null;
   }
 

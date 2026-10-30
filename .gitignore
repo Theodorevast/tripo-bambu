@@ -12,3 +12,6 @@ assets/generated/
 # 本地密钥（Tripo API 等）：只在本机和服务端用，不进仓库
 .env.local
 .env.*.local
+# Cloudflare Worker 本地开发的密钥文件和缓存（wrangler dev）
+.dev.vars
+.wrangler/

@@ -21,6 +21,7 @@
 
      在 Windows 的 Git Bash 里要写成 `MSYS_NO_PATHCONV=1 npm run build -- --base=/gbn/`，否则 `/gbn/` 会被改写成 `C:/Program Files/Git/gbn/`。PowerShell、cmd 不受影响。
 5. 素材版权：`brand/` 下的翠宝模型、tripo 和 MakerWorld 标志、像素翠宝动图是品牌方的素材；`models/`、`thumbs/` 是社区作者的作品。版权归各自所有者，只用于本站，不要转用或公开分发，仓库保持私有。
+6. 上传模型以外的「用 Tripo 生成模型」功能要调 `/api/tripo/*`，需要服务端中转（密钥只在服务端）；纯静态托管时这部分不可用。两种部署方式（独立 Node 服务 `npm start` 同时托管 `dist/`；或 Cloudflare Worker）、密钥和各项限制见 [docs/TRIPO.md](docs/TRIPO.md)。
 
 ## English
 
@@ -43,3 +44,4 @@
 
      In Git Bash on Windows, run `MSYS_NO_PATHCONV=1 npm run build -- --base=/gbn/` instead; otherwise Git Bash rewrites `/gbn/` to `C:/Program Files/Git/gbn/`. PowerShell and cmd are not affected.
 5. Asset ownership: everything in `brand/` (the Triboo model, the tripo and MakerWorld logos, the pixel Triboo GIFs) belongs to the brands, and `models/` and `thumbs/` are works by community creators. They remain the property of their owners and are for use on this site only. Do not reuse or redistribute them, and keep this repository private.
+6. Generating models with Tripo calls `/api/tripo/*`, which needs the server-side proxy (the API key stays on the server). On a purely static host that feature is unavailable. See [docs/TRIPO.md](docs/TRIPO.md) (in Chinese) for the two deployment options (the standalone Node server, `npm start`, which also serves `dist/`; or a Cloudflare Worker), the key setup and the limits.
