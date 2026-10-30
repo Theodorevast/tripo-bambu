@@ -83,6 +83,45 @@ const traceStats = (trace) => {
   }
   return { maxTurn, minUpDot, minClear, maxFloat, frames: trace.length };
 };
+// 翠宝现在的姿势和一件作品的网格之间的间隙（米，负数是穿进去了）：都换到翠宝脚底的坐标系里（y 朝上、z 朝前），
+// 翠宝每层（身高的 10%）每格（16 个方位）取最大水平半径；作品只算翠宝身高范围里的顶点（不算看不见的拾取盒）
+const bodyGap = (workId) => page.evaluate(async (id) => {
+  const { PlanetView } = await import('/src/scenes/planetView.ts');
+  const { CHAR_HEIGHT } = await import('/src/play/params.ts');
+  const pw = PlanetView.active?.placed.get(id);
+  const walker = window.__world.scene.getObjectByName('walker');
+  if (!pw || !walker) return NaN;
+  const tmp = walker.position.clone();
+  walker.updateMatrixWorld(true);
+  pw.root.updateMatrixWorld(true);
+  const inv = walker.matrixWorld.clone().invert();
+  const k = walker.scale.x || 1;
+  const band = (h) => Math.min(9, Math.max(0, Math.floor((h / CHAR_HEIGHT) * 10)));
+  const sector = (x, z) => Math.floor((Math.atan2(x, z) / (Math.PI * 2) + 1) * 16 + 0.5) % 16;
+  const prof = Array.from({ length: 10 }, () => new Array(16).fill(0));
+  const each = (root, fn, skip = null) => root.traverse((o) => {
+    if (!o.isMesh || o === skip) return;
+    for (let p = o; p; p = p.parent) if (!p.visible) return;
+    const pos = o.geometry.getAttribute('position');
+    const m = inv.clone().multiply(o.matrixWorld);
+    const step = Math.max(1, Math.ceil(pos.count / 60000));
+    for (let i = 0; i < pos.count; i += step) fn(tmp.fromBufferAttribute(pos, i).applyMatrix4(m));
+  });
+  each(walker, (p) => {
+    const b = band(p.y * k);
+    const s = sector(p.x, p.z);
+    prof[b][s] = Math.max(prof[b][s], Math.hypot(p.x, p.z) * k);
+  });
+  let gap = Infinity;
+  each(pw.root, (p) => {
+    const h = p.y * k;
+    if (h < 0.005 || h > CHAR_HEIGHT) return;
+    const b = band(h);
+    const s = sector(p.x, p.z);
+    gap = Math.min(gap, Math.hypot(p.x, p.z) * k - Math.max(prof[b][s], prof[b][(s + 1) % 16], prof[b][(s + 15) % 16]));
+  }, pw.proxy);
+  return gap;
+}, workId);
 const walkTrace = async (key, ms) => {
   await page.evaluate(() => window.__walk.trace(true));
   await hold(key, ms);
@@ -172,6 +211,18 @@ const slideStats = traceStats(slideTrace);
 const slideEnd = await state();
 const past = dot(slideEnd.dir, north) - dot(c, north);
 check('斜着撞上去：贴着圆柱滑过去，到了作品另一边', slideStats.minClear > -1e-3 && past > 0, `最近 ${slideStats.minClear.toFixed(4)}，越过作品 ${(past * R).toFixed(2)} 个单位`);
+// 停在作品的表面上：翠宝实际的外形（现在的姿势，按高度分 10 层、方位分 16 格的最大水平半径）和作品的网格（展台 + 模型，翠宝身高范围里的顶点）
+// 之间最近多远，负数是穿进去了。按翠宝现在的朝向算：正对着撞上去时是身体正面，侧着站时是手臂
+await page.evaluate(([d, h]) => window.__walk.teleport(d, h), [head, toward(head, c)]);
+await hold('w', 2000);
+await page.waitForTimeout(400);
+const headGap = await bodyGap(target.id);
+const sideAt = turn(c, scale(north, -1), target.minAngle);
+await page.evaluate(([d, h]) => window.__walk.teleport(d, h), [sideAt, east]); // 作品在左手边
+await page.waitForTimeout(400);
+const sideGap = await bodyGap(target.id);
+check('撞上作品停在作品表面：正对着停下时翠宝身体和作品的网格之间 −1～12 厘米，侧着贴在旁边时手臂也不插进去（> −1.5 厘米）',
+  headGap > -0.01 && headGap < 0.12 && sideGap > -0.015, `正对 ${(headGap * 100).toFixed(1)} 厘米，侧着 ${(sideGap * 100).toFixed(1)} 厘米`);
 
 // —— 4. 走到星球背面、翻过北极：镜头的上方向逐帧连续 ——
 await startFrames();

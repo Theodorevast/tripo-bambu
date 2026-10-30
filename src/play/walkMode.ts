@@ -8,9 +8,9 @@ import type { PlanetScreen } from '../ui/planetScreen';
 import { authorLine } from '../ui/workCard';
 import { CharacterView, loadCharacter } from './character';
 import { FollowCamera } from './followCamera';
-import { CHAR_RADIUS, FOLLOW, NEAR_DISTANCE, WADE_DEPTH, WALK } from './params';
+import { CHAR_RADIUS, CHAR_SIDE, FOLLOW, NEAR_DISTANCE, WADE_DEPTH, WALK } from './params';
 import { blendPose, easeInOutCubic, retangent, slerpDir, transitionAdvance, walkGround } from './sphere';
-import { setObstacle, Walker, type Obstacle } from './walker';
+import { newObstacle, setObstacle, Walker, type Obstacle } from './walker';
 import './walk.css';
 
 // off：轨道镜头；enter：从轨道镜头过渡到跟随镜头（已经能走）；walk：漫游；exit：回轨道镜头的过渡
@@ -328,7 +328,8 @@ export class WalkMode {
     this.onStep?.();
   }
 
-  // 作品的碰撞圆柱：半径取展台和模型水平半径里大的那个（和编辑条的 workRect 一样）乘缩放，再加角色半径。
+  // 作品的碰撞圆柱：半径取展台和模型水平半径里大的那个（和编辑条的 workRect 一样）乘缩放，再加角色半径；
+  // 作品在角色侧面时再多挡 CHAR_SIDE − CHAR_RADIUS（手臂）。
   // 作品列表只在进入、瞬移、数量变了时重新取（只在这时遍历 Map；漫游时编辑器关着，摆放不会变）；
   // 半径每帧从作品上读：模型加载完、展台变大，马上就挡得住
   private syncObstacles(force: boolean): void {
@@ -338,7 +339,7 @@ export class WalkMode {
       let i = 0;
       for (const pw of placed.values()) {
         this.obstacleWorks[i] = pw;
-        this.obstacles[i] ??= { center: new THREE.Vector3(), minAngle: 0, cosMin: 1 };
+        this.obstacles[i] ??= newObstacle();
         i++;
       }
       this.obstacleCount = i;
@@ -348,7 +349,8 @@ export class WalkMode {
     for (let i = 0; i < this.obstacleCount; i++) {
       const pw = this.obstacleWorks[i];
       const radius = Math.max(pw.plinth.scale.x, pw.model?.footprint ?? 0) * pw.placement.scale;
-      setObstacle(this.obstacles[i], pw.root.position, (radius + CHAR_RADIUS) / pw.root.position.length());
+      const g = pw.root.position.length();
+      setObstacle(this.obstacles[i], pw.root.position, (radius + CHAR_RADIUS) / g, (CHAR_SIDE - CHAR_RADIUS) / g);
     }
   }
 

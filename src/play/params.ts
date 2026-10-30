@@ -5,6 +5,9 @@ import { WORK_SIZE } from '../planet/placement';
 
 export const CHAR_HEIGHT = 1.0; // 角色身高
 export const CHAR_RADIUS = 0.36 * CHAR_HEIGHT; // 碰撞半径：翠宝的身体球半径约是身高的 0.36
+// 两侧伸到多远：翠宝的手臂比身体宽（scripts/measure-clip.mjs 量的：站着 0.47，走起来手臂往外张一点）。
+// 东西在角色侧面时按它挡（walker.ts 的 Obstacle.side），贴着作品侧着走过去手臂不插进去；正前方还是 CHAR_RADIUS
+export const CHAR_SIDE = 0.5 * CHAR_HEIGHT;
 export const WADE_DEPTH = 0.3 * CHAR_HEIGHT; // 水最多没到小腿：水底比水面低更多时，脚踩在水面下这么深的地方
 export const NEAR_DISTANCE = 1.8 * WORK_SIZE; // 离作品中心这么近时显示标签、按 E 能打开
 

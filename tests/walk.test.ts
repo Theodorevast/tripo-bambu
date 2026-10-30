@@ -2,9 +2,9 @@ import * as THREE from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 import { makeHeightFn, seaRadius } from '../src/planet/noise';
 import { FollowCamera } from '../src/play/followCamera';
-import { CHAR_RADIUS, FOLLOW, WADE_DEPTH, WALK } from '../src/play/params';
+import { CHAR_RADIUS, CHAR_SIDE, FOLLOW, WADE_DEPTH, WALK } from '../src/play/params';
 import { blendPose, signedAngle, slerpDir, turnToward, walkGround } from '../src/play/sphere';
-import { collide, setObstacle, Walker, type Obstacle } from '../src/play/walker';
+import { collide, newObstacle, setObstacle, Walker, type Obstacle } from '../src/play/walker';
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const R = 10;
@@ -30,9 +30,10 @@ function holdForward(w: Walker, heading: THREE.Vector3, seconds: number, fps: nu
   }
 }
 
-function obstacle(center: THREE.Vector3, radius: number, groundRadius = R): Obstacle {
-  const o: Obstacle = { center: new THREE.Vector3(), minAngle: 0, cosMin: 1 };
-  setObstacle(o, center, (radius + CHAR_RADIUS) / groundRadius);
+// arms：作品在角色侧面时多挡手臂伸出去的那段（CHAR_SIDE − CHAR_RADIUS，和 walkMode 一样）
+function obstacle(center: THREE.Vector3, radius: number, groundRadius = R, arms = false): Obstacle {
+  const o = newObstacle();
+  setObstacle(o, center, (radius + CHAR_RADIUS) / groundRadius, arms ? (CHAR_SIDE - CHAR_RADIUS) / groundRadius : 0);
   return o;
 }
 
@@ -206,6 +207,42 @@ describe('圆柱碰撞', () => {
     const w = walkerAt(center.clone(), v(1, 0, 0), flat, obs);
     expect(w.dir.dot(center)).toBeLessThanOrEqual(obs[0].cosMin + 1e-9);
     expect(Math.acos(w.dir.dot(center))).toBeCloseTo(obs[0].minAngle, 5);
+  });
+
+  it('手臂：作品在角色正侧面时多挡 CHAR_SIDE − CHAR_RADIUS，正前方照旧按碰撞半径', () => {
+    const obs = [obstacle(center, 1.2, R, true)];
+    const at = center.clone().applyAxisAngle(v(1, 0, 0), -0.05); // 作品南边，圆柱里面
+    const toCenter = center.clone().addScaledVector(at, -center.dot(at)).normalize();
+    // 面朝作品：推到碰撞半径的圆柱边上
+    const front = walkerAt(at, toCenter, flat, obs);
+    expect(Math.acos(front.dir.dot(center))).toBeCloseTo(obs[0].minAngle, 5);
+    // 侧对作品（朝向和「作品 → 角色」垂直）：推到再远 CHAR_SIDE − CHAR_RADIUS 的地方
+    const side = walkerAt(at, toCenter.clone().cross(at), flat, obs);
+    expect(Math.acos(side.dir.dot(center))).toBeCloseTo(obs[0].minAngle + obs[0].side, 5);
+    expect(obs[0].side * R).toBeCloseTo(CHAR_SIDE - CHAR_RADIUS, 9);
+  });
+
+  it('手臂：斜着撞上去、贴着圆柱侧着滑过去，每一帧手臂都在圆柱外面（按当时的朝向）', () => {
+    const obs = [obstacle(center, 1.2, R, true)];
+    const start = startAt(0.8);
+    const heading = north(start);
+    const w = walkerAt(start, heading, flat, obs);
+    let minGap = Infinity;
+    let sideways = 0;
+    const t = new THREE.Vector3();
+    holdForward(w, heading.clone(), 6, 60, obs, (x) => {
+      // 按朝向算这一帧该挡多远：作品在侧面时多 side·(1 − k²)
+      const d = x.dir.dot(center);
+      t.copy(x.dir).addScaledVector(center, -d).normalize();
+      const k = x.facing.dot(t) / d;
+      const need = obs[0].minAngle + obs[0].side * (1 - k * k);
+      minGap = Math.min(minGap, Math.acos(Math.min(1, d)) - need);
+      if (x.bumped && Math.abs(k) < 0.3) sideways++;
+    });
+    // 转身在碰撞之后（转过来的那一下要到下一帧才推出去）：60 帧时最多差 3 厘米、只有一帧
+    expect(minGap).toBeGreaterThan(-0.03 / R);
+    expect(sideways).toBeGreaterThan(10); // 确实侧着贴着圆柱滑了一段
+    expect(w.dir.y).toBeGreaterThan(0.3);
   });
 
   it('collide 去掉速度里朝圆柱里面的分量，留下沿边的分量', () => {
