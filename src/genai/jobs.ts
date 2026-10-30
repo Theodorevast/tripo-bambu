@@ -17,6 +17,12 @@ import { ACTIVE_PHASES, type GenError, type GenErrorCode, type GenInput, type Ge
 export const POLL_MIN_MS = 2000; // 轮询间隔：最短（状态、进度一变就回到它）
 export const POLL_MAX_MS = 5000; // 最长；轮询、下载出错后也隔这么久再试
 export const POLL_GROWTH = 1.25; // 状态没变时，每次间隔乘以它
+// 收尾：快完成时每秒问一次，成功了马上知道（平均早 1–2 秒开始下载；Tripo 建议 1–2 秒一次）。
+// 快完成 = 进度到 90%，或者已经过了预计耗时的 85%（Tripo 的进度常常在最后一段不动）；超过预计耗时的 1.5 倍还没完，回到平时的退避
+export const POLL_TAIL_MS = 1000;
+export const POLL_TAIL_PROGRESS = 90;
+export const POLL_TAIL_FROM = 0.85;
+export const POLL_TAIL_UNTIL = 1.5;
 export const RETRY_AFTER_CAP_MS = 30_000; // 中转说的 retryAfter 最多等这么久
 export const MAX_JOBS = 30; // 列表里最多留几个（多了先删最早结束的；没结束的不删）
 export const MAX_PROMPT_CHARS = 1024; // 提示词最多几个字符（Tripo 的上限；界面的字数提示也用它）
@@ -73,8 +79,12 @@ function cleanOptions(o: unknown): GenOptions {
   if (typeof o.texture === 'boolean') out.texture = o.texture;
   if (typeof o.pbr === 'boolean') out.pbr = o.pbr;
   if (isText(o.modelVersion, 60) && o.modelVersion) out.modelVersion = o.modelVersion;
+  if (o.textureQuality === 'fast' || o.textureQuality === 'standard') out.textureQuality = o.textureQuality;
   return out;
 }
+
+// 预览图地址：中转的 /…/preview/:id、模拟中转的 /thumbs/…，或者 http(s) 的绝对地址；别的（javascript: 之类）不要
+const isPreviewUrl = (v: unknown): v is string => isText(v, 500) && (/^\/(?!\/)/.test(v) || /^https?:\/\//i.test(v));
 
 function toError(v: unknown): GenError | null {
   if (!isRecord(v) || typeof v.code !== 'string' || !(CODES as readonly string[]).includes(v.code) || !isText(v.message, 500)) return null;
@@ -101,6 +111,11 @@ function toStoredJob(v: unknown): StoredJob | null {
   if (error) job.error = error;
   if (isText(v.workId, 120) && v.workId) job.workId = v.workId;
   if (v.seen === true) job.seen = true;
+  if (isTime(v.etaSec) && v.etaSec > 0 && v.etaSec <= 3600) job.etaSec = v.etaSec;
+  if (isText(v.modelLabel, 40) && v.modelLabel) job.modelLabel = v.modelLabel;
+  if (isTime(v.startedAt)) job.startedAt = v.startedAt;
+  if (isTime(v.runningAt)) job.runningAt = v.runningAt;
+  if (isPreviewUrl(v.previewUrl)) job.previewUrl = v.previewUrl;
   if (typeof v.failedAt === 'string' && (PHASES as readonly string[]).includes(v.failedAt)) job.failedAt = v.failedAt as JobPhase;
   if (v.retryable === true) job.retryable = true;
   return job;
@@ -200,6 +215,8 @@ export class GenJobs {
     };
     if (input.mode === 'text') job.prompt = input.prompt.trim();
     else job.inputNames = (input.mode === 'image' ? [input.image] : input.views).filter((f): f is File => !!f).map((f) => f.name);
+    if (typeof input.etaSec === 'number' && Number.isFinite(input.etaSec) && input.etaSec > 0) job.etaSec = Math.min(3600, input.etaSec);
+    if (input.modelLabel) job.modelLabel = input.modelLabel.slice(0, 40);
     this.jobs.unshift(job);
     this.prune();
     this.persist();
@@ -309,7 +326,7 @@ export class GenJobs {
       }
       const { taskId } = await this.api.createTask(req);
       if (this.stale(id, token)) return;
-      this.set(id, { phase: 'queued', taskId, progress: 0 });
+      this.set(id, { phase: 'queued', taskId, progress: 0, startedAt: this.now() });
       this.schedule(id, token, POLL_MIN_MS, () => this.poll(id, token));
     } catch (err) {
       if (this.stale(id, token)) return;
@@ -332,7 +349,8 @@ export class GenJobs {
     const r = this.runners.get(id);
     const cur = this.find(id);
     if (!r || r.token !== token || !cur) return;
-    if (info.status === 'success') return this.fetchModel(id, token);
+    // 成功：Tripo 渲染的预览图先记下来，下载、导入模型期间窗口里就有图看
+    if (info.status === 'success') return this.fetchModel(id, token, info.previewUrl ? this.api.resolve(info.previewUrl) : undefined);
     if (info.status === 'failed') return this.fail(id, token, 'upstream', { detail: info.error });
     if (info.status === 'cancelled') return this.end(id, token, { phase: 'cancelled', stalled: undefined });
     // unknown：当作没变，接着问
@@ -340,21 +358,33 @@ export class GenJobs {
     const reported = info.status === 'unknown' ? cur.progress : clampProgress(info.progress);
     const progress = phase === cur.phase ? Math.max(cur.progress, reported) : reported; // 同一步里进度不往回走
     const changed = phase !== cur.phase || progress !== cur.progress;
-    r.interval = changed ? POLL_MIN_MS : Math.min(POLL_MAX_MS, Math.round(r.interval * POLL_GROWTH));
-    if (changed || cur.stalled) this.set(id, { phase, progress, stalled: undefined });
+    const t = this.now();
+    r.interval = this.inTail(cur, progress, t) ? POLL_TAIL_MS : changed ? POLL_MIN_MS : Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Math.round(r.interval * POLL_GROWTH)));
+    const patch: Partial<StoredJob> = { phase, progress, stalled: undefined };
+    if (phase === 'running' && cur.runningAt === undefined) patch.runningAt = t;
+    if (changed || cur.stalled || patch.runningAt !== undefined) this.set(id, patch);
     this.schedule(id, token, r.interval, () => this.poll(id, token));
   }
 
-  // 下载模型、交给 finish 导入
-  private async fetchModel(id: string, token: number): Promise<void> {
+  // 是不是到了收尾（见 POLL_TAIL_*）：进度到了，或者在预计耗时的 85%–150% 之间
+  private inTail(job: StoredJob, progress: number, t: number): boolean {
+    if (progress >= POLL_TAIL_PROGRESS) return true;
+    if (!job.etaSec || job.startedAt === undefined) return false;
+    const k = (t - job.startedAt) / (job.etaSec * 1000);
+    return k >= POLL_TAIL_FROM && k <= POLL_TAIL_UNTIL;
+  }
+
+  // 下载模型、交给 finish 导入。previewUrl：刚成功时轮询拿到的预览图
+  private async fetchModel(id: string, token: number, previewUrl?: string): Promise<void> {
     let blob = this.downloads.get(id);
     if (!blob) {
       const job = this.find(id);
       if (!job?.taskId || this.stale(id, token)) return;
       // 从轮询转过来：stalled 清掉（下载重试时阶段已经是 downloading，不动它，免得一闪一闪）
-      if (job.phase !== 'downloading') this.set(id, { phase: 'downloading', progress: 100, stalled: undefined });
+      if (job.phase !== 'downloading') this.set(id, { phase: 'downloading', progress: 100, stalled: undefined, ...(previewUrl ? { previewUrl } : {}) });
       try {
-        blob = await this.api.download(job.taskId);
+        // 下载进度只通知、不存档（一秒好几次）
+        blob = await this.api.download(job.taskId, (p) => { if (!this.stale(id, token)) this.set(id, { download: p }, false); });
       } catch (err) {
         if (!this.stale(id, token)) this.hiccup(id, token, err, () => this.fetchModel(id, token));
         return;
@@ -364,7 +394,7 @@ export class GenJobs {
     }
     const job = this.find(id);
     if (!job || this.stale(id, token)) return;
-    this.set(id, { phase: 'importing', progress: 100, stalled: undefined });
+    this.set(id, { phase: 'importing', progress: 100, stalled: undefined, download: undefined });
     let result: { workId: string };
     try {
       result = await this.finishWork(toPublic(job), blob);
@@ -445,8 +475,8 @@ export class GenJobs {
     return this.jobs.find((j) => j.id === id);
   }
 
-  // 改任务（值是 undefined 的字段删掉）→ 存档 → 通知
-  private set(id: string, patch: Partial<StoredJob>): void {
+  // 改任务（值是 undefined 的字段删掉）→ 存档 → 通知。save = false：只通知（下载进度这种一秒好几次的）
+  private set(id: string, patch: Partial<StoredJob>, save = true): void {
     const job = this.find(id);
     if (!job) return;
     const from = job.phase;
@@ -456,7 +486,7 @@ export class GenJobs {
       else target[k] = v;
     }
     job.updatedAt = this.now();
-    this.persist();
+    if (save) this.persist();
     this.emit(job, from);
   }
 
@@ -481,11 +511,11 @@ export class GenJobs {
     }
   }
 
-  // 存档：{ v: 1, jobs }。stalled 不存（刷新以后重新判断）；写不进去（配额满、隐私模式）时只留在内存里
+  // 存档：{ v: 1, jobs }。stalled、download 不存（刷新以后重新判断、重新下载）；写不进去（配额满、隐私模式）时只留在内存里
   private persist(): void {
     if (!this.storage) return;
     try {
-      this.storage.setItem(JOBS_KEY, JSON.stringify({ v: 1, jobs: this.jobs }, (key, value: unknown) => (key === 'stalled' ? undefined : value)));
+      this.storage.setItem(JOBS_KEY, JSON.stringify({ v: 1, jobs: this.jobs }, (key, value: unknown) => (key === 'stalled' || key === 'download' ? undefined : value)));
     } catch {
       // 下次改动时再试
     }

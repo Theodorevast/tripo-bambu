@@ -11,11 +11,27 @@ export interface TripoHealth { ok: true; mock: boolean }
 export interface TripoBalance { ok: true; balance: number; frozen: number }
 export interface TripoUploaded { ok: true; token: string; type: 'png' | 'jpeg' }
 export interface TripoView { token: string; type?: string }
+// 三种任务共用的可选字段。textureQuality：fast 是快速贴图（不加钱，只有目录里写了 fast 的版本能用）；
+// faceLimit：0 = 不发 face_limit，不传用中转的默认（TRIPO_FACE_LIMIT，默认 30 万）
+export interface TripoTaskOptions { texture?: boolean; pbr?: boolean; modelVersion?: string; textureQuality?: 'standard' | 'fast'; faceLimit?: number; compress?: boolean }
 export type TripoTaskRequest =
-  | { mode: 'text'; prompt: string; texture?: boolean; pbr?: boolean; modelVersion?: string }
-  | { mode: 'image'; token: string; type?: string; texture?: boolean; pbr?: boolean; modelVersion?: string }
+  | ({ mode: 'text'; prompt: string } & TripoTaskOptions)
+  | ({ mode: 'image'; token: string; type?: string } & TripoTaskOptions)
   // 顺序：前、左、后、右；正面必须有，至少 2 张
-  | { mode: 'multiview'; views: [TripoView | null, TripoView | null, TripoView | null, TripoView | null]; texture?: boolean; pbr?: boolean; modelVersion?: string };
+  | ({ mode: 'multiview'; views: [TripoView | null, TripoView | null, TripoView | null, TripoView | null] } & TripoTaskOptions);
+// GET /models：放行的模型版本和它们的说明。eta、credits 按 [生成方式][贴图档] 查，这个版本不支持的贴图档没有键
+export type TripoTextureChoice = 'none' | 'fast' | 'standard';
+export type TripoModeTable = Record<'text' | 'image' | 'multiview', Partial<Record<TripoTextureChoice, number | null>>>;
+export interface TripoModelInfo {
+  id: string;
+  label: string;
+  blurb: string;
+  textures: TripoTextureChoice[];
+  eta: TripoModeTable | null; // 秒，从建任务到 success
+  measured: boolean; // eta 是实测的（scripts/bench-tripo.mjs）还是估的
+  credits: TripoModeTable | null;
+}
+export interface TripoModels { ok: true; defaultModel: string; defaultTexture: TripoTextureChoice; models: TripoModelInfo[] }
 export interface TripoTaskCreated { ok: true; taskId: string }
 export interface TripoTaskState {
   ok: true;
@@ -23,6 +39,7 @@ export interface TripoTaskState {
   progress: number;
   modelUrl?: string;
   previewUrl?: string;
+  credits?: number; // success 时 Tripo 报的扣费（credits_consumed）；模拟模式没有
   error?: string;
 }
 
@@ -57,6 +74,8 @@ export interface TripoConfig {
   modelVersions: string[];
   defaultModel: string;
   downloadHosts: string[];
+  faceLimit: number; // 0 = 不发 face_limit
+  compress: boolean; // TRIPO_COMPRESS=geometry
 }
 
 export function createHandler(options?: TripoHandlerOptions): TripoHandle;
@@ -77,4 +96,10 @@ export function buildTask(body: unknown, cfg: TripoConfig): {
   route: string;
   payload: Record<string, unknown>;
   mockTriggers: { fail: boolean; quota: boolean; upstream: boolean };
+  optional: string[]; // payload 里加速用的可选字段（被 Tripo 拒时去掉重试）
 };
+export function modelsInfo(cfg: TripoConfig): Omit<TripoModels, 'ok'>;
+export const MODEL_CATALOG: Record<string, { label: string; blurb: string; textures: TripoTextureChoice[]; fastQuality?: boolean; compress?: boolean; maxFaces?: number; credits: TripoModeTable }>;
+export const ETA_SEC: Record<string, TripoModeTable & { measured: boolean }>;
+export const FAST_TEXTURE_VERSION: string;
+export const DEFAULT_TEXTURE: TripoTextureChoice;

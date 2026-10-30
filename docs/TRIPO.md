@@ -40,10 +40,11 @@ curl http://127.0.0.1:5173/api/tripo/health   # → {"ok":true,"mock":true}
 | 接口 | 请求 | 返回 |
 | --- | --- | --- |
 | `GET /health` | — | `{ ok, mock }` |
+| `GET /models` | — | `{ ok, defaultModel, defaultTexture, models: [{ id, label, blurb, textures, eta, measured, credits }] }`（模型选择器，见 10.9） |
 | `GET /balance` | — | `{ ok, balance, frozen }`（Tripo 积分，带两位小数的数字，别用 parseInt） |
 | `POST /upload` | multipart，字段 `file`，**一张** PNG / JPEG，≤ 10 MB | `{ ok, token, type: 'png' \| 'jpeg' }` |
 | `POST /task` | JSON，见下 | `{ ok, taskId }` |
-| `GET /task/:id` | — | `{ ok, status, progress, modelUrl?, previewUrl?, error? }` |
+| `GET /task/:id` | — | `{ ok, status, progress, modelUrl?, previewUrl?, credits?, error? }`（`credits`：成功时 Tripo 报的扣费） |
 | `GET /download/:id` | — | 结果 GLB，流式返回，`Content-Type: model/gltf-binary`，带 `Content-Length` |
 | `GET /preview/:id` | — | 结果预览图（同源，可以画到 canvas 上） |
 
@@ -58,6 +59,11 @@ curl http://127.0.0.1:5173/api/tripo/health   # → {"ok":true,"mock":true}
 - `texture`、`pbr`、`modelVersion`、`type` 都可以不传。不传时 Tripo 默认带贴图和 PBR；`texture: false` 会一并关掉 PBR（Tripo 的 `pbr` 默认是 true，而且会强制带贴图）。
 - `prompt` 最多 1024 个字。多视图正好 4 项，**正面必须有，至少 2 张**。
 - `modelVersion` 默认 `v3.1-20260211`，可选值由 `TRIPO_MODEL_VERSIONS` 决定（默认只有 H 系列，见第 8 节）。
+- 加速用的可选字段（三种任务都能带，都不加钱，见 10.9）：
+  - `textureQuality: 'fast'`：快速贴图。中转发 `pbr: false`，v3.0 以上再加 `texture_quality: 'fast'` 和 `texture_version: 'v3.5-20260815'`；P 系列没有这一档；和 `pbr: true` 一起传会被拒。`'standard'` 等于不传。
+  - `faceLimit`：`0` = 不发 `face_limit`，或者 1000–500000 的整数；不传用中转的默认（`TRIPO_FACE_LIMIT`，30 万）。P1 这种自己有更低上限的版本不发默认值。
+  - `compress`：布尔，`true` 发 `compress: 'geometry'`（meshopt，只给 v3.0 以上）；不传按 `TRIPO_COMPRESS`（默认关）。
+  - 这些参数被 Tripo 当成无效参数（1003 / 1004）拒绝时，中转去掉它们再建一次（建任务失败不扣积分）。
 
 `status` 取值：`queued`、`running`、`success`、`failed`、`cancelled`、`unknown`。`progress` 是 0–100 的整数。成功时给 `modelUrl: '/api/tripo/download/:id'` 和 `previewUrl: '/api/tripo/preview/:id'`；失败或取消时给 `error`。
 
@@ -369,7 +375,9 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 | `TRIPO_MAX_IMAGE_MB` | 10 | 单张图上限，最大只能调到 20（Tripo 的上限） |
 | `ALLOWED_ORIGINS` | 空 | 允许跨域调用的网页来源，逗号分隔；空 = 只允许同源。`*` 表示任何来源（不建议） |
 | `TRIPO_MODEL_VERSIONS` | `v3.1-20260211,v3.0-20250812,v2.5-20250123` | 前端能选的模型版本。P 系列（`P1-20260311`、`P2-20260801`）贵很多，默认不放行 |
-| `TRIPO_DEFAULT_MODEL_VERSION` | `v3.1-20260211` | 前端没指定时用的版本 |
+| `TRIPO_DEFAULT_MODEL_VERSION` | `v3.1-20260211` | 前端没指定时用的版本（也是选择器上标 Recommended 的那个） |
+| `TRIPO_FACE_LIMIT` | `300000` | 发给 Tripo 的默认 `face_limit`（网页导入时反正简化到 30 万面）。`0` = 不发；只认 1000–500000 |
+| `TRIPO_COMPRESS` | 空 | `geometry` = 默认带 `compress: 'geometry'`（meshopt）。真实测过一次、确认结果文件用的是 `EXT_meshopt_compression` 再打开（10.9） |
 | `TRIPO_API_BASE` | `https://openapi.tripo3d.ai/v3` | 中国区账号用 `https://openapi.tripo3d.com/v3` |
 | `TRIPO_DOWNLOAD_HOSTS` | 空 | 结果文件额外允许的主机。内置 `tripo3d.ai`、`tripo3d.com` 及其子域名 |
 | `TRIPO_MAX_DOWNLOAD_MB` | 200 | 结果文件上限 |
@@ -380,7 +388,7 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 
 固定的限制：JSON 请求体 ≤ 16 KB；`prompt` ≤ 1024 字；一次上传一张图、只认 PNG / JPEG（按文件头判断）；多视图正好 4 个位置、正面必填、至少 2 张；下载只按任务 id，不接受任何 URL。
 
-**算一下最多花多少**：本中转只开放了基本参数，单个任务最多 30 积分（图片 / 多视图带贴图；文字带贴图 20、不带 10；1 积分 = 0.01 美元）。默认每日上限 50 个，即滚动 24 小时内最多约 1500 积分（约 15 美元）。
+**算一下最多花多少**：本中转只开放了不加钱的参数（快速贴图、`face_limit`、`compress` 都不加钱），单个任务最多 30 积分（图片 / 多视图带贴图；文字带贴图 20、不带 10；1 积分 = 0.01 美元）；把 P1 加进 `TRIPO_MODEL_VERSIONS` 的话最多 50。默认每日上限 50 个，即滚动 24 小时内最多约 1500 积分（约 15 美元）。
 
 **会场共用 Wi-Fi**：所有人可能共用一个出口 IP，会一起被「每 IP」限额卡住。现场演示时调大 `TRIPO_MAX_TASKS_PER_IP_PER_HOUR` 和 `TRIPO_MAX_REQUESTS_PER_IP_PER_MINUTE`，靠 `TRIPO_MAX_TASKS_PER_DAY` 兜底。
 
@@ -475,6 +483,104 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 
 任务失败时的 `error_code` 和请求级的 `code` 是两套，同一个数字含义可能不同。HTTP 404 一律映射成 `not_found`。来源：[Error Handling](https://developers.tripo3d.ai/en/docs/error-handling)。
 
+### 10.9 速度：模型、选项、耗时、价格（2026-10-30 调研 + 实测）
+
+模型页大多是前端渲染的，数字是从站点的 JS 包里读出来的；同一页上有两个数时两个都写。
+
+**生成要多久**（官方都是「约」，不分文字 / 单图 / 多视图）：
+
+| | 不带贴图 | 带贴图 | 来源 |
+| --- | --- | --- | --- |
+| v3.1 | 约 40 秒 | 约 120 秒（带 PBR） | [v3.1 模型页](https://developers.tripo3d.ai/en/models/v3-1) |
+| P1 | 约 10 秒（「base mesh generation in approximately 10 seconds」） | 约 60 秒 | [P1 模型页（存档，2026-08-20）](http://web.archive.org/web/20260820050958/https://developers.tripo3d.ai/en/models/p1)（现在 /models/p1 跳到 P2）；同一个包里还有旧数字 2 秒 / 15 秒 |
+| v3.0、v2.5、P2 | 没写 | 没写 | Tripo CLI 只说 v3.0「Good quality, faster」 |
+
+- [Quick Start](https://developers.tripo3d.ai/en/docs/quick-start)：「Typical generation takes 10–120 seconds」；只要几何约 40 秒、标准贴图约 80 秒、v3.1 + PBR + 高清贴图 + 高清几何约 120 秒；单图 + 转换约 125 秒、单图转多视图再生成约 120 秒（单图、多视图和文字差不多）。
+- **PBR 是最慢的一段**：「PBR generation is significantly slower (~120s vs ~20s)」（同页另一处写 ~40s）。`pbr: true` 会强制带贴图。
+- 第三方实测（含排队）：WaveSpeed 上 H3.1 单图约 197 秒、H2.5 约 159 秒（[链接](https://wavespeed.ai/models/tripo3d/h3.1/image-to-3d)）。H2.5 并不明显快。
+- **我们的实测**：v3.1 文字、不带贴图约 90 秒（比官方的 40 秒多：文字要先出图，再加排队）。
+- v3 里**没有 Turbo**：`Turbo-v1.0-20250506` 列为已退役、映射到 v2.5（[官方迁移说明](https://developers.tripo3d.ai/assets/developer/tripo-v2-to-v3-migration/SKILL.md)）。文档里能快的只有 P1、`texture: false`、`texture_quality: fast`。
+
+**选项对时间、价格的影响**：
+
+| 选项 | 时间 | 价格 | 来源 |
+| --- | --- | --- | --- |
+| `texture: false` | v3.1 约 40 秒对 120 秒；P1 约 10 秒对 60 秒 | 文字 10、单图 / 多视图 20（带贴图 20 / 30） | 模型页、[Pricing](https://developers.tripo3d.ai/en/pricing) |
+| `pbr: false`（带贴图） | 标准贴图约 80 秒对 PBR 约 120 秒 | 不另收钱（按带贴图算） | Quick Start、Pricing |
+| `texture_quality: fast`（要配 `texture_version: v3.5-20260815`） | 「the fastest generation, trading texture detail for speed」，没给数字 | **和 standard 一样**：「Output texture size and credit cost are both identical to `standard`」；价目表 Fast 10 / Standard 10 | [Text to Model](https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard.md)、[Changelog](https://developers.tripo3d.ai/en/docs/changelog.md) |
+| `texture_quality: detailed` | 多约 90 秒（另一处写 80 秒），4K | +10 | Quick Start、Pricing |
+| `face_limit` | 没写 | 生成不加钱（只有 `/v3/models/convert` 用它时按高级转换收 10） | Pricing |
+| `compress: 'geometry'` | 没写 | 不加钱 | Pricing |
+| `export_uv: false` | 「faster generation and smaller file size」 | — | Text to Model |
+| 加钱的（都不放行） | — | 高清贴图 +10、8K +20、高清几何 +20、四边面 +5、智能低模 +10、拆件 +20 | Pricing |
+
+- `texture_version: v3.5-20260815` 是 2026-09 加的新贴图模型，要显式写；默认还是 `v3.0-20250812`；`fast` 和 `delight` 都要它（Changelog）。
+- P 系列价格：P1 文字 30（不带贴图）/ 40（标准贴图），单图、多视图 40 / 50（Pricing 的 P Series 页；存档页还有 Detailed 50 / 60 / 60）；P2 每种方式 100 / 110 / 120 / 130（[P2 模型页](https://developers.tripo3d.ai/en/models/p2)）。实际扣费以任务的 `credits_consumed` 为准（[Task Query](https://developers.tripo3d.ai/en/docs/task-query.md)）。
+
+**`compress: 'geometry'` 是 meshopt**：文档「meshopt compression for reduced file size」，只支持 `model ≥ v3.0-20250812`，P 系列页上没有；JS SDK 的类型写「`'geometry'` applies meshopt compression」（[tripo-js-sdk](https://github.com/Tripo-Developer/tripo-js-sdk)），Python SDK 收布尔值、发 `"geometry"`（[tripo-python-sdk](https://github.com/Tripo-Developer/tripo-python-sdk)）。文档里没有 Draco、KTX2、WebP（0 处）。贴图格式只能通过转换接口改（`texture_format` 有 WEBP，默认 JPEG、4096；非默认值收 10 积分，[Convert](https://developers.tripo3d.ai/en/docs/models-convert.md)）。
+- 我们的导入管线认 `EXT_meshopt_compression`（gltf-transform 4.5.1 只认这个名字，不认新的 `KHR_meshopt_compression`）。文档没写扩展名，所以 **`TRIPO_COMPRESS` 默认关**：等测速脚本第 7 行看到真实结果的 `extensionsUsed` 是 `EXT_meshopt_compression`，再设 `TRIPO_COMPRESS=geometry`。
+
+**面数**：不传 `face_limit` 是「adaptive topology」，没给数字；上限 v3.1 150 万（`geometry_quality: detailed` 200 万）、v3.0 100 万、v2.5 50 万，四边面 15 万，智能低模 500–2 万；网页 / 手机建议 1–5 万面（Text to Model）。P1 50–2 万面，P2 48–5 万三角面（[P 系列](https://developers.tripo3d.ai/en/docs/generation-text-to-model/p.md)）。
+
+**结果文件，我们的实测**（`.tmp/real-test/` 里两个 v3.1 的真实结果）：
+
+| | 大小 | 面数 | 贴图 | 扩展 |
+| --- | --- | --- | --- | --- |
+| 文字、不带贴图 | 38.75 MB | 1,425,240 | 无 | 无 |
+| 单图、带贴图（PBR） | 42.33 MB | 1,410,071 | 3 张 2048（2 张 JPEG、1 张 PNG），共 3.3 MB | 无 |
+
+**92% 是几何**（不压缩：uint32 索引 16 MB、位置 8.6 MB、法线 8.6 MB、UV 5.7 MB），贴图只占 3.3 MB。v3.1 不限面数时给到 141 万面，接近它的上限；网页导入时又会简化到 30 万面。所以 **`face_limit = 300000`** 不会比现在难看（用户看到的本来就是 30 万面），文件小到约 12 MB（把同一个模型简化到 29 万面实测 12.1 MB），导入也不用再简化。
+
+**预览图**：`rendered_image_url` 只在 success 时有（「Only populated when `status=success`」）；官方样例是 `.png` 占位，阿里云的接入样例是 `openapi.cdn.tripo3d.com` 上的 `.webp`。
+
+**进度和轮询**：v3 没有预计时间、排队位置（`queue_position`、`estimated_running_time`、`running_left_time`、`queuing_num` 都去掉了，「derive UX from `progress`」）；两个 SDK 还声明着 `running_left_time` / `queuing_num`，别指望。`queued` 是 0、`running` 0–100、`success` 100。轮询：「Query once every 1-2 seconds」（[Task Lifecycle](https://developers.tripo3d.ai/en/docs/task-lifecycle.md)、[Rate Limits](https://developers.tripo3d.ai/en/docs/rate-limits.md)），迁移说明写 2–5 秒，JS SDK 默认 2 秒；**轮询的 GET 不占建任务的频率额度**。并发：H 系列 10 个、P 系列 5 个。
+
+**这次怎么用上**（代码见 `server/tripo/handler.mjs` 的 `MODEL_CATALOG`、`ETA_SEC`，`src/ui/genaiDialog.ts` 的选择器，`src/genai/eta.ts`、`jobs.ts`）：
+
+- **模型选择器**：文字、单图、多视图三页都有，每个版本一行：名字、一句长处、大概多久、多少积分。数据都从中转的 `GET /models` 来（中转是唯一来源，只列 `TRIPO_MODEL_VERSIONS` 放行的；P2 照旧不放行）。预计耗时在 **`ETA_SEC` 一张表**里，按「模型 × 生成方式 × 贴图档」写秒数，现在是估的（`measured: false`）：
+  - v3.1 文字：不带贴图 90（实测）、快速贴图 120、标准贴图 170；单图、多视图比文字少 10–15 秒（官方 40 / 120 秒是单图的量级）。
+  - v3.0 比 v3.1 少约 15%；v2.5 和 v3.0 差不多（第三方的数）；P1 文字 30 / 80。
+  - 测完把实测的中位数填进去、`measured` 改成 `true`（界面上的「≈」悬停提示会写 Measured）。
+- **默认 H3.1 + 快速贴图**：模型之间差得不多（P1 快但贵一倍、是低模的样子），差得多的是贴图——带 PBR 的标准贴图最慢。快速贴图 = 不要 PBR + v3.0 以上用 Tripo 的快速贴图模型，同价，估计比标准贴图快三成左右（约 120 秒对 170 秒），还保住 v3.1 的形状。要完整的 PBR 材质就选 Standard；改默认：`handler.mjs` 的 `DEFAULT_TEXTURE`。
+- **默认 `face_limit = 300000`**：下载从约 42 MB 降到约 12 MB。模拟模式实测（`scripts/perf-genai-import.mjs`，真实结果当样本）：success 以后本机下载 0.13 → 0.05 秒、导入 + 缩略图 + 存进本地 2.04 → 0.54 秒、窗口里画出来 0.12 秒；真实网络上下载才是大头：42.3 MB 在 20 / 50 / 100 Mbps 上约 17.8 / 7.1 / 3.6 秒，12.1 MB 约 5.1 / 2.0 / 1.0 秒。Node 里按阶段量导入管线：141 万面要 1.64 秒（清理 0.62、简化 0.82、压缩 0.20），30 万面 0.29 秒。
+- **成功马上给预览图**：任务一 success，窗口舞台上先放 Tripo 渲染的预览图（白底用 multiply 融进舞台），下面是下载进度（「Downloading… 4.2 MB of 12.1 MB」），模型导入好再换成能转的 3D。
+- **倒计时**：按选的模型的预计耗时 + Tripo 的进度推（进度越往后越信进度，最多八成五；往上涨不到 15 秒不改口），「About 40 s left」「Almost done…」「Taking a little longer than usual…」。
+- **轮询收尾**：进度到 90%、或者过了预计耗时的 85%（到 150% 为止），每秒问一次；平时照旧 2 秒起、没变化 ×1.25、最多 5 秒。成功以后平均早 1–2 秒开始下载。
+- **加速参数的退路**：快速贴图、`face_limit`、`compress` 被 Tripo 当成无效参数（1003 / 1004）时，中转去掉它们再建一次。
+
+### 10.10 实测：scripts/bench-tripo.mjs
+
+用户同意过：最多 8 个任务、最多 200 积分。脚本自己没有密钥，只和**本地中转**说话；一个一个建文字任务（同一句提示词「a small wooden treasure chest with brass corners」），记提交到 success 的时间、Tripo 的进度时间线、结果大小 / 面数 / glTF 扩展、下载耗时、预览图、每个任务前后的余额差（和 Tripo 报的 `credits`）。计划超过 `--max-credits`（默认、上限 200）不开始；每个任务开始前再算一次；余额比开始时少了超过上限就停。中转是真实模式时必须 `REAL=1` 加 `--yes`；默认只连本机。结果写 `.tmp/bench/bench-<时间>.json` 和 `.md`。
+
+在主目录跑（Git Bash）：
+
+```sh
+cd ~/Desktop/gbn
+# 1. 一个终端：起真实模式的本地中转（读 .env.local 的密钥），每 IP 上限调大，放行 P1；只要接口，不用先 build
+TRIPO_MOCK=0 TRIPO_MAX_TASKS_PER_IP_PER_HOUR=20 \
+TRIPO_MODEL_VERSIONS=v3.1-20260211,v3.0-20250812,v2.5-20250123,P1-20260311 \
+HOST=127.0.0.1 PORT=8790 node server/tripo/node-server.mjs
+# 2. 另一个终端：先看计划和预计积分（不建任务）
+node scripts/bench-tripo.mjs --base http://127.0.0.1:8790/api/tripo --dry-run
+# 3. 真的跑（约 15–25 分钟）
+REAL=1 node scripts/bench-tripo.mjs --base http://127.0.0.1:8790/api/tripo --yes --max-tasks 8 --max-credits 200
+```
+
+默认矩阵（按重要性排，中途停了也先拿到要紧的；共 170 积分）：
+
+| # | 模型 | 贴图 | 其他 | 积分 | 回答什么 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | v3.1 | 快速 | 默认 face_limit 30 万 | 20 | 默认路子要多久 |
+| 2 | v3.1 | 标准（PBR） | 同上 | 20 | 快速贴图省多少 |
+| 3 | v3.1 | 标准（PBR） | 不限面数（`faceLimit: 0`） | 20 | 以前的做法：face_limit 对时间、大小的影响 |
+| 4 | v3.1 | 不带 | 默认 | 10 | 不带贴图 |
+| 5 | v3.0 | 快速 | 默认 | 20 | H3.0 |
+| 6 | v2.5 | 快速（只关 PBR） | 默认 | 20 | H2.5 |
+| 7 | v3.1 | 快速 | `compress: true` | 20 | meshopt 的扩展名、大小（决定要不要开 `TRIPO_COMPRESS`） |
+| 8 | P1 | 标准 | 版本自己的面数 | 40 | P1（中转没放行 P1 时自动跳过） |
+
+只跑几行：`--only 1,2,7`。测完把每行「到 success」的秒数填进 `ETA_SEC`（文字那一列；单图、多视图照比例估），`measured` 改成 `true`；第 7 行的扩展是 `EXT_meshopt_compression` 就设 `TRIPO_COMPRESS=geometry`（`wrangler.toml` 的 `[vars]` 两处）。
+
 ---
 
 ## 11. 从 v2 换到 v3 改了什么
@@ -517,6 +623,8 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 4. 任务 id 是否总是 UUID（中转只限定字符 `[A-Za-z0-9_-]` 和长度 8–128）。
 5. 查不到任务时的业务码（中转以 HTTP 404 为准）。
 6. 每个密钥的具体频率上限（文档没写数值）。
+7. 各版本、各贴图档的真实耗时（`ETA_SEC` 现在是估的）、`face_limit` 和快速贴图对耗时的影响、`compress: 'geometry'` 结果用的扩展名：跑 `scripts/bench-tripo.mjs`（10.10）。
+8. `texture_quality: fast` 在 v3.0 上是否可用（文档只说要配 `texture_version`）；被拒时中转会去掉它重试，不会挡住生成。
 
 拿到真实密钥后的首次验证建议：先 `TRIPO_MOCK=1` 把前端走通；再去掉模拟，只做**一个**最便宜的任务（文字生成、`texture: false`，10 积分），确认轮询、下载、预览都通，再放开。
 
@@ -532,7 +640,7 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 - **多实例 / 持久的限流**：实现 `store` 接口（`hit(key, limit, windowMs, now)`，见 7.3）接 Redis、Durable Objects 或数据库，传给 `createHandler({ store })`。
 - **结果存到自己的存储**：任务成功后由服务端下载一次存到 S3 / R2，给前端自己的地址，就不用每次下载都去 Tripo 取（也不怕链接过期）。改 `result()` 和 `taskStatus()` 里 `modelUrl` 的生成。
 - **用 Webhook 代替轮询**：Tripo 支持 `task.completed`、`task.failed` 回调（HMAC-SHA256 签名），见 [Webhooks](https://developers.tripo3d.ai/en/docs/webhooks)。
-- **开放更多参数**（比如 `negative_prompt`、`face_limit`）：在 `TASK_FIELDS` 加字段，在 `buildTask()` 里校验并写进 `payload`。注意有些参数会多扣积分（见 10.7）。
+- **开放更多参数**（比如 `negative_prompt`；`face_limit`、快速贴图、`compress` 已经开了，见 10.9）：在 `TASK_FIELDS` 加字段，在 `buildTask()` 里校验并写进 `payload`。注意有些参数会多扣积分（见 10.7）。
 - **换模拟数据**：Node / Vite 用 `TRIPO_MOCK_MODEL_FILE`，Worker 用 `MOCK_MODEL_URL`；或者给 `createHandler` 传 `loadMockModel` / `loadMockPreview`。
 - **中国区账号**：`TRIPO_API_BASE=https://openapi.tripo3d.com/v3`。
 
@@ -548,6 +656,7 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 - 上传：转发到 `POST /v3/files`、大小上限、按文件头认格式、只收一张；
 - 下载只放行 Tripo 主机：别的主机、后缀伪装、http、带账号密码、非默认端口、内网地址、跳到白名单外都拒绝且不去请求，不把密钥发给存储主机；
 - 错误码映射、状态映射、跨域白名单、模拟模式的时间线和出错开关、Worker 外壳的路由和按 `CF-Connecting-IP` 限流；
+- 模型列表（`GET /models`：放行的版本、说明、贴图档、预计耗时、积分，跟着 `TRIPO_MODEL_VERSIONS` 走）、快速贴图 / `face_limit` / `compress` 的白名单和映射、加速参数被拒时去掉重试一次、查任务带 `credits`；
 - 最后检查所有用例的响应和日志里都没有出现密钥。
 
 `tests/rateLimiter.test.ts`（假的 Durable Objects 绑定）覆盖 Cloudflare 上的限流：滑动窗口和内存版逐步一致、重启后计数还在、清理闹钟、一次检查一次往返、退名额走 `waitUntil`、可重试的错误只重试一次、两版共用每日上限、静态资源不碰 Durable Objects、真实模式缺绑定时拒绝、模拟模式的模型不套限大小的流。
