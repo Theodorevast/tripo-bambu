@@ -53,8 +53,8 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 
 - 第二版的说明在那个分支根目录的 `V2-README.md`；`compare/index.html` 是两版的对比页。部署方式和第一版一样（`git checkout v2-medieval && npm ci && npm run build`）。
 - `v1-backport` 是从第二版移植回第一版的流畅度修复，已经合进 main（`de4eb2f`）。
-- 写这份文档时 `origin/main` 停在 `0b858cb`。int/v6 比它多了上传模型和 Tripo 生成，还没推到 GitHub。
-- **上传和 Tripo 生成目前只在第一版里。** 搬到第二版时会改到哪些共用文件，见第 6.3 节。
+- GitHub 的 `main` 已经包含上传模型和 Tripo 生成（`3eef512` 合进来的）。
+- **上传和 Tripo 生成两版都有**（第二版换了皮）。两版共用文件的改动清单见第 6.3 节。
 
 ### 1.4 目录结构
 
@@ -361,9 +361,9 @@ export interface UserWorksStore {
 - Draco、KTX2 压缩的模型会被拒（没有解码器）；只保留默认场景；超大的 PNG 贴图不重新编码。
 - 直接拖进页面（不经过「Add a work」窗口）的 GLB 还是原来的临时作品，不存。check-editor、check-drop、check-create 都依赖这个行为。
 
-### 6.3 上传和生成还没进第二版
+### 6.3 上传和生成在第二版里
 
-`v2-medieval` 里没有上传和生成。搬过去时，新文件直接拷：
+上传和生成已经合进 `v2-medieval`（换成第二版深色细金线的皮，只改了 `src/ui/theme-v2.css` 的第 6 部分，逻辑和第一版是同一份）。下面的清单留给以后两版分别演进时对照。当初搬过去时，新文件直接拷：
 
 - `src/works/`、`src/genai/`、`src/ui/genai*`、`server/tripo/`；
 - 对应的 `scripts/`、`tests/`、`dev/import.*`。
