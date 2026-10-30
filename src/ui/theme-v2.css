@@ -986,7 +986,11 @@ kbd { padding: 3px 6px; border-radius: 3px; background: rgba(15, 21, 48, 0.6); b
 :where(#app) .ga-cancel { padding: 9px 14px; font-size: 10px; color: var(--v2-ink-dim); background: transparent; box-shadow: inset 0 0 0 1px rgba(168, 137, 79, 0.5); }
 :where(#app) .ga-cancel::after { background: rgba(168, 137, 79, 0.14); }
 .ga-error-icon { width: 44px; height: 44px; border-radius: 50%; background: transparent; color: #a8473a; box-shadow: inset 0 0 0 1px rgba(168, 71, 58, 0.5); }
-.ga-stage .dots i { background: var(--v2-gold-deep); }
+/* 生成中：三个圆点换成三颗小月相（娥眉、上弦、盈凸），照旧依次亮起，和下面那道细金线配成一组 */
+.ga-stage .dots { gap: 8px; }
+.ga-stage .dots i { width: 11px; height: 11px; border-radius: 0; background: var(--v2-gold-deep); mask: var(--v2-moon-1) center / contain no-repeat; -webkit-mask: var(--v2-moon-1) center / contain no-repeat; }
+.ga-stage .dots i:nth-child(2) { mask-image: var(--v2-moon-2); -webkit-mask-image: var(--v2-moon-2); }
+.ga-stage .dots i:nth-child(3) { mask-image: var(--v2-moon-3); -webkit-mask-image: var(--v2-moon-3); }
 .ga-result { gap: 10px; }
 .ga-name { font: 500 17px/1.3 var(--v2-serif); }
 .ga-facts { gap: 4px; font: 400 12.5px/1.4 var(--v2-sans); color: var(--v2-text-dim); }
@@ -1038,5 +1042,6 @@ kbd { padding: 3px 6px; border-radius: 3px; background: rgba(15, 21, 48, 0.6); b
 @media (prefers-reduced-motion: reduce) {
   .ga-steps li[data-state='now'] > i { animation: none; }
   .ga-stage[data-state='model'] .ga-canvas { animation: fade-in 0.2s ease-out both; }
+  .ga-stage .dots i:nth-child(n) { animation: none; }
   .ga-close .icon, .ga-switch-track i, .ga-bar i { transition-duration: 0.01ms !important; }
 }
