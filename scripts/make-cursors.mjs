@@ -1,6 +1,6 @@
 // 生成光标图（ui/cursor.css 用）：每种光标一张 32×32（1x）、一张 64×64（2x）的 PNG，写到 src/ui/cursors/
 // 图是下面的 SVG（32×32 的坐标），用 sharp（librsvg）按 1 倍、2 倍栅格化：高分屏上系统直接用 2x 那张，不放大、不糊。
-// 热点（指针的尖）写在 cursor.css 里，和这里的坐标对应：箭头的尖在 (4, 3)，拖动的圈在正中 (16, 16)。
+// 热点（指针的尖）写在 cursor.css（第二版在 theme-v2.css）里，和这里的坐标对应：第一版箭头的尖在 (4, 3)，第二版指针的尖在 (5, 3)，拖动的圈在正中 (16, 16)。
 // node scripts/make-cursors.mjs
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -47,7 +47,54 @@ const v1 = {
     <circle cx="14.2" cy="14.2" r="1.15" fill="#fff" fill-opacity="0.85"/>`),
 };
 
-const SETS = { v1 };
+// —— 第二版：午夜天文台。细长的星图指针（星光白、右半面暗一档、中间一道金色的脊线，像天体仪上的指针），
+//    能点时镀金、右上角一颗四角小星；能拖、拖着是一圈香槟金的天体仪刻度（拖着时圈收紧、刻度转到斜角）。
+//    线 1.3px、圆头；底下垫一道半透明的午夜蓝描边：象牙白的作品卡片上也看得见 ——
+const MID = '#0f1530';
+const GOLD = '#d8c08e';
+const DEEP = '#a8894f';
+const STAR = '#f6f1e7';
+const NEEDLE = 'M5 3 L5 21.6 L8.4 16.2 L13.9 19.3 Z'; // 尖 (5, 3)，左边竖直，背后一个凹口
+const LEFT = 'M5 3 L5 21.6 L8.4 16.2 Z';
+const RIGHT = 'M5 3 L8.4 16.2 L13.9 19.3 Z';
+const SPARK = 'M17 2.6 L17.85 5.65 L20.9 6.5 L17.85 7.35 L17 10.4 L16.15 7.35 L13.1 6.5 L16.15 5.65 Z';
+const TICKS = 'M16 3.6V6.4 M28.4 16H25.6 M16 28.4V25.6 M3.6 16H6.4';
+const DIAG = 'M21.09 10.91L23.07 8.93 M10.91 10.91L8.93 8.93 M21.09 21.09L23.07 23.07 M10.91 21.09L8.93 23.07';
+
+const v2 = {
+  // 平时：星光白的指针，右半面暗一档，脊线是深一点的金
+  default: svg(`
+    <path d="${NEEDLE}" fill="${MID}" fill-opacity="0.85" stroke="${MID}" stroke-opacity="0.85" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="${LEFT}" fill="${STAR}"/>
+    <path d="${RIGHT}" fill="#d6c9ae"/>
+    <path d="M5 3 L8.4 16.2" stroke="${DEEP}" stroke-width="0.8" stroke-linecap="round"/>`),
+  // 能点：镀金的指针（脊线换成星光白），右上角一颗四角小星
+  pointer: svg(`
+    <path d="${NEEDLE}" fill="${MID}" fill-opacity="0.85" stroke="${MID}" stroke-opacity="0.85" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="${LEFT}" fill="#efdcab"/>
+    <path d="${RIGHT}" fill="#bf9e5e"/>
+    <path d="M5 3 L8.4 16.2" stroke="${STAR}" stroke-width="0.8" stroke-linecap="round"/>
+    <path d="${SPARK}" fill="${MID}" fill-opacity="0.8" stroke="${MID}" stroke-opacity="0.8" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="${SPARK}" fill="${STAR}"/>`),
+  // 能拖：一圈金线，外面四道刻度，正中一颗星光白的小点
+  grab: svg(`
+    <g fill="none" stroke-linecap="round">
+      <g stroke="${MID}" stroke-opacity="0.75" stroke-width="3"><circle cx="16" cy="16" r="7"/><path d="${TICKS}"/></g>
+      <g stroke="${GOLD}" stroke-width="1.3"><circle cx="16" cy="16" r="7"/><path d="${TICKS}"/></g>
+    </g>
+    <circle cx="16" cy="16" r="2.1" fill="${MID}" fill-opacity="0.75"/>
+    <circle cx="16" cy="16" r="1.25" fill="${STAR}"/>`),
+  // 拖着：圈收紧，刻度转到斜角，正中的小点换成金色
+  grabbing: svg(`
+    <g fill="none" stroke-linecap="round">
+      <g stroke="${MID}" stroke-opacity="0.75" stroke-width="3"><circle cx="16" cy="16" r="5"/><path d="${DIAG}"/></g>
+      <g stroke="${GOLD}" stroke-width="1.3"><circle cx="16" cy="16" r="5"/><path d="${DIAG}"/></g>
+    </g>
+    <circle cx="16" cy="16" r="2.6" fill="${MID}" fill-opacity="0.75"/>
+    <circle cx="16" cy="16" r="1.8" fill="${GOLD}"/>`),
+};
+
+const SETS = { v1, v2 };
 
 mkdirSync(OUT, { recursive: true });
 for (const [set, cursors] of Object.entries(SETS)) {
