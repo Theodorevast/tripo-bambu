@@ -849,3 +849,194 @@ kbd { padding: 3px 6px; border-radius: 3px; background: rgba(15, 21, 48, 0.6); b
   :where(#app) .pp-toggles button { padding: 9px 6px; font-size: 9px; letter-spacing: 0.06em; }
   #app > .walk-hint { font-size: 11px; padding: 9px 14px 10px; }
 }
+
+/* ====================================================================================================
+   第六部分：「Add a work」窗口（上传 / 用 Tripo 生成，genai.css 之上，只换皮不动逻辑）、完成提示、作品栏的两个按钮、「Made with Tripo」标记。
+   深色面板、细金线；标签页 Cinzel 小号大写；预览是 Ivory 的尖拱壁龛（同 Museum）；进度是一道细金线；
+   Generate、Add to planet 是香槟金主按钮，和 Tripo 品牌直接相关的（Create with Tripo、Tripo 那组标签的小标记）留品牌黄
+   ==================================================================================================== */
+/* —— 作品栏头上的两个按钮 —— */
+:where(#app) .tray-add { gap: 7px; padding: 9px 12px; font-size: 10px; border-radius: 3px; }
+.tray-add .icon { width: 14px; height: 14px; }
+:where(#app) .tray-tripo { color: var(--v2-midnight); background: var(--v2-tripo); box-shadow: none; }
+:where(#app) .tray-tripo:active { box-shadow: inset 0 0 0 1px rgba(15, 21, 48, 0.35); }
+.ti-tripo { top: 5px; left: 6px; padding: 2px 5px; border-radius: 2px; background: var(--v2-tripo); color: var(--v2-midnight); font: 600 8.5px/1.2 var(--v2-sans); letter-spacing: 0.12em; text-transform: uppercase; rotate: none; }
+
+/* —— 「Made with Tripo」：细线小框里一个小翠宝标志 + Inter 小号大写；文字生成的下面引一句 Cormorant 斜体的提示词 —— */
+.tripo-tag { gap: 7px; padding: 3px 9px 3px 3px; border-radius: 2px; background: rgba(15, 21, 48, 0.55); color: var(--v2-star); font: 500 9.5px/1 var(--v2-sans); letter-spacing: 0.16em; text-transform: uppercase; box-shadow: inset 0 0 0 1px var(--v2-hair); rotate: none; }
+.tripo-mark { width: 16px; height: 16px; }
+.tripo-mark .mw-body { stroke: rgba(216, 192, 142, 0.7); stroke-width: 0.07; }
+.tripo-prompt { padding: 1px 0 1px 10px; border-left: 1px solid var(--v2-gold); font: italic 400 15px/1.4 var(--v2-serif); color: var(--v2-text-dim); }
+.tripo-from { font: italic 400 14px/1.3 var(--v2-serif); color: var(--v2-text-faint); }
+/* Museum 卡片（Ivory 上）：深色的字、古金细线 */
+.museum-card .mc-tripo { justify-items: center; }
+.museum-card .tripo-tag { background: rgba(255, 253, 248, 0.6); color: var(--v2-ink); box-shadow: inset 0 0 0 1px rgba(168, 137, 79, 0.55); }
+.museum-card .tripo-prompt { border-left-color: rgba(168, 137, 79, 0.7); color: var(--v2-ink-dim); font-size: 13.5px; text-align: left; }
+.museum-card .tripo-from { color: var(--v2-ink-faint); }
+
+/* —— 窗口 —— */
+.ga-backdrop { background: radial-gradient(130% 100% at 50% 0%, rgba(15, 21, 48, 0.45), rgba(9, 12, 30, 0.8)); }
+.ga-card { padding: 28px 32px 24px; border-radius: 4px; background: var(--v2-corners), var(--v2-panel-deep); box-shadow: inset 0 0 0 1px var(--v2-hair), 0 30px 70px rgba(3, 5, 16, 0.45); outline: 1px solid var(--v2-hair-faint); outline-offset: -5px; }
+.genai[data-drag='on'] .ga-card { box-shadow: inset 0 0 0 1px var(--v2-gold), 0 0 0 3px rgba(216, 192, 142, 0.18), 0 30px 70px rgba(3, 5, 16, 0.45); }
+.ga-titles { gap: 6px; }
+.ga-tag { gap: 9px; padding: 0; border-radius: 0; background: none; color: var(--v2-gold); font: 500 10.5px/1.2 var(--v2-sans); letter-spacing: 0.2em; text-transform: uppercase; rotate: none; box-shadow: none; }
+.ga-tag::before { width: 10px; height: 10px; border-radius: 0; background: color-mix(in srgb, var(--team, #d8c08e) 35%, #ead9ae); box-shadow: none; mask: var(--v2-star-svg) center / contain no-repeat; -webkit-mask: var(--v2-star-svg) center / contain no-repeat; }
+.ga-head h1 { margin: 4px 0 0; font-size: 32px; line-height: 1.08; letter-spacing: 0.15em; color: var(--v2-star); }
+.ga-head h1::after {
+  width: 130px;
+  height: 9px;
+  margin-top: 12px;
+  background:
+    var(--v2-star-svg) center / 9px 9px no-repeat,
+    linear-gradient(90deg, rgba(216, 192, 142, 0), rgba(216, 192, 142, 0.7)) left center / calc(50% - 10px) 1px no-repeat,
+    linear-gradient(90deg, rgba(216, 192, 142, 0.7), rgba(216, 192, 142, 0)) right center / calc(50% - 10px) 1px no-repeat;
+}
+.ga-credits, .ga-mock { gap: 7px; padding: 7px 11px; border-radius: 2px; font: 500 10px/1 var(--v2-sans); letter-spacing: 0.12em; text-transform: uppercase; }
+.ga-credits { background: rgba(9, 12, 30, 0.5); color: var(--v2-star); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); }
+.ga-credits .icon { width: 14px; height: 14px; color: var(--v2-gold); }
+.ga-mock { background: rgba(216, 192, 142, 0.12); color: var(--v2-gold); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); rotate: none; }
+:where(#app) .ga-close { width: 42px; height: 42px; border-radius: 3px; background: rgba(15, 21, 48, 0.5); }
+.ga-close .icon { width: 17px; height: 17px; transition: transform 0.7s var(--v2-ease); }
+
+/* 标签页：Cinzel 小号大写，下面一道细金线表示选中（不是黄色贴纸）；Tripo 那一组前面的小标记留品牌的样子 */
+.ga-tabs { gap: 2px; margin: 20px 0 6px; padding-bottom: 1px; background: linear-gradient(90deg, var(--v2-hair-soft), var(--v2-hair-soft)) left bottom / 100% 1px no-repeat; }
+:where(#app) .ga-tab { gap: 8px; padding: 11px 14px 12px 11px; border-radius: 2px 2px 0 0; background: transparent; box-shadow: none; color: var(--v2-text-faint); font: 600 11px/1 var(--v2-caps); letter-spacing: 0.14em; }
+:where(#app) .ga-tab:hover { color: var(--v2-star); }
+:where(#app) .ga-tab[aria-selected='true'] { color: var(--v2-star); background: rgba(216, 192, 142, 0.1); box-shadow: inset 0 -1px 0 var(--v2-gold); }
+.ga-tab .icon { width: 15px; height: 15px; }
+.ga-tab-group { gap: 7px; margin-left: 10px; padding-left: 14px; border-left: 1px solid var(--v2-hair-soft); font: 500 9.5px/1 var(--v2-sans); letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-text-faint); }
+.ga-tab-group .tripo-mark { width: 15px; height: 15px; }
+
+/* 左栏：标题、说明、表单 */
+.ga-body { gap: 30px; padding-top: 14px; }
+.ga-panels { gap: 18px; }
+.ga-h { font-size: 20px; line-height: 1.15; letter-spacing: 0.14em; color: var(--v2-star); }
+.ga-lead { margin: -6px 0 2px; font: italic 400 17px/1.4 var(--v2-serif); color: var(--v2-text-dim); }
+.ga-label { font: 500 10.5px/1.2 var(--v2-sans); letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-text-dim); }
+.ga-input { padding: 13px 14px; border-radius: 3px; background: rgba(9, 12, 30, 0.55); color: var(--v2-star); font: 400 15px/1.4 var(--v2-sans); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); transition: none; }
+.ga-input::placeholder { color: rgba(246, 241, 231, 0.36); font-weight: 400; }
+.ga-input:focus { box-shadow: inset 0 0 0 1px var(--v2-gold), 0 0 0 3px rgba(216, 192, 142, 0.14); }
+.ga-prompt { font: italic 400 17px/1.4 var(--v2-serif); }
+.ga-count { padding: 0; border-radius: 0; background: none; font: 500 10px/1 var(--v2-sans); letter-spacing: 0.06em; color: var(--v2-text-faint); }
+.ga-count[data-tone='near'] { background: none; color: var(--v2-gold); }
+.ga-hint { font: 400 12px/1.45 var(--v2-sans); color: var(--v2-text-faint); }
+.ga-examples { gap: 7px; }
+.ga-examples-label { font: italic 400 15px/1 var(--v2-serif); color: var(--v2-text-dim); }
+:where(#app) .ga-example { padding: 8px 11px; border-radius: 2px; font: italic 400 14px/1.2 var(--v2-serif); letter-spacing: 0; text-transform: none; background: transparent; box-shadow: inset 0 0 0 1px var(--v2-hair-soft); rotate: none; }
+:where(#app) .ga-example:hover { rotate: none; color: var(--v2-star); }
+/* 拖放区：细金线的虚线框 */
+.ga-drop { gap: 8px; min-height: 170px; border-radius: 3px; border: 1px dashed var(--v2-hair); background: rgba(9, 12, 30, 0.35); color: var(--v2-text-dim); font: italic 400 15px/1.35 var(--v2-serif); transition: none; }
+.ga-drop b { font: 600 13px/1.2 var(--v2-caps); letter-spacing: 0.14em; text-transform: uppercase; color: var(--v2-star); font-style: normal; }
+.ga-drop:hover { border-color: var(--v2-gold); background: rgba(216, 192, 142, 0.06); translate: none; }
+.ga-drop:focus-visible { outline: 1.5px solid var(--v2-star); outline-offset: 3px; }
+.genai[data-drag='on'] .ga-drop { border-color: var(--v2-gold); background: rgba(216, 192, 142, 0.1); }
+.ga-drop-icon { width: 46px; height: 46px; border-radius: 50%; background: transparent; color: var(--v2-gold); box-shadow: inset 0 0 0 1px var(--v2-hair); }
+.ga-drop-icon .icon { width: 22px; height: 22px; }
+.ga-picked { border-radius: 2px; background: radial-gradient(78% 66% at 50% 34%, #fdfaf3, #efe6d5 60%, #e1d5bf); box-shadow: inset 0 0 0 1px rgba(168, 137, 79, 0.55); }
+.ga-picked-name { font: 500 15px/1.25 var(--v2-serif); color: var(--v2-star); }
+.ga-picked-change { font: 400 11.5px/1.3 var(--v2-sans); color: var(--v2-text-faint); }
+/* 上传的处理步骤：细金线的小圆，走过的亮、现在这步香槟金 */
+.ga-steps { gap: 8px; padding: 13px 15px; border-radius: 3px; background: rgba(9, 12, 30, 0.4); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); font: 400 12.5px/1.3 var(--v2-sans); color: var(--v2-text-faint); }
+.ga-steps-file { color: var(--v2-text-dim); }
+.ga-steps-file b { color: var(--v2-star); font-weight: 500; }
+.ga-steps li > i { width: 16px; height: 16px; background: transparent; box-shadow: inset 0 0 0 1px var(--v2-hair); }
+.ga-steps li > i .icon { width: 11px; height: 11px; }
+.ga-steps li[data-state='done'] { color: var(--v2-text-dim); }
+.ga-steps li[data-state='done'] > i { background: rgba(246, 241, 231, 0.85); color: var(--v2-midnight); box-shadow: none; }
+.ga-steps li[data-state='now'] { color: var(--v2-star); }
+.ga-steps li[data-state='now'] > i { background: var(--v2-gold); box-shadow: 0 0 10px rgba(216, 192, 142, 0.45); animation: ga-glow-v2 1.4s ease-in-out infinite alternate; }
+@keyframes ga-glow-v2 { from { opacity: 0.55; } to { opacity: 1; } }
+/* 多视图：四个 Ivory 的小框 */
+.ga-views { gap: 12px; }
+:where(#app) .ga-view-pick { border-radius: 2px; background: rgba(9, 12, 30, 0.35); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); }
+:where(#app) .ga-view-pick:hover { box-shadow: inset 0 0 0 1px var(--v2-gold); }
+.ga-view[data-slot='0'] .ga-view-pick { box-shadow: inset 0 0 0 1px var(--v2-hair); }
+.ga-view[data-filled='true'] .ga-view-pick { background: radial-gradient(78% 66% at 50% 34%, #fdfaf3, #efe6d5 60%, #e1d5bf); box-shadow: inset 0 0 0 1px rgba(168, 137, 79, 0.55); }
+.ga-view-plus { width: 34px; height: 34px; border-radius: 50%; background: transparent; color: var(--v2-gold); box-shadow: inset 0 0 0 1px var(--v2-hair); }
+.ga-view-plus .icon { width: 18px; height: 18px; }
+.ga-view-label { gap: 7px; font: 600 10.5px/1.2 var(--v2-caps); letter-spacing: 0.12em; text-transform: uppercase; color: var(--v2-text-dim); }
+.ga-view-label em { font: italic 400 13px/1 var(--v2-serif); letter-spacing: 0; text-transform: none; color: var(--v2-gold); }
+:where(#app) .ga-view-x { width: 24px; height: 24px; border-radius: 2px; background: #141a3b; }
+.ga-view-x .icon { width: 12px; height: 12px; }
+/* 开关、离线提示、Generate */
+.ga-switch { font: 500 10.5px/1 var(--v2-sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--v2-text-dim); }
+.ga-switch-track { width: 40px; height: 22px; background: rgba(9, 12, 30, 0.55); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); transition: none; }
+.ga-switch-track i { top: 3px; left: 3px; width: 16px; height: 16px; background: rgba(246, 241, 231, 0.75); box-shadow: none; transition: transform 0.5s var(--v2-ease); }
+.ga-switch-input:checked + .ga-switch-track { background: rgba(216, 192, 142, 0.3); box-shadow: inset 0 0 0 1px var(--v2-gold); }
+.ga-switch-input:checked + .ga-switch-track i { transform: translateX(18px); background: var(--v2-gold); }
+.ga-switch:has(input:focus-visible) { outline: 1.5px solid var(--v2-star); outline-offset: 3px; }
+.ga-offline { gap: 9px; padding: 11px 13px; border-radius: 3px; background: rgba(229, 154, 139, 0.1); box-shadow: inset 0 0 0 1px rgba(229, 154, 139, 0.4); color: #f0b3a6; font: 400 13px/1.45 var(--v2-sans); }
+:where(#app) .ga-generate { gap: 9px; padding: 13px 20px 13px 17px; font-size: 11.5px; border-radius: 3px; }
+.ga-generate .icon { width: 15px; height: 15px; }
+.ga-cost { font: italic 400 14px/1.3 var(--v2-serif); color: var(--v2-text-faint); }
+
+/* 右边：舞台是 Ivory 的尖拱壁龛（同 Museum 的卡片），模型画在透明的画布上 */
+.ga-side { gap: 16px; }
+.ga-stage { border-radius: 0; background: radial-gradient(62% 56% at 50% 42%, #fdfaf3, #efe6d5 58%, #ddd0b9 100%); box-shadow: none; mask: var(--v2-arch-sq) center / 100% 100% no-repeat; -webkit-mask: var(--v2-arch-sq) center / 100% 100% no-repeat; }
+.ga-stage::after { content: ''; position: absolute; inset: 0; background: var(--v2-arch-line) center / 100% 100% no-repeat; pointer-events: none; }
+.ga-spot { background: radial-gradient(closest-side, rgba(70, 52, 32, 0.22), rgba(70, 52, 32, 0)); }
+.ga-stage[data-state='model'] .ga-canvas { animation: model-in-v2 0.8s var(--v2-ease) both; }
+.ga-stage-empty p, .ga-stage-error p { font: italic 400 16px/1.45 var(--v2-serif); color: var(--v2-ink-dim); }
+.ga-plinth { width: 96px; height: 110px; border-radius: 0; background: var(--v2-arch-line) center / 100% 100% no-repeat; box-shadow: none; opacity: 0.85; }
+.ga-busy-label { font: 600 13px/1.3 var(--v2-caps); letter-spacing: 0.14em; text-transform: uppercase; color: var(--v2-ink); }
+.ga-busy-hint { font: italic 400 14px/1.4 var(--v2-serif); color: var(--v2-ink-dim); }
+/* 进度：一道细金线（槽是很淡的古金线），不确定的时候一小段金光来回扫 */
+.ga-bar { width: min(220px, 76%); height: 2px; border-radius: 1px; background: rgba(168, 137, 79, 0.25); box-shadow: none; }
+.ga-bar i { border-radius: 1px; background: var(--v2-gold-deep); box-shadow: 0 0 6px rgba(168, 137, 79, 0.6); transition: transform 0.6s var(--v2-ease); }
+:where(#app) .ga-cancel { padding: 9px 14px; font-size: 10px; color: var(--v2-ink-dim); background: transparent; box-shadow: inset 0 0 0 1px rgba(168, 137, 79, 0.5); }
+:where(#app) .ga-cancel::after { background: rgba(168, 137, 79, 0.14); }
+.ga-error-icon { width: 44px; height: 44px; border-radius: 50%; background: transparent; color: #a8473a; box-shadow: inset 0 0 0 1px rgba(168, 71, 58, 0.5); }
+.ga-stage .dots i { background: var(--v2-gold-deep); }
+.ga-result { gap: 10px; }
+.ga-name { font: 500 17px/1.3 var(--v2-serif); }
+.ga-facts { gap: 4px; font: 400 12.5px/1.4 var(--v2-sans); color: var(--v2-text-dim); }
+.ga-facts li:first-child { color: var(--v2-star); font-weight: 500; }
+:where(#app) .ga-add { gap: 9px; padding: 14px 20px; font-size: 12px; border-radius: 3px; margin-top: 6px; }
+.ga-add .icon { width: 16px; height: 16px; }
+
+/* 任务列表 */
+.ga-jobs { gap: 9px; padding-top: 16px; border-top: 0; background: linear-gradient(90deg, var(--v2-hair-soft), rgba(216, 192, 142, 0)) left top / 100% 1px no-repeat; }
+.ga-jobs-title { font: 500 10.5px/1.2 var(--v2-sans); letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-text-dim); }
+.ga-job { gap: 6px; border-radius: 3px; background: rgba(9, 12, 30, 0.42); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); }
+.ga-job[data-current='true'] { box-shadow: inset 0 0 0 1px var(--v2-gold); }
+:where(#app) .ga-job-main { gap: 10px; color: var(--v2-star); text-transform: none; letter-spacing: 0; border-radius: 2px; }
+:where(#app) .ga-job-main:hover { background: rgba(216, 192, 142, 0.08); }
+.ga-job-icon { width: 30px; height: 30px; border-radius: 50%; background: transparent; color: var(--v2-gold); box-shadow: inset 0 0 0 1px var(--v2-hair-soft); }
+.ga-job-icon .icon { width: 15px; height: 15px; }
+.ga-job-title { font: 500 15px/1.25 var(--v2-serif); }
+.ga-job-status { font: 400 11.5px/1.25 var(--v2-sans); color: var(--v2-text-faint); }
+.ga-job[data-phase='done'] .ga-job-status { color: #b9c8b0; }
+.ga-job[data-phase='failed'] .ga-job-status { color: var(--danger); }
+.ga-job[data-phase='done'] .ga-job-icon { background: rgba(216, 192, 142, 0.14); color: var(--v2-gold); }
+:where(#app) .ga-job-x { width: 28px; height: 28px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--v2-hair-soft); }
+.ga-job-bar { height: 1px; background: var(--v2-gold); box-shadow: 0 0 6px rgba(216, 192, 142, 0.5); }
+
+/* —— 完成提示：右下角一张深色的小卡，细金线 —— */
+#app > .ga-notice { gap: 12px; padding: 11px 11px 11px 13px; border-radius: 4px; background: var(--v2-corners), var(--v2-panel-deep); box-shadow: inset 0 0 0 1px var(--v2-gold), 0 16px 36px rgba(3, 5, 16, 0.45); }
+#app > .ga-notice[data-tone='failed'] { box-shadow: inset 0 0 0 1px rgba(229, 154, 139, 0.6), 0 16px 36px rgba(3, 5, 16, 0.45); }
+.ga-notice-mark .mw-body { stroke: rgba(216, 192, 142, 0.7); stroke-width: 0.06; }
+.ga-notice-alert { border-radius: 50%; background: transparent; color: var(--danger); box-shadow: inset 0 0 0 1px rgba(229, 154, 139, 0.5); }
+.ga-notice-text b { font: 600 12px/1.3 var(--v2-caps); letter-spacing: 0.12em; text-transform: uppercase; color: var(--v2-star); }
+.ga-notice-text span { font: italic 400 14px/1.3 var(--v2-serif); color: var(--v2-text-dim); }
+:where(#app) .ga-notice-go { gap: 7px; padding: 10px 13px; font-size: 10.5px; }
+.ga-notice-go .icon { width: 14px; height: 14px; }
+:where(#app) .ga-notice-x { width: 28px; height: 28px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--v2-hair-soft); }
+
+@media (max-width: 820px) {
+  .ga-card { padding: 18px 16px 18px; }
+  .ga-head h1 { font-size: 24px; letter-spacing: 0.13em; }
+  .ga-head h1::after { width: 100px; margin-top: 9px; }
+  :where(#app) .ga-close { width: 38px; height: 38px; }
+  .ga-tabs { margin: 12px -4px 0; }
+  :where(#app) .ga-tab { padding: 10px 10px 11px 9px; font-size: 10px; letter-spacing: 0.1em; }
+  .ga-tab-group { margin-left: 4px; padding-left: 8px; }
+  .ga-stage { height: min(40vh, 320px); }
+  .ga-stage[data-state='empty'] { mask: none; -webkit-mask: none; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(168, 137, 79, 0.55); }
+  .ga-stage[data-state='empty']::after { display: none; }
+  .ga-h { font-size: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ga-steps li[data-state='now'] > i { animation: none; }
+  .ga-stage[data-state='model'] .ga-canvas { animation: fade-in 0.2s ease-out both; }
+  .ga-close .icon, .ga-switch-track i, .ga-bar i { transition-duration: 0.01ms !important; }
+}
