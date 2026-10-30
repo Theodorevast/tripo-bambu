@@ -139,9 +139,11 @@
 .ga-generate .icon { width: 19px; height: 19px; }
 .ga-cost { font: 700 12px/1.3 var(--font-ui); color: var(--ink-faint); }
 
-/* 右边：舞台（暖色摄影棚，同查看器）+ 结果 */
-.ga-side { display: grid; align-content: start; gap: 14px; min-height: 0; }
-.ga-stage { position: relative; aspect-ratio: 1 / 0.92; min-height: 0; overflow: hidden; border-radius: 26px; background: radial-gradient(60% 55% at 50% 44%, #fffcf3, #f6e7cd 60%, #ead4ba 100%); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.6), 0 8px 0 rgba(160, 120, 80, 0.18), 0 22px 40px rgba(60, 45, 30, 0.16); }
+/* 右边：舞台（暖色摄影棚，同查看器）+ 结果。
+   右栏是一列 flex：舞台的基准高是栏宽 × 0.92（栏宽用 cqi 量，右栏是 inline-size 容器）；结果栏出来、窗口又矮放不下时，舞台缩到剩下的高度，
+   宽由高按 1 : 0.92 算出来、居中（align-self 不是 stretch，比例不变）。以前右栏是 grid：那一行被压矮了，舞台还按比例撑着原来的高，压住下面的「Name」 */
+.ga-side { display: flex; flex-direction: column; gap: 14px; min-height: 0; container-type: inline-size; }
+.ga-stage { position: relative; flex: 0 1 calc(100cqi * 0.92); align-self: center; aspect-ratio: 1 / 0.92; min-height: 0; max-width: 100%; overflow: hidden; border-radius: 26px; background: radial-gradient(60% 55% at 50% 44%, #fffcf3, #f6e7cd 60%, #ead4ba 100%); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.6), 0 8px 0 rgba(160, 120, 80, 0.18), 0 22px 40px rgba(60, 45, 30, 0.16); }
 .ga-spot { position: absolute; left: 50%; bottom: 10%; width: 54%; aspect-ratio: 4 / 1; translate: -50% 0; border-radius: 50%; background: radial-gradient(closest-side, rgba(120, 90, 60, 0.2), rgba(120, 90, 60, 0)); pointer-events: none; }
 .ga-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; visibility: hidden; }
 .ga-canvas:active { cursor: grabbing; }
@@ -159,7 +161,7 @@
 :where(#app) .ga-cancel { padding: 8px 14px 9px; font-size: 12.5px; }
 .ga-error-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 16px; background: #fff; color: var(--danger); box-shadow: inset 0 0 0 2px rgba(217, 87, 74, 0.25), 0 4px 0 var(--paper-3); }
 .ga-error-icon .icon { width: 24px; height: 24px; }
-.ga-result { display: grid; gap: 9px; }
+.ga-result { flex: none; display: grid; gap: 9px; } /* 结果栏按内容撑高、不缩：要让的是舞台 */
 .ga-name { font-size: 16px; }
 .ga-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font: 700 12.5px/1.4 var(--font-ui); color: var(--ink-dim); }
 .ga-facts li:first-child { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -227,7 +229,7 @@
   .ga-body { display: flex; flex-direction: column; gap: 16px; min-height: auto; }
   .ga-panels { overflow: visible; margin: 0; padding: 0; min-height: auto; flex: none; }
   .ga-side { order: -1; min-height: auto; flex: none; }
-  .ga-stage { aspect-ratio: auto; height: min(40vh, 320px); border-radius: 20px; }
+  .ga-stage { flex: none; align-self: stretch; aspect-ratio: auto; height: min(40vh, 320px); border-radius: 20px; } /* 定高、铺满宽（不用桌面上按栏宽算的基准高） */
   .ga-stage[data-state='empty'] { height: 112px; } /* 还没有模型：矮一点，表单不用往下滚就看得见 */
   .ga-stage[data-state='empty'] .ga-plinth { display: none; }
   .ga-h { font-size: 21px; }

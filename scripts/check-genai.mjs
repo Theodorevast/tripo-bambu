@@ -6,6 +6,7 @@
 // 4. 提示词带 #fail：任务大约 60% 时失败，窗口里、任务列表里有清楚的提示；带 #quota：额度用完的提示
 // 5. 生成到一半刷新：任务接着轮询，做完照样加进作品
 // 6. Reset demo 以后全部清空（用户作品、生成任务）
+// 上传预览、文字生成的结果出来时，在 1440 × 900、1366 × 768、1280 × 720 各量一次右栏：舞台不压 Name 标签和输入框，右栏的子元素互不重叠
 //
 // 绝对不花额度：启动开发服务器之前设 TRIPO_MOCK=1（中转的模拟开关，优先级最高）；页面加载后先问一次 /api/tripo/health，
 // mock 不是 true 就立刻中止。只有显式加 REAL=1 才允许真实模式（留给最后经用户同意的真实测试，平时不要用）。
@@ -49,6 +50,42 @@ async function step(name, fn) {
   } catch (err) {
     check(name, false, firstLine(err));
   }
+}
+// 右栏（舞台 + 结果栏）不重叠：以前舞台按 aspect-ratio 撑高，比右栏 grid 里那一行高，压住下面的「Name」（1440 × 900 上就有）。
+// 结果栏出来时按几个桌面尺寸各量一次：舞台的框不碰 Name 标签、Name 输入框，它们的中心点最上层就是它们自己（点得到）；
+// 右栏的直接子元素两两不重叠、都在右栏里。量完换回 1440 × 900
+const SIDE_SIZES = [[1440, 900], [1366, 768], [1280, 720]];
+async function sideLayout(label) {
+  for (const [width, height] of SIDE_SIZES) {
+    await page.setViewportSize({ width, height });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const l = await page.evaluate(() => {
+      const box = (n) => n.getBoundingClientRect();
+      const hit = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+      const show = (r) => `${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}×${Math.round(r.height)}`;
+      const side = document.querySelector('.ga-side');
+      const s = box(side);
+      const stage = box(document.querySelector('.ga-stage'));
+      const bad = [];
+      for (const [n, what] of [[document.querySelector('label[for="ga-name"]'), 'Name 标签'], [document.querySelector('#ga-name'), 'Name 输入框']]) {
+        const r = box(n);
+        if (hit(stage, r)) bad.push(`舞台 ${show(stage)} 压住${what} ${show(r)}`);
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (!top || !n.contains(top)) bad.push(`${what}的中心点被 ${top ? top.className || top.tagName : '空'} 盖住`);
+      }
+      const kids = [...side.children].filter((n) => !n.hidden && n.getClientRects().length > 0);
+      for (let i = 0; i < kids.length; i++) {
+        const a = box(kids[i]);
+        if (a.left < s.left - 1 || a.top < s.top - 1 || a.right > s.right + 1 || a.bottom > s.bottom + 1) bad.push(`${kids[i].className} ${show(a)} 出了右栏 ${show(s)}`);
+        for (let j = i + 1; j < kids.length; j++) if (hit(a, box(kids[j]))) bad.push(`右栏的 ${kids[i].className} 和 ${kids[j].className} 重叠`);
+      }
+      if (kids.length < 2) bad.push(`右栏只看得见 ${kids.length} 个子元素（结果栏没出来？）`);
+      return { ok: bad.length === 0, detail: bad.length ? bad.join('；') : `舞台 ${show(stage)}，右栏 ${show(s)}` };
+    });
+    check(`${label} ${width}×${height}：舞台不压 Name 标签和输入框，右栏的子元素互不重叠`, l.ok, l.detail);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
@@ -187,6 +224,7 @@ try {
     numbers.push(`上传处理 + 预览 ${Date.now() - t0} ms，${s.upload.triangles?.toLocaleString('en-US')} 面；期间主画面最长帧间隔 ${Math.max(...gaps).toFixed(1)} ms（${gaps.length} 帧）`);
     check('上传处理完：显示三角面数', s.upload.triangles > 0 && /triangles/.test(await page.locator('.ga-facts').textContent()), `${s.upload.triangles} tris`);
     await shot(page, 'upload-preview');
+    await sideLayout('上传预览');
     await page.locator('.ga-name').fill('Comfy Armchair');
     await page.locator('.ga-add').click();
     await until(page, '窗口关掉', () => !window.__genai.state().open);
@@ -256,6 +294,7 @@ try {
     check('做完以后作品加进来（有作品 id）', typeof textWork === 'string' && textWork.startsWith('u-'), textWork);
     check('结果旁边写着 Made with Tripo 和提示词', /Made with Tripo/.test(await page.locator('.ga-note').textContent()) && /robot gardener/.test(await page.locator('.ga-note').textContent()));
     await shot(page, 'text-result');
+    await sideLayout('文字生成的结果');
     await page.locator('.ga-add').click();
     await until(page, '窗口关掉', () => !window.__genai.state().open);
     check('Add to planet 以后摆上了星球', await placeOnPlanet(textWork));
