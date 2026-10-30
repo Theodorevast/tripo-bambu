@@ -52,6 +52,12 @@ for (const [W, H] of SIZES) {
   for (const phase of ['sky', 'warm', 'land']) {
     await until(p, `启动画面 ${phase}`, (x) => window.__bootAt === x, phase, 90000);
     await p.evaluate(() => document.fonts.ready);
+    if (phase === 'sky' && want('boot-draw')) {
+      // 中间的 Tripo 标志画到一半：标志的几段动画拨到 650 ms、停住截一张，再接着放
+      await p.evaluate(() => { for (const a of document.getAnimations()) if (a.effect?.target?.closest?.('.boot-logo')) { a.pause(); a.currentTime = 650; } });
+      await shot('boot-draw');
+      await p.evaluate(() => { for (const a of document.getAnimations()) if (a.effect?.target?.closest?.('.boot-logo')) a.play(); });
+    }
     await p.waitForTimeout(phase === 'sky' ? 900 : 400);
     await shot(`boot-${phase}`);
     await p.evaluate(() => window.__bootGo());

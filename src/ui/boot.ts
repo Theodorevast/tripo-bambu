@@ -1,6 +1,6 @@
 // 启动画面：index.html 里的 #boot（样式在 boot.css），页面一打开就显示，不等 JS。main.ts 按启动的进度推进三个阶段：
 // 建天空（建 World、装配各个页面）→ 预热（编译着色器）→ 落地（进入第一条路由）；3D 准备好后天体仪的环散开、夜空淡掉、撤掉。
-// 第二版：夜空、细金色的天体仪环（中间一个很小的单色翠宝剪影，都画在 index.html 里），三个阶段是三个月相（boot.css）。
+// 第二版：夜空、细金色的天体仪环（正中是香槟金细线一笔笔画出来的 Tripo 标志，都画在 index.html 里），三个阶段是三个月相（boot.css）。
 // 起不来时停在启动画面上：浏览器做不了 3D（没有 WebGPU 也没有 WebGL2）时提示换浏览器或设备，别的错误提示刷新。
 // 顺带在后台预加载界面的三种字体（Cinzel、Cormorant Garamond 正体和斜体、Inter；都是可变字重，一种一个文件）：
 // 星系页的标题卡片、名牌一开始就要用，第一次进星球时作品卡、按钮也不用再现下载、换一次字体
@@ -108,7 +108,7 @@ export function startBoot(root: HTMLElement | null = document.getElementById('bo
   const live = root?.querySelector<HTMLElement>('.boot-now') ?? null;
   const center = root?.querySelector<HTMLElement>('.boot-center') ?? null;
 
-  // 中间的图：第二版不放像素翠宝动图了，天体仪和中间的翠宝剪影都是 index.html 里现成的线稿（data-art="orrery"：
+  // 中间的图：第二版不放像素翠宝动图了，天体仪和中间的 Tripo 标志都是 index.html 里现成的线稿（data-art="orrery"：
   // 图已经在画面上，自查脚本认这个属性）
   if (root) root.dataset.art = 'orrery';
 
