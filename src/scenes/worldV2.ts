@@ -62,8 +62,11 @@ export function installWorldV2(world: World): WorldV2 {
       you.pos = e.home;
       you.size = e.planet.radius * e.planet.group.scale.x;
     }
-    armillary.update(dt, home, e ? you : null, reducedMotion());
-    constellation.update(dt, world, home);
+    // 开场拼标志的时候（homeGalaxy 的 playShape）：天体仪环、星座线压到一成多，标志的细金线单独出来，不和它们缠在一起
+    const shape = world.galaxy.shapeState;
+    const dim = shape.t >= 0 ? 1 - 0.85 * shape.progress : 1;
+    armillary.update(dt, home, e ? you : null, reducedMotion(), dim);
+    constellation.update(dt, world, home, dim);
   });
   installed = { armillary, constellation, props };
   // 自查、截图脚本用：星座翠宝马上出现（不等周期）、天体仪环和星座线的状态
