@@ -13,6 +13,8 @@ const KEY = 'tsk_unit_test_SECRET_9f8e7d6c5b4a';
 const SITE = 'http://site.test';
 const API = 'https://openapi.tripo3d.ai/v3';
 const REAL: TripoEnv = { TRIPO_API_KEY: KEY };
+// 默认只放行 H3.1、P1；要测 H3.0、H2.5 的用例用这个
+const ALL: TripoEnv = { ...REAL, TRIPO_MODEL_VERSIONS: 'v3.1-20260211,v3.0-20250812,v2.5-20250123,P1-20260311' };
 const T0 = Date.UTC(2026, 9, 30, 8, 0, 0);
 const UUID = '123e4567-e89b-42d3-a456-426614174000';
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]);
@@ -330,27 +332,27 @@ describe('参数白名单', () => {
     const handle = make();
     await send(handle, postJson({ mode: 'text', prompt: '  a chair  ', texture: false }), REAL);
     await send(handle, postJson({ mode: 'image', token: 'file_abc123', type: 'png', pbr: true }), REAL);
-    await send(handle, postJson({ mode: 'multiview', views: [{ token: 'file_f' }, null, { token: 'file_b', type: 'jpeg' }, null], modelVersion: 'v3.0-20250812' }), REAL);
+    await send(handle, postJson({ mode: 'multiview', views: [{ token: 'file_f' }, null, { token: 'file_b', type: 'jpeg' }, null], modelVersion: 'v3.0-20250812' }), ALL);
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       `POST ${API}/generation/text-to-model`,
       `POST ${API}/generation/image-to-model`,
       `POST ${API}/generation/multiview-to-model`,
     ]);
     // texture=false 时一并关掉 pbr（Tripo 的 pbr 默认 true，会强制带贴图）
-    // 默认带 face_limit = 30 万（网页导入时反正要简化到这么多）
-    expect(calls[0].body).toEqual({ prompt: 'a chair', model: 'v3.1-20260211', texture: false, pbr: false, face_limit: 300000 });
-    expect(calls[1].body).toEqual({ input: 'file_abc123', model: 'v3.1-20260211', texture: true, pbr: true, face_limit: 300000 });
+    // 默认带 face_limit = 30 万（网页导入时反正要简化到这么多）和 compress = geometry（v3.0 以上，meshopt）
+    expect(calls[0].body).toEqual({ prompt: 'a chair', model: 'v3.1-20260211', texture: false, pbr: false, compress: 'geometry', face_limit: 300000 });
+    expect(calls[1].body).toEqual({ input: 'file_abc123', model: 'v3.1-20260211', texture: true, pbr: true, compress: 'geometry', face_limit: 300000 });
     // 多视图用 view-key 写法，跳过没有的视图
-    expect(calls[2].body).toEqual({ inputs: [{ front: 'file_f' }, { back: 'file_b' }], model: 'v3.0-20250812', face_limit: 300000 });
+    expect(calls[2].body).toEqual({ inputs: [{ front: 'file_f' }, { back: 'file_b' }], model: 'v3.0-20250812', compress: 'geometry', face_limit: 300000 });
     for (const c of calls) expect(c.headers.get('authorization')).toBe(`Bearer ${KEY}`);
   });
 
   it('快速贴图：fast → 不带 PBR，v3.0 以上再加 texture_quality + texture_version；H2.5 只关 PBR；不带贴图时不发；P1 没有 fast', async () => {
     const handle = make();
-    await send(handle, text('a', { textureQuality: 'fast' }), REAL);
-    await send(handle, text('b', { textureQuality: 'standard' }), REAL);
-    await send(handle, text('c', { textureQuality: 'fast', texture: false }), REAL);
-    await send(handle, text('d', { textureQuality: 'fast', modelVersion: 'v2.5-20250123' }), REAL);
+    await send(handle, text('a', { textureQuality: 'fast' }), ALL);
+    await send(handle, text('b', { textureQuality: 'standard' }), ALL);
+    await send(handle, text('c', { textureQuality: 'fast', texture: false }), ALL);
+    await send(handle, text('d', { textureQuality: 'fast', modelVersion: 'v2.5-20250123' }), ALL);
     expect(calls[0].body).toMatchObject({ texture: true, pbr: false, texture_quality: 'fast', texture_version: 'v3.5-20260815' });
     expect(calls[1].body).not.toHaveProperty('texture_quality');
     expect(calls[1].body).not.toHaveProperty('pbr');
@@ -365,15 +367,15 @@ describe('参数白名单', () => {
     await bad({ mode: 'text', prompt: 'x', textureQuality: 'fast', modelVersion: 'P1-20260311' }, { ...REAL, TRIPO_MODEL_VERSIONS: 'v3.1-20260211,P1-20260311' });
   });
 
-  it('compress：默认不发；TRIPO_COMPRESS=geometry 打开（只给 v3.0 以上）；请求里的 compress 布尔值可以单次改', async () => {
+  it('compress：默认发（只给 v3.0 以上）；TRIPO_COMPRESS=off 关掉；请求里的 compress 布尔值可以单次改', async () => {
     const handle = make();
-    const on = { ...REAL, TRIPO_COMPRESS: 'geometry' };
-    await send(handle, text('a'), REAL);
-    await send(handle, text('b'), on);
-    await send(handle, text('c', { modelVersion: 'v2.5-20250123' }), on);
-    await send(handle, text('d', { compress: true }), REAL);
-    await send(handle, text('e', { compress: false }), on);
-    expect(calls.map((c) => (c.body as Record<string, unknown>).compress)).toEqual([undefined, 'geometry', undefined, 'geometry', undefined]);
+    const off = { ...ALL, TRIPO_COMPRESS: 'off' };
+    await send(handle, text('a'), ALL);
+    await send(handle, text('b'), off);
+    await send(handle, text('c', { modelVersion: 'v2.5-20250123' }), ALL);
+    await send(handle, text('d', { compress: true }), off);
+    await send(handle, text('e', { compress: false }), ALL);
+    expect(calls.map((c) => (c.body as Record<string, unknown>).compress)).toEqual(['geometry', undefined, undefined, 'geometry', undefined]);
     calls.length = 0;
     await bad({ mode: 'text', prompt: 'x', compress: 'geometry' });
   });
@@ -398,20 +400,24 @@ describe('参数白名单', () => {
 });
 
 describe('模型列表（GET /models）和加速参数的退路', () => {
-  it('只列放行的版本（默认 H 系列三个，P 系列不在），带说明、能选的贴图档、预计耗时和积分', async () => {
+  it('只列放行的版本（默认两个：H · High precision = H3.1、P · Smart Mesh = P1），带说明、能选的贴图档、预计耗时和积分', async () => {
     const out = await send(make(), get('/api/tripo/models'), REAL);
     expect(out.status).toBe(200);
     expect(out.json.defaultModel).toBe('v3.1-20260211');
     expect(out.json.defaultTexture).toBe('fast');
-    expect(out.json.models.map((m: { id: string }) => m.id)).toEqual(['v3.1-20260211', 'v3.0-20250812', 'v2.5-20250123']);
-    const h31 = out.json.models[0];
-    expect(h31).toMatchObject({ label: 'H3.1', textures: ['none', 'fast', 'standard'], measured: false });
+    expect(out.json.models.map((m: { id: string }) => m.id)).toEqual(['v3.1-20260211', 'P1-20260311']);
+    const [h31, p1] = out.json.models;
+    expect(p1).toMatchObject({ label: 'P · Smart Mesh', textures: ['none', 'standard'], measured: true });
+    expect(p1.credits.text).toEqual({ none: 30, standard: 40 });
+    // P 比 H 快（实测：P1 标准贴图 62 秒，H3.1 快速贴图 109 秒）
+    expect(p1.eta.text.standard).toBeLessThan(h31.eta.text.fast);
+    expect(h31).toMatchObject({ label: 'H · High precision', textures: ['none', 'fast', 'standard'], measured: true });
     expect(h31.blurb.length).toBeGreaterThan(5);
     expect(h31.credits.text).toEqual({ none: 10, fast: 20, standard: 20 });
     expect(h31.credits.image).toEqual({ none: 20, fast: 30, standard: 30 });
     for (const m of ['text', 'image', 'multiview']) for (const t of ['none', 'fast', 'standard']) expect(h31.eta[m][t]).toBeGreaterThan(0);
-    // 快速贴图和标准贴图同价；fast 比带 PBR 的标准贴图快
-    for (const m of out.json.models) expect(m.eta.text.fast).toBeLessThan(m.eta.text.standard);
+    // 快速贴图和标准贴图同价；fast 比带 PBR 的标准贴图快（P1 没有 fast 档）
+    for (const m of out.json.models) if (m.textures.includes('fast')) expect(m.eta.text.fast).toBeLessThan(m.eta.text.standard);
   });
 
   it('跟着 TRIPO_MODEL_VERSIONS、TRIPO_DEFAULT_MODEL_VERSION 走；目录里没有的版本照列，只是没有耗时和积分；模拟模式一样能问', async () => {
@@ -421,11 +427,11 @@ describe('模型列表（GET /models）和加速参数的退路', () => {
     expect(out.json.models.map((m: { id: string }) => m.id)).toEqual(['v3.0-20250812', 'P1-20260311', 'v9.9-test']);
     expect(out.json.models[2]).toMatchObject({ label: 'v9.9-test', eta: null, credits: null });
     // P1：没有 fast 档，价目表的 30 / 40 积分
-    expect(out.json.models[1]).toMatchObject({ label: 'P1', textures: ['none', 'standard'] });
+    expect(out.json.models[1]).toMatchObject({ label: 'P · Smart Mesh', textures: ['none', 'standard'] });
     expect(out.json.models[1].credits.text).toEqual({ none: 30, standard: 40 });
     expect(out.json.models[1].eta.text).not.toHaveProperty('fast');
     const mock = await send(make(), get('/api/tripo/models'), { TRIPO_MOCK: '1' });
-    expect(mock.json.models).toHaveLength(3);
+    expect(mock.json.models).toHaveLength(2); // 模拟模式也是默认的 H3.1、P1 两个
     expect((await send(make(), postJson({}, {}, '/api/tripo/models'), REAL)).status).toBe(405);
   });
 

@@ -58,11 +58,11 @@ curl http://127.0.0.1:5173/api/tripo/health   # → {"ok":true,"mock":true}
 
 - `texture`、`pbr`、`modelVersion`、`type` 都可以不传。不传时 Tripo 默认带贴图和 PBR；`texture: false` 会一并关掉 PBR（Tripo 的 `pbr` 默认是 true，而且会强制带贴图）。
 - `prompt` 最多 1024 个字。多视图正好 4 项，**正面必须有，至少 2 张**。
-- `modelVersion` 默认 `v3.1-20260211`，可选值由 `TRIPO_MODEL_VERSIONS` 决定（默认只有 H 系列，见第 8 节）。
+- `modelVersion` 默认 `v3.1-20260211`，可选值由 `TRIPO_MODEL_VERSIONS` 决定（默认两个：H3.1「H · High precision」和 P1「P · Smart Mesh」，见第 8 节）。
 - 加速用的可选字段（三种任务都能带，都不加钱，见 10.9）：
   - `textureQuality: 'fast'`：快速贴图。中转发 `pbr: false`，v3.0 以上再加 `texture_quality: 'fast'` 和 `texture_version: 'v3.5-20260815'`；P 系列没有这一档；和 `pbr: true` 一起传会被拒。`'standard'` 等于不传。
   - `faceLimit`：`0` = 不发 `face_limit`，或者 1000–500000 的整数；不传用中转的默认（`TRIPO_FACE_LIMIT`，30 万）。P1 这种自己有更低上限的版本不发默认值。
-  - `compress`：布尔，`true` 发 `compress: 'geometry'`（meshopt，只给 v3.0 以上）；不传按 `TRIPO_COMPRESS`（默认关）。
+  - `compress`：布尔，`true` 发 `compress: 'geometry'`（meshopt，只给 v3.0 以上）；不传按 `TRIPO_COMPRESS`（默认开）。
   - 这些参数被 Tripo 当成无效参数（1003 / 1004）拒绝时，中转去掉它们再建一次（建任务失败不扣积分）。
 
 `status` 取值：`queued`、`running`、`success`、`failed`、`cancelled`、`unknown`。`progress` 是 0–100 的整数。成功时给 `modelUrl: '/api/tripo/download/:id'` 和 `previewUrl: '/api/tripo/preview/:id'`；失败或取消时给 `error`。
@@ -374,10 +374,10 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 | `TRIPO_MAX_REQUESTS_PER_IP_PER_MINUTE` | 300 | 每个 IP 每分钟所有接口合计（含轮询、下载） |
 | `TRIPO_MAX_IMAGE_MB` | 10 | 单张图上限，最大只能调到 20（Tripo 的上限） |
 | `ALLOWED_ORIGINS` | 空 | 允许跨域调用的网页来源，逗号分隔；空 = 只允许同源。`*` 表示任何来源（不建议） |
-| `TRIPO_MODEL_VERSIONS` | `v3.1-20260211,v3.0-20250812,v2.5-20250123` | 前端能选的模型版本。P 系列（`P1-20260311`、`P2-20260801`）贵很多，默认不放行 |
+| `TRIPO_MODEL_VERSIONS` | `v3.1-20260211,P1-20260311` | 前端能选的模型版本。默认两个：H3.1（质量最好）、P1（最快、低模，带贴图 40–50 积分）；H3.0（实测 54 秒）、H2.5 要用就加上；P2 一个任务 100–130 积分，不要放行 |
 | `TRIPO_DEFAULT_MODEL_VERSION` | `v3.1-20260211` | 前端没指定时用的版本（也是选择器上标 Recommended 的那个） |
 | `TRIPO_FACE_LIMIT` | `300000` | 发给 Tripo 的默认 `face_limit`（网页导入时反正简化到 30 万面）。`0` = 不发；只认 1000–500000 |
-| `TRIPO_COMPRESS` | 空 | `geometry` = 默认带 `compress: 'geometry'`（meshopt）。真实测过一次、确认结果文件用的是 `EXT_meshopt_compression` 再打开（10.9） |
+| `TRIPO_COMPRESS` | 空（开） | 默认带 `compress: 'geometry'`（meshopt，只给 v3.0 以上）；`off` 关掉。2026-10-30 实测结果文件是 `EXT_meshopt_compression` + `KHR_mesh_quantization`，8.6 MB → 2.4 MB（10.9） |
 | `TRIPO_API_BASE` | `https://openapi.tripo3d.ai/v3` | 中国区账号用 `https://openapi.tripo3d.com/v3` |
 | `TRIPO_DOWNLOAD_HOSTS` | 空 | 结果文件额外允许的主机。内置 `tripo3d.ai`、`tripo3d.com` 及其子域名 |
 | `TRIPO_MAX_DOWNLOAD_MB` | 200 | 结果文件上限 |
@@ -388,7 +388,7 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 
 固定的限制：JSON 请求体 ≤ 16 KB；`prompt` ≤ 1024 字；一次上传一张图、只认 PNG / JPEG（按文件头判断）；多视图正好 4 个位置、正面必填、至少 2 张；下载只按任务 id，不接受任何 URL。
 
-**算一下最多花多少**：本中转只开放了不加钱的参数（快速贴图、`face_limit`、`compress` 都不加钱），单个任务最多 30 积分（图片 / 多视图带贴图；文字带贴图 20、不带 10；1 积分 = 0.01 美元）；把 P1 加进 `TRIPO_MODEL_VERSIONS` 的话最多 50。默认每日上限 50 个，即滚动 24 小时内最多约 1500 积分（约 15 美元）。
+**算一下最多花多少**：本中转只开放了不加钱的参数（快速贴图、`face_limit`、`compress` 都不加钱），H3.1 单个任务最多 30 积分（图片 / 多视图带贴图；文字带贴图 20、不带 10；1 积分 = 0.01 美元），默认放行的 P1 最多 50（图片 / 多视图带贴图）。Node / Vite 默认每日上限 50 个，即滚动 24 小时内最多约 2500 积分（约 25 美元）；线上 Worker 在 `wrangler.toml` 里设成 30 个，最多约 1500 积分（约 15 美元）。
 
 **会场共用 Wi-Fi**：所有人可能共用一个出口 IP，会一起被「每 IP」限额卡住。现场演示时调大 `TRIPO_MAX_TASKS_PER_IP_PER_HOUR` 和 `TRIPO_MAX_REQUESTS_PER_IP_PER_MINUTE`，靠 `TRIPO_MAX_TASKS_PER_DAY` 兜底。
 
@@ -518,7 +518,7 @@ npm run cf:check   # 构建，再两个版本各跑一次 deploy --dry-run（不
 - P 系列价格：P1 文字 30（不带贴图）/ 40（标准贴图），单图、多视图 40 / 50（Pricing 的 P Series 页；存档页还有 Detailed 50 / 60 / 60）；P2 每种方式 100 / 110 / 120 / 130（[P2 模型页](https://developers.tripo3d.ai/en/models/p2)）。实际扣费以任务的 `credits_consumed` 为准（[Task Query](https://developers.tripo3d.ai/en/docs/task-query.md)）。
 
 **`compress: 'geometry'` 是 meshopt**：文档「meshopt compression for reduced file size」，只支持 `model ≥ v3.0-20250812`，P 系列页上没有；JS SDK 的类型写「`'geometry'` applies meshopt compression」（[tripo-js-sdk](https://github.com/Tripo-Developer/tripo-js-sdk)），Python SDK 收布尔值、发 `"geometry"`（[tripo-python-sdk](https://github.com/Tripo-Developer/tripo-python-sdk)）。文档里没有 Draco、KTX2、WebP（0 处）。贴图格式只能通过转换接口改（`texture_format` 有 WEBP，默认 JPEG、4096；非默认值收 10 积分，[Convert](https://developers.tripo3d.ai/en/docs/models-convert.md)）。
-- 我们的导入管线认 `EXT_meshopt_compression`（gltf-transform 4.5.1 只认这个名字，不认新的 `KHR_meshopt_compression`）。文档没写扩展名，所以 **`TRIPO_COMPRESS` 默认关**：等测速脚本第 7 行看到真实结果的 `extensionsUsed` 是 `EXT_meshopt_compression`，再设 `TRIPO_COMPRESS=geometry`。
+- 我们的导入管线认 `EXT_meshopt_compression`（gltf-transform 4.5.1 只认这个名字，不认新的 `KHR_meshopt_compression`）。文档没写扩展名；2026-10-30 测速第 7 行确认真实结果是 `EXT_meshopt_compression` + `KHR_mesh_quantization`，所以 **默认开**（`TRIPO_COMPRESS=off` 关掉）。以后 Tripo 要是改发 `KHR_meshopt_compression`，网页导入会报错：先设 `TRIPO_COMPRESS=off`，再升级 gltf-transform。
 
 **面数**：不传 `face_limit` 是「adaptive topology」，没给数字；上限 v3.1 150 万（`geometry_quality: detailed` 200 万）、v3.0 100 万、v2.5 50 万，四边面 15 万，智能低模 500–2 万；网页 / 手机建议 1–5 万面（Text to Model）。P1 50–2 万面，P2 48–5 万三角面（[P 系列](https://developers.tripo3d.ai/en/docs/generation-text-to-model/p.md)）。
 
@@ -580,6 +580,25 @@ REAL=1 node scripts/bench-tripo.mjs --base http://127.0.0.1:8790/api/tripo --yes
 | 8 | P1 | 标准 | 版本自己的面数 | 40 | P1（中转没放行 P1 时自动跳过） |
 
 只跑几行：`--only 1,2,7`。测完把每行「到 success」的秒数填进 `ETA_SEC`（文字那一列；单图、多视图照比例估），`measured` 改成 `true`；第 7 行的扩展是 `EXT_meshopt_compression` 就设 `TRIPO_COMPRESS=geometry`（`wrangler.toml` 的 `[vars]` 两处）。
+
+**2026-10-30 实测结果**（文字生成、同一个提示词「a small wooden treasure chest with brass corners」、一个一个跑，共 170 积分；每格只测一次，单次会差 ±20 秒）：
+
+| # | 模型 | 贴图 | 面数限制 | 压缩 | 到 success | GLB | 面数 | 积分 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | v3.1 | 快速 | 默认 30 万 | — | 108.6 s | 8.6 MB | 281,480 | 20 |
+| 2 | v3.1 | 标准 | 默认 30 万 | — | 144.2 s | 10.8 MB | 277,423 | 20 |
+| 3 | v3.1 | 标准 | 不限 | — | 123.4 s | 42.5 MB | 1,438,236 | 20 |
+| 4 | v3.1 | 不带 | 默认 30 万 | — | 106.2 s | 8.0 MB | 286,883 | 10 |
+| 5 | v3.0 | 快速 | 默认 30 万 | — | 54.2 s | 8.5 MB | 271,243 | 20 |
+| 6 | v2.5 | 快速 | 默认 30 万 | — | 63.0 s | 9.2 MB | 301,586 | 20 |
+| 7 | v3.1 | 快速 | 默认 30 万 | geometry | 100.3 s | 2.4 MB | 271,062 | 20 |
+| 8 | P1 | 标准 | P1 自己的 | — | 62.1 s | 3.1 MB | 4,737 | 40 |
+
+- 排队（建任务到开始跑）都在 2–3 秒。最慢的是模型本身：v3.1 约 105–145 秒，v3.0、v2.5 约 55–65 秒。
+- 快速贴图几乎不加时间（v3.1 不带贴图 106 秒、快速贴图 109 秒），标准贴图（带 PBR）多 25–35 秒。
+- 第 7 行的结果文件是 `EXT_meshopt_compression` + `KHR_mesh_quantization`，所以 `compress` 改成默认开；同样的设置下文件从 8.6 MB 变成 2.4 MB。
+- 下载时间没列：这台机器经代理到 Tripo 的存储只有约 0.1–0.4 MB/s，不代表线上（线上是 Cloudflare 的 Worker 去取、再传给用户）。文件越小越重要，所以默认 30 万面 + 压缩几何。
+- 原始记录：`.tmp/bench/bench-2026-10-30T12-27-58.json`（本机，不进仓库）。
 
 ---
 

@@ -22,7 +22,9 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 // H 系列 10–30 积分一个任务；P 系列贵得多（P2 带贴图 110 积分），默认不放行，要用就在 TRIPO_MODEL_VERSIONS 里加
-const DEFAULT_MODEL_VERSIONS = ['v3.1-20260211', 'v3.0-20250812', 'v2.5-20250123'];
+// 默认只放两个（2026-10-30 定的）：H3.1 = 「H · High precision」，质量最好；P1 = 「P · Smart Mesh」，最快、网格干净。
+// 要放 H3.0（实测 54 秒，H 系列里最快）、H2.5 回来，就在 TRIPO_MODEL_VERSIONS 里列上
+const DEFAULT_MODEL_VERSIONS = ['v3.1-20260211', 'P1-20260311'];
 const DEFAULT_MODEL_VERSION = 'v3.1-20260211';
 
 // ---------- 模型目录：前端模型选择器的唯一来源（GET /api/tripo/models）----------
@@ -39,12 +41,12 @@ const H_CREDITS = {
   multiview: { none: 20, fast: 30, standard: 30 },
 };
 export const MODEL_CATALOG = {
-  'v3.1-20260211': { label: 'H3.1', blurb: 'Finest shapes and textures', textures: ['none', 'fast', 'standard'], fastQuality: true, compress: true, credits: H_CREDITS },
+  'v3.1-20260211': { label: 'H · High precision', blurb: 'Finest shapes and textures', textures: ['none', 'fast', 'standard'], fastQuality: true, compress: true, credits: H_CREDITS },
   'v3.0-20250812': { label: 'H3.0', blurb: 'Clean shapes, a bit quicker', textures: ['none', 'fast', 'standard'], fastQuality: true, compress: true, credits: H_CREDITS },
   'v2.5-20250123': { label: 'H2.5', blurb: 'Older model, simpler shapes', textures: ['none', 'fast', 'standard'], credits: H_CREDITS },
-  // P 系列贵（P1 带贴图 40–50 积分），默认不放行；要用就把 P1-20260311 加进 TRIPO_MODEL_VERSIONS
+  // P1 贵一些（带贴图 40–50 积分），但最快（实测标准贴图 62 秒，H3.1 要 105–145 秒）、网格干净（2 万面以内）：默认和 H3.1 一起放行
   'P1-20260311': {
-    label: 'P1', blurb: 'Low-poly look, quickest shape', textures: ['none', 'standard'], maxFaces: 20_000,
+    label: 'P · Smart Mesh', blurb: 'Clean low-poly mesh, quickest', textures: ['none', 'standard'], maxFaces: 20_000,
     credits: { text: { none: 30, standard: 40 }, image: { none: 40, standard: 50 }, multiview: { none: 40, standard: 50 } },
   },
   // P2 一个任务 100–130 积分：只在目录里留着说明，不要加进 TRIPO_MODEL_VERSIONS
@@ -55,14 +57,15 @@ export const MODEL_CATALOG = {
 };
 
 // 预计耗时（秒，从建任务到 success），模型 × 生成方式 × 贴图档。界面上的「≈ 2 min」和倒计时都按它算。
-// 现在的数是估的（measured: false）：v3.1 文字不带贴图实测约 90 秒；官方 v3.1 不带贴图约 40 秒、带贴图（PBR）约 120 秒，
-// 标准贴图不带 PBR 约 80 秒；P1 约 10 秒 / 60 秒；第三方实测 H3.1 单图约 197 秒、H2.5 约 159 秒（含排队）。来源见 docs/TRIPO.md 10.9。
-// 跑完 scripts/bench-tripo.mjs 后把实测的中位数填进来、measured 改成 true；单图、多视图没测的照文字的数估
+// 文字一列是 2026-10-30 用 scripts/bench-tripo.mjs 实测的（每格一次，同一个提示词，默认 30 万面；单次会差 ±20 秒）：
+// v3.1 不带贴图 106 秒、快速贴图 109 秒、标准贴图 144 秒（不限面数那次 123 秒，取 135）；v3.0 快速贴图 54 秒；v2.5 快速贴图 63 秒；
+// P1 标准贴图 62 秒。没测的格子照同一版本的比例估（不带贴图 ≈ 快速贴图，标准贴图 ≈ 快速贴图 × 1.25）；
+// 单图、多视图都没测，照文字的 0.9、0.95 倍估（第三方测的 H3.1 单图约 197 秒、含排队，见 docs/TRIPO.md 10.9）。measured：这个版本至少有一格是实测的
 export const ETA_SEC = {
-  'v3.1-20260211': { measured: false, text: { none: 90, fast: 120, standard: 170 }, image: { none: 75, fast: 105, standard: 160 }, multiview: { none: 80, fast: 110, standard: 165 } },
-  'v3.0-20250812': { measured: false, text: { none: 75, fast: 100, standard: 145 }, image: { none: 60, fast: 90, standard: 135 }, multiview: { none: 65, fast: 95, standard: 140 } },
-  'v2.5-20250123': { measured: false, text: { none: 70, fast: 100, standard: 140 }, image: { none: 60, fast: 90, standard: 130 }, multiview: { none: 65, fast: 95, standard: 135 } },
-  'P1-20260311': { measured: false, text: { none: 30, standard: 80 }, image: { none: 25, standard: 75 }, multiview: { none: 30, standard: 80 } },
+  'v3.1-20260211': { measured: true, text: { none: 105, fast: 110, standard: 135 }, image: { none: 95, fast: 100, standard: 120 }, multiview: { none: 100, fast: 105, standard: 130 } },
+  'v3.0-20250812': { measured: true, text: { none: 50, fast: 55, standard: 70 }, image: { none: 45, fast: 50, standard: 65 }, multiview: { none: 50, fast: 55, standard: 65 } },
+  'v2.5-20250123': { measured: true, text: { none: 60, fast: 65, standard: 80 }, image: { none: 55, fast: 60, standard: 70 }, multiview: { none: 55, fast: 60, standard: 75 } },
+  'P1-20260311': { measured: true, text: { none: 30, standard: 60 }, image: { none: 25, standard: 55 }, multiview: { none: 30, standard: 60 } },
   'P2-20260801': { measured: false, text: { none: 120, standard: 180 }, image: { none: 120, standard: 180 }, multiview: { none: 120, standard: 180 } },
 };
 
@@ -200,7 +203,8 @@ export function readConfig(env = {}) {
     // 0 = 不发 face_limit（Tripo 自己定面数）；超出范围的值当没设
     faceLimit: faceLimitOf(env.TRIPO_FACE_LIMIT),
     // compress: geometry（meshopt）默认关：等真实测过一次结果文件用的是 EXT_meshopt_compression、导入正常再打开（docs/TRIPO.md 10.9）
-    compress: str(env.TRIPO_COMPRESS).toLowerCase() === 'geometry',
+    // 默认开（2026-10-30 实测：结果是 EXT_meshopt_compression + KHR_mesh_quantization，导入管线解得开；8.6 MB → 2.4 MB），TRIPO_COMPRESS=off 关掉
+    compress: !['off', 'none', '0', 'false'].includes(str(env.TRIPO_COMPRESS).toLowerCase()),
     downloadHosts: [...DEFAULT_DOWNLOAD_HOSTS, ...list(env.TRIPO_DOWNLOAD_HOSTS).map((h) => h.toLowerCase().replace(/^\*?\./, ''))],
   };
 }
@@ -561,7 +565,7 @@ export function buildTask(body, cfg) {
       optional.push('texture_quality', 'texture_version');
     }
   }
-  // compress: geometry = meshopt 压缩几何（网页的导入管线解得开 EXT_meshopt_compression）。默认关着（TRIPO_COMPRESS=geometry 打开），
+  // compress: geometry = meshopt 压缩几何（网页的导入管线解得开 EXT_meshopt_compression）。默认开着（TRIPO_COMPRESS=off 关掉），
   // 请求里的 compress: true / false 可以单次改（测速脚本用）；只有目录里写了 compress 的版本（v3.0 以上）才发
   const squeeze = optionalBool(body.compress, 'compress') ?? cfg.compress;
   if (squeeze && meta?.compress) {

@@ -140,7 +140,7 @@ npm start         # 独立 Node 服务：同时托管 dist/ 和 /api/tripo，默
 
 - 中转先占名额再调 Tripo。Tripo 明确拒绝时退回名额；结果不明（超时、5xx）时不退，因为请求可能已经扣费。
 - 只开放基本参数，单个任务最多 30 积分（1 积分 = 0.01 美元）。按默认上限，一天最多约 1500 积分，约 15 美元。
-- P 系列模型一个任务 100 积分起，默认不放行（`TRIPO_MODEL_VERSIONS`）。
+- 默认只放两个模型：H3.1「H · High precision」和 P1「P · Smart Mesh」（P1 带贴图 40–50 积分）。P2 一个任务 100–130 积分，不要放行（`TRIPO_MODEL_VERSIONS`）。
 - 会场共用 Wi-Fi 时大家是同一个出口 IP，要调大每 IP 的两项上限，靠每日上限兜底。
 - Cloudflare 上 `wrangler.toml` 设的是每日 30 个（两版合计，最多约 900 积分、9 美元）、每 IP 每小时 5 个。
 
@@ -431,7 +431,7 @@ TRIPO_API_KEY=… TRIPO_MAX_TASKS_PER_DAY=50 PORT=8787 npm start   # 第一次�
 | `ALLOWED_ORIGINS` | 同源留空；分开部署时必填 | 跨域白名单 |
 | `TRUST_PROXY` | 有反向代理时**必填** | 代理层数；直连保持 0 |
 | `PORT` / `HOST` / `STATIC_DIR` | 可选 | 默认 8787 / 0.0.0.0 / dist |
-| `TRIPO_MODEL_VERSIONS` / `TRIPO_DEFAULT_MODEL_VERSION` | 可选 | 默认只放行 H 系列；默认 `v3.1-20260211` |
+| `TRIPO_MODEL_VERSIONS` / `TRIPO_DEFAULT_MODEL_VERSION` | 可选 | 默认放行 H3.1 和 P1；默认选 `v3.1-20260211` |
 | `TRIPO_API_BASE` | 中国区账号必填 | 默认 `https://openapi.tripo3d.ai/v3` |
 | `TRIPO_DOWNLOAD_HOSTS` | 可选 | 结果文件额外允许的主机 |
 | `TRIPO_MAX_DOWNLOAD_MB` | 可选 | 默认 200 |
