@@ -4,6 +4,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHandler, createMemoryStore, ipKey, readConfig, type TripoEnv, type TripoHandle, type TripoHandlerOptions } from '../server/tripo/handler.mjs';
 import { loadEnvFiles, modeBanner } from '../server/tripo/node-adapter.mjs';
+import tripoProxy from '../server/tripo/vite-plugin.mjs';
+import worker from '../server/tripo/worker.mjs';
 import { makeEnvDir } from './tripoEnvDir.mjs';
 
 const KEY = 'tsk_unit_test_SECRET_9f8e7d6c5b4a';
@@ -653,6 +655,78 @@ describe('模拟模式', () => {
 
   it('模拟模式不认真实任务 id', async () => {
     expect((await send(make(), get(`/api/tripo/task/${UUID}`))).json.code).toBe('not_found');
+  });
+});
+
+describe('Cloudflare Worker 外壳（worker.mjs）', () => {
+  // ASSETS 绑定的替身：记下被要的地址
+  function fakeAssets(files: Record<string, Uint8Array<ArrayBuffer>> = {}) {
+    const asked: string[] = [];
+    return {
+      asked,
+      async fetch(request: Request) {
+        const path = new URL(request.url).pathname;
+        asked.push(path);
+        const body = files[path];
+        return body ? new Response(body, { headers: { 'content-length': String(body.length), 'content-type': 'model/gltf-binary' } }) : new Response('page', { status: 200 });
+      },
+    };
+  }
+  const wreq = (path: string, init: RequestInit = {}, ip = '198.18.0.1') => {
+    const headers = new Headers(init.headers);
+    headers.set('cf-connecting-ip', ip);
+    return new Request(`https://planets.example${path}`, { ...init, headers });
+  };
+  afterEach(() => vi.useRealTimers());
+
+  it('真实模式下每个实例第一次处理接口请求时提示一次会消耗额度，不带密钥', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const res = await worker.fetch(wreq('/api/tripo/health'), { TRIPO_API_KEY: KEY });
+    expect(await res.json()).toEqual({ ok: true, mock: false });
+    await worker.fetch(wreq('/api/tripo/health'), { TRIPO_API_KEY: KEY });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('真实模式');
+    expect(String(warn.mock.calls[0][0])).not.toContain(KEY);
+    warn.mockRestore();
+  });
+
+  it('/api/tripo/* 交给中转，其余交给静态资源', async () => {
+    const assets = fakeAssets();
+    expect(await (await worker.fetch(wreq('/api/tripo/health'), { ASSETS: assets })).json()).toEqual({ ok: true, mock: true });
+    expect((await worker.fetch(wreq('/index.html'), { ASSETS: assets })).status).toBe(200);
+    expect(assets.asked).toEqual(['/index.html']);
+    expect((await worker.fetch(wreq('/x'), {})).status).toBe(404);
+  });
+
+  it('按 CF-Connecting-IP 限流', async () => {
+    const env = { TRIPO_MAX_TASKS_PER_IP_PER_HOUR: '1' };
+    const task = (ip: string) => worker.fetch(wreq('/api/tripo/task', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'text', prompt: 'x' }) }, ip), env);
+    expect((await task('198.18.1.1')).status).toBe(200);
+    expect((await task('198.18.1.1')).status).toBe(429);
+    expect((await task('198.18.1.2')).status).toBe(200);
+  });
+
+  it('模拟模式的模型按 MOCK_MODEL_URL 从静态资源取（同源相对地址不绕回 Worker）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0]);
+    const assets = fakeAssets({ '/models/m.glb': glb });
+    const env = { ASSETS: assets, MOCK_MODEL_URL: '/models/m.glb' };
+    const created = await (await worker.fetch(wreq('/api/tripo/task', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'text', prompt: 'x' }) }, '198.18.2.1'), env)).json();
+    vi.setSystemTime(T0 + 13_000);
+    const res = await worker.fetch(wreq(`/api/tripo/download/${created.taskId}`, {}, '198.18.2.1'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-length')).toBe(String(glb.length));
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(glb);
+    expect(assets.asked).toEqual(['/models/m.glb']);
+  });
+});
+
+describe('Vite 插件', () => {
+  it('会进前端包的 VITE_ 变量里有像 Tripo 密钥的就直接报错', () => {
+    const plugin = tripoProxy() as unknown as { configResolved(config: { env: Record<string, string> }): void };
+    expect(() => plugin.configResolved({ env: { VITE_TRIPO_API_KEY: 'x' } })).toThrow(/VITE_TRIPO_API_KEY/);
+    expect(() => plugin.configResolved({ env: { VITE_TRIPO_PROXY: 'https://proxy.example', MODE: 'development' } })).not.toThrow();
   });
 });
 
