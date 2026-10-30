@@ -224,6 +224,28 @@ function unionGeometry(): THREE.BufferGeometry {
 // 每样东西多高（米，缩放前）：给摆放时判断坡度、留空用
 const FOOT: Record<PropKind, number> = { lamp: 0.35, menhir: 0.45, arch: 1.2, tower: 1.0 };
 
+// 漫游时挡路的圆柱（walkMode 接上，和作品同一套碰撞）：每样几个圆，局部坐标、缩放前 [x, z, 半径]，和几何同一个原点。
+// 按几何里翠宝身高以下（1.25 米以下，缩放前）的顶点实际量的外形定：
+// - 灯柱：铁底座最宽 0.2，上面的灯杆细得多
+// - 立石：又高又扁（长 0.34、厚 0.19），沿长边两个圆，扁的那面不会隔老远就挡住；
+//   圆比石头宽 1.5 厘米：翠宝正前方最远 0.385（肚子），比碰撞半径多出来的那点由它盖住
+// - 拱门：只挡两根柱子（每根前后两个圆，正好包住 0.37 × 0.34 的石块），门洞留着能穿过去：
+//   柱子的圆到门洞中线 0.625 × 大小，翠宝连手臂 0.5（CHAR_SIDE），最小的拱门（大小 0.9）两边也各留 6 厘米
+// - 小天文台：塔身底下半径 0.66，再加门上那道往外伸 0.17 的拱
+export const PROP_BLOCKERS: Record<PropKind, ReadonlyArray<readonly [number, number, number]>> = {
+  lamp: [[0, 0, 0.2]],
+  menhir: [[-0.12, 0, 0.25], [0.12, 0, 0.25]],
+  arch: [[-0.83, -0.085, 0.205], [-0.83, 0.085, 0.205], [0.83, -0.085, 0.205], [0.83, 0.085, 0.205]],
+  tower: [[0, 0, 0.69], [0, 0.7, 0.15]],
+};
+
+// 一个挡路的圆柱：星球本地坐标的方向（单位向量）、半径（米，已乘大小）
+export interface PropBlocker {
+  kind: PropKind;
+  dir: THREE.Vector3;
+  radius: number;
+}
+
 const GLOW = uniform(PROPS.glow).setGroup(renderGroup);
 
 export function applyProps(): void {
@@ -393,6 +415,11 @@ export class PropsField {
   readonly mesh: THREE.InstancedMesh;
   private readonly kinds: THREE.InstancedBufferAttribute;
   items: PropItem[] = [];
+  // 漫游挡路用（walkMode 的 WalkBlockers）：重摆时一起算好；owner 是摆在哪颗星球上（PlanetObject，没摆是 null），
+  // blockerVersion 每次重摆、摘下都加一，漫游看它变了才重新取
+  readonly blockers: PropBlocker[] = [];
+  blockerVersion = 0;
+  owner: object | null = null;
 
   constructor() {
     this.group.name = 'props-v2';
@@ -415,9 +442,10 @@ export class PropsField {
     this.mesh.count = on ? 1 : this.items.length;
   }
 
-  // 按星球重摆
-  fill(planet: PropsPlanet): PropItem[] {
+  // 按星球重摆；owner：这颗星球（漫游据此判断挡路的东西是不是在脚下这颗上）
+  fill(planet: PropsPlanet, owner: object | null = null): PropItem[] {
     const items = PROPS.on > 0 ? propItems(planet).slice(0, PROPS_CAPACITY) : [];
+    this.blockers.length = 0;
     const up = new THREE.Vector3(0, 1, 0);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -439,7 +467,14 @@ export class PropsField {
       this.kinds.setX(i, PROP_KINDS.indexOf(it.kind));
       const k = 0.92 + ((i * 0.618) % 1) * 0.16;
       this.mesh.setColorAt(i, col.copy(tint).multiplyScalar(k));
+      // 挡路的圆柱：局部的圆心按同一个朝向、大小摆到星球上
+      for (const [x, z, r] of PROP_BLOCKERS[it.kind]) {
+        const dir = new THREE.Vector3(x * it.size, 0, z * it.size).applyQuaternion(q).add(pos).normalize();
+        this.blockers.push({ kind: it.kind, dir, radius: r * it.size });
+      }
     });
+    this.owner = owner;
+    this.blockerVersion++;
     this.items = items;
     this.mesh.count = items.length;
     this.mesh.instanceMatrix.needsUpdate = true;
@@ -447,6 +482,13 @@ export class PropsField {
     this.kinds.needsUpdate = true;
     this.mesh.visible = items.length > 0;
     return items;
+  }
+
+  // 从星球上摘下：漫游不再挡（网格、实例数据留着，下次摆的时候重写）
+  release(): void {
+    this.blockers.length = 0;
+    this.owner = null;
+    this.blockerVersion++;
   }
 
   stats(): { instances: number; drawCalls: number; triangles: number } {

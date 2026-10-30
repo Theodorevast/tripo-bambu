@@ -12,7 +12,7 @@ export interface WalkSample {
   ground: number; // 那个方向上走路用的地面半径
   up: Vec; // 镜头的上方向（世界坐标）
   right: Vec; // 镜头的右方向
-  clearance: number; // 离最近的作品圆柱边还有多远（球面路程；负数是穿进去了）
+  clearance: number; // 离最近的圆柱边（作品和第二版的点缀道具，按碰撞半径）还有多远（球面路程；负数是穿进去了）
 }
 
 export interface WalkState {
@@ -48,7 +48,8 @@ declare global {
   interface Window {
     __walk?: {
       state(): WalkState;
-      obstacles(): Array<{ id: string; dir: Vec; minAngle: number }>;
+      obstacles(): Array<{ id: string; dir: Vec; minAngle: number; side: number }>; // 作品的圆柱；side：作品在角色侧面时多挡的球心角（手臂）
+      blockers(): Array<{ kind: string; dir: Vec; minAngle: number; side: number }>; // 作品以外挡路的圆柱（第二版的点缀道具）
       teleport(dir: Vec, heading: Vec): boolean;
       trace(on: boolean): WalkSample[]; // trace(true) 开始记、返回空数组；trace(false) 停下、返回记下的每一帧
       feet(): { left: FootSample; right: FootSample; phase: number; amp: number; bob: number; squash: number }; // 两只脚、身体颠的高度和伸缩：自查、录屏脚本算着地时滑了多远
@@ -110,8 +111,15 @@ export function installWalkDebug(app: App, walk: WalkMode): void {
       };
     },
     obstacles: () => {
-      const { works, obstacles, count } = walk.colliders;
-      return Array.from({ length: count }, (_, i) => ({ id: works[i].work.id, dir: vec(obstacles[i].center), minAngle: obstacles[i].minAngle }));
+      const { works, obstacles } = walk.colliders;
+      return works.map((pw, i) => ({ id: pw.work.id, dir: vec(obstacles[i].center), minAngle: obstacles[i].minAngle, side: obstacles[i].side }));
+    },
+    blockers: () => {
+      const { works, kinds, obstacles } = walk.colliders;
+      return kinds.map((kind, k) => {
+        const o = obstacles[works.length + k];
+        return { kind, dir: vec(o.center), minAngle: o.minAngle, side: o.side };
+      });
     },
     teleport: (dir, heading) => {
       if (!walk.planet) return false;

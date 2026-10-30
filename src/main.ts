@@ -61,7 +61,8 @@ const coupons = installCoupons(app, planetScreen, walk, editor); // 点翠宝吐
 installHomeTriboo(app, coupons, home); // 首页右下角躲着的翠宝（H2）：点它吐一张券，展开成领券窗口
 installCloudTriboo(world); // 首页翠宝元素①：云海上空一朵翠宝形状的云（scenes/homeCloudTriboo.ts；开场预热之前装上，一起编译）
 installHomeTribooTune(world); // ?tune → Home → Cloud Triboo / Stardust Triboo
-installWorldV2(world); // 第二版 [v2-world]：首页的天体仪环、星座线（scenes/worldV2.ts；开场预热之前装上，一起编译）
+const worldV2 = installWorldV2(world); // 第二版 [v2-world]：首页的天体仪环、星座线（scenes/worldV2.ts；开场预热之前装上，一起编译）
+walk.blockers = worldV2.props; // 漫游时点缀道具（灯柱、立石、拱门的柱子、小天文台）也挡路，和作品同一套碰撞
 installCreatePlanet(app, store); // P3：#/create 造星窗口、首页标题卡片的「Create a planet」接上 openCreatePlanet、新星球从云海升起来（ui/createPlanet*.ts）
 app.planetLayer = {
   enter: (team) => {
